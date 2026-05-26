@@ -1,0 +1,235 @@
+# Конфигурация стратегий ставок
+# paper_trading_only: true — стратегия работает только в режиме симуляции (реальные ставки не размещаются)
+# Все стратегии в MVP-режиме по умолчанию имеют paper_trading_only: true
+
+strategies:
+  # ─────────────────────────────────────────
+  # Стратегия 1: Поиск ценности через справочную линию (1X2)
+  # ─────────────────────────────────────────
+  ref_value_soccer_1x2:
+    name_ru: Ценность относительно справочной линии — футбол 1X2
+    description: >
+      Сравнивает котировки целевых российских БК со среднерыночной справедливой
+      линией (после девиггирования). Фиксирует ставку при обнаружении
+      статистически значимого преимущества.
+    sport: soccer
+    market: 1x2
+    active: true
+    paper_trading_only: true
+
+    target_books:
+      - fonbet
+      - winline
+      - betboom
+      - olimpbet
+
+    reference_source: market_average_devigged
+    reference_books_used:
+      - pinnacle
+      - betfair_exchange
+
+    # Временные окна до начала матча (в минутах)
+    entry_window_minutes_before_start:
+      - 1440  # За 24 часа
+      - 360   # За 6 часов
+      - 60    # За 1 час (предматчевое закрытие линии)
+
+    filters:
+      min_edge_pct: 1.5             # Минимальное преимущество над справедливой линией
+      max_margin_pct: 6.0           # Не входить, если маржа БК превышает порог
+      min_implied_probability: 0.05 # Исключить экзотические аутсайдерские котировки
+      max_implied_probability: 0.92
+      min_source_quality: official_vendor  # Требуется качественный источник данных
+
+    leagues_active:
+      - EPL
+      - la_liga
+      - bundesliga
+      - serie_a
+      - ligue_1
+      - RPL
+      - champions_league
+
+    logging:
+      log_all_opportunities: true
+      log_bets_placed: true
+      save_to_db: true
+
+  # ─────────────────────────────────────────
+  # Стратегия 2: Отслеживание ценности закрывающей линии (CLV)
+  # ─────────────────────────────────────────
+  closing_line_timing_soccer:
+    name_ru: Тайминг по закрывающей линии — футбол
+    description: >
+      Фиксирует котировки в разные моменты времени и сравнивает с закрывающей линией.
+      Позволяет оценить качество timing'а ставок и наличие информационного преимущества.
+      Стратегия аналитическая — для калибровки других стратегий по CLV.
+    sport: soccer
+    market: 1x2
+    active: true
+    paper_trading_only: true
+    mode: clv_tracking  # Не торговая стратегия, а аналитический трекер
+
+    target_books:
+      - fonbet
+      - winline
+
+    reference_source: closing_line_devigged
+
+    snapshot_windows_minutes_before_start:
+      - 10080  # 7 дней
+      - 4320   # 3 дня
+      - 1440   # 24 часа
+      - 360    # 6 часов
+      - 60     # 1 час
+      - 5      # 5 минут (почти закрытие)
+
+    filters:
+      min_edge_pct: 0.5   # Низкий порог — цель аналитика, а не торговца
+      max_margin_pct: 8.0
+
+    clv_metrics:
+      - raw_clv_pct
+      - devigged_clv_pct
+      - market_movement_direction
+
+    leagues_active:
+      - EPL
+      - la_liga
+      - bundesliga
+      - RPL
+
+    logging:
+      log_all_snapshots: true
+      save_to_db: true
+
+  # ─────────────────────────────────────────
+  # Стратегия 3: Реакция на новости о травмах/болезнях ключевых игроков
+  # ─────────────────────────────────────────
+  illness_shock_soccer:
+    name_ru: Шок от травмы/болезни — футбол
+    description: >
+      Отслеживает новости об изменении статуса ключевых игроков (травма, болезнь,
+      дисквалификация). При выявлении значимого изменения проверяет,
+      успели ли котировки российских БК скорректироваться.
+      Потенциально даёт преимущество в окне реакции рынка.
+    sport: soccer
+    market: 1x2
+    active: false  # Отключено до подключения надёжного фида травм
+    paper_trading_only: true
+
+    required_feeds:
+      - illness_feed
+      - lineup_feed
+
+    target_books:
+      - fonbet
+      - winline
+      - betboom
+
+    status_change_window:
+      min_status_change_hours_before: 2    # Слишком близко к игре — рынок уже скорректировался
+      max_status_change_hours_before: 24   # Слишком рано — рынок успеет отреагировать
+
+    player_importance_filter:
+      min_player_importance: starter       # Только игроки основного состава
+      positions_priority:
+        - goalkeeper
+        - central_defender
+        - central_midfielder
+        - striker
+
+    filters:
+      min_edge_pct: 2.0          # Выше порог из-за шумных данных о травмах
+      max_margin_pct: 7.0
+      require_corroboration: true  # Требуется подтверждение из 2+ источников
+
+    leagues_active:
+      - EPL
+      - la_liga
+      - bundesliga
+      - champions_league
+      - RPL  # Осторожно — данные по РПЛ менее надёжны
+
+    logging:
+      log_status_changes: true
+      log_market_reaction: true
+      save_to_db: true
+
+  # ─────────────────────────────────────────
+  # Стратегия 4: Смещение «фаворит-аутсайдер» (децильный анализ)
+  # ─────────────────────────────────────────
+  favorite_longshot_soccer:
+    name_ru: Смещение фаворит-аутсайдер — футбол
+    description: >
+      Анализирует системное ценовое смещение у российских БК относительно
+      справедливых вероятностей. Разбивает исходы на децили по подразумеваемой
+      вероятности и ищет постоянно переоценённые или недооценённые сегменты.
+    sport: soccer
+    market: 1x2
+    active: true
+    paper_trading_only: true
+    mode: calibration_analysis  # Преимущественно аналитический режим
+
+    target_books:
+      - fonbet
+      - winline
+      - betboom
+      - olimpbet
+      - pari
+
+    reference_source: market_average_devigged
+
+    decile_buckets:
+      num_deciles: 10
+      min_samples_per_decile: 50  # Минимум наблюдений для статистической значимости
+      probability_range:
+        min: 0.05
+        max: 0.95
+
+    analysis_settings:
+      rolling_window_days: 180     # Скользящее окно для актуальности данных
+      min_total_samples: 500       # Минимум матчей для запуска анализа
+      confidence_level: 0.95       # Доверительный интервал для выводов
+
+    filters:
+      # Торговые параметры применяются только при обнаружении устойчивых смещений
+      min_edge_pct: 2.5           # Высокий порог — смещения должны быть устойчивыми
+      max_margin_pct: 7.0
+      min_decile_edge_significance: 0.05  # p-value
+
+    leagues_active:
+      - EPL
+      - la_liga
+      - bundesliga
+      - serie_a
+      - ligue_1
+      - RPL
+      - champions_league
+
+    logging:
+      log_decile_report: true
+      log_bets_placed: true
+      save_to_db: true
+      report_frequency: weekly
+
+# ─────────────────────────────────────────
+# Глобальные фильтры риска
+# Применяются ко всем стратегиям
+# ─────────────────────────────────────────
+global_risk_filters:
+  max_stake_pct_bankroll: 2.0      # Максимальный размер ставки — 2% от банкролла
+  kelly_fraction: 0.25             # Дробный Келли (четверть) для консервативного управления банком
+  max_concurrent_bets: 10          # Максимальное число активных ставок одновременно
+  no_bet_if_lineup_missing: true   # Не ставить, если состав команды неизвестен
+  no_bet_if_data_quality_below: 0.7 # Порог качества данных (0.0–1.0)
+
+  cooldown_after_loss_streak:
+    enabled: false                  # Отключено в MVP — активировать после калибровки
+    max_consecutive_losses: 5
+    cooldown_hours: 24
+
+  daily_loss_limit_pct_bankroll: 5.0   # Остановить торговлю при дневных потерях > 5%
+  weekly_loss_limit_pct_bankroll: 15.0
+
+  paper_trading_override: true     # Глобальное переключение в режим симуляции для MVP

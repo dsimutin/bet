@@ -1,0 +1,105 @@
+# Конфигурация рынков ставок
+# devig_method: метод удаления маржи букмекера для получения справедливых вероятностей
+#   - multiplicative: простое нормирование вероятностей (подходит для сбалансированных рынков)
+#   - additive: равномерное распределение маржи между исходами
+#   - power: итеративный метод степенного преобразования (предпочтителен для асимметричных рынков)
+
+markets:
+  1x2:
+    name: 1x2
+    name_ru: Исход матча (П1/Ничья/П2)
+    active: true
+    selections:
+      - home
+      - draw
+      - away
+    selection_names_ru:
+      home: Победа хозяев (П1)
+      draw: Ничья (X)
+      away: Победа гостей (П2)
+    odds_limits:
+      min_odds: 1.05
+      max_odds: 20.0
+    devig_method: multiplicative
+    notes: >
+      Базовый трёхисходный рынок. Мультипликативный метод девиггирования
+      оптимален при примерно равных вероятностях исходов.
+      Для явных фаворитов рассмотреть power-метод.
+
+  asian_handicap:
+    name: asian_handicap
+    name_ru: Азиатский гандикап
+    active: true
+    selections:
+      - home_ah
+      - away_ah
+    selection_names_ru:
+      home_ah: Хозяева с гандикапом
+      away_ah: Гости с гандикапом
+    odds_limits:
+      min_odds: 1.70
+      max_odds: 2.30
+    devig_method: multiplicative
+    line_types:
+      - whole  # например, -1, +1
+      - half   # например, -1.5, +0.5
+      - quarter # например, -1.25, -0.75 (сплит-ставка)
+    notes: >
+      Двухисходный рынок — ничьей нет. Котировки сосредоточены около 2.00.
+      Предпочтителен для value-беттинга из-за низкой маржи у эффективных БК.
+      Квартальные линии дают половину ставки на два смежных целых гандикапа.
+
+  over_under:
+    name: over_under
+    name_ru: Тотал (Больше/Меньше)
+    active: true
+    selections:
+      - over
+      - under
+    selection_names_ru:
+      over: Больше (ТБ)
+      under: Меньше (ТМ)
+    odds_limits:
+      min_odds: 1.60
+      max_odds: 2.40
+    devig_method: multiplicative
+    common_lines_soccer:
+      - 0.5
+      - 1.5
+      - 2.5
+      - 3.5
+      - 4.5
+    notes: >
+      Популярный двухисходный рынок. Линия 2.5 гола — наиболее ликвидная в футболе.
+      Мультипликативный девиг стандартен; при сильном перекосе котировок
+      рассмотреть power-метод.
+
+  btts:
+    name: btts
+    name_ru: Обе команды забьют (ОбЗ)
+    active: true
+    full_name: both_teams_to_score
+    selections:
+      - yes
+      - no
+    selection_names_ru:
+      yes: "Да — обе команды забьют"
+      no: "Нет — хотя бы одна команда не забьёт"
+    odds_limits:
+      min_odds: 1.50
+      max_odds: 3.00
+    devig_method: multiplicative
+    notes: >
+      Двухисходный рынок. Высокая корреляция с атакующей силой и формой команд.
+      Полезен в связке с рынком тотала. Маржа обычно выше, чем у азиатского гандикапа.
+
+# ─────────────────────────────────────────
+# Глобальные настройки рынков
+# ─────────────────────────────────────────
+global_market_settings:
+  default_devig_method: multiplicative
+  min_implied_probability: 0.03   # Исходы с вероятностью ниже 3% игнорируются
+  max_implied_probability: 0.97
+  odds_format: decimal             # Используется формат десятичных коэффициентов
+  value_threshold_pct: 1.0         # Минимальное преимущество для фиксации события
+  log_all_markets: true

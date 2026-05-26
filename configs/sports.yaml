@@ -1,0 +1,141 @@
+# Конфигурация видов спорта для аналитики ставок
+# Приоритет: 1 = наивысший, 5 = наименьший
+
+sports:
+  soccer:
+    name: soccer
+    name_ru: Футбол
+    active: true
+    priority: 1
+    leagues:
+      EPL:
+        name_ru: Английская Премьер-лига
+        active: true
+        priority: 1
+        country: england
+        seasons_available:
+          - "2021-22"
+          - "2022-23"
+          - "2023-24"
+          - "2024-25"
+        notes: "Основной приоритет — высокая ликвидность рынка"
+
+      la_liga:
+        name_ru: Ла Лига
+        active: true
+        priority: 1
+        country: spain
+        seasons_available:
+          - "2021-22"
+          - "2022-23"
+          - "2023-24"
+          - "2024-25"
+        notes: "Высокая активность российских букмекеров"
+
+      bundesliga:
+        name_ru: Бундеслига
+        active: true
+        priority: 2
+        country: germany
+        seasons_available:
+          - "2021-22"
+          - "2022-23"
+          - "2023-24"
+          - "2024-25"
+        notes: "Хорошее покрытие статистики и составов"
+
+      serie_a:
+        name_ru: Серия А
+        active: true
+        priority: 2
+        country: italy
+        seasons_available:
+          - "2021-22"
+          - "2022-23"
+          - "2023-24"
+          - "2024-25"
+        notes: "Умеренная ликвидность у российских БК"
+
+      ligue_1:
+        name_ru: Лига 1
+        active: true
+        priority: 3
+        country: france
+        seasons_available:
+          - "2021-22"
+          - "2022-23"
+          - "2023-24"
+          - "2024-25"
+        notes: "Средний приоритет, данные доступны"
+
+      RPL:
+        name_ru: Российская Премьер-лига
+        active: true
+        priority: 1
+        country: russia
+        seasons_available:
+          - "2021-22"
+          - "2022-23"
+          - "2023-24"
+          - "2024-25"
+        notes: "Ключевой рынок для российских БК; данные о составах и травмах менее надёжны"
+        data_quality_warning: true
+        lineup_data_quality: low
+
+      champions_league:
+        name_ru: Лига чемпионов УЕФА
+        active: true
+        priority: 2
+        country: europe
+        seasons_available:
+          - "2021-22"
+          - "2022-23"
+          - "2023-24"
+          - "2024-25"
+        notes: "Высокий медиаинтерес; пиковая ликвидность в матчах плей-офф"
+
+  tennis:
+    name: tennis
+    name_ru: Теннис
+    active: true
+    priority: 3
+    tours:
+      ATP:
+        name_ru: АТП Тур (мужчины)
+        active: true
+        priority: 3
+      WTA:
+        name_ru: ВТА Тур (женщины)
+        active: false
+        priority: 4
+    notes: "Вторичный вид спорта; ценность в live-ставках выше, чем в пре-матч"
+    markets_focus:
+      - match_winner
+      - set_handicap
+
+  hockey:
+    name: hockey
+    name_ru: Хоккей
+    active: true
+    priority: 2
+    leagues:
+      KHL:
+        name_ru: Kontinental Hockey League (КХЛ)
+        active: true
+        priority: 2
+        country: russia
+        seasons_available:
+          - "2022-23"
+          - "2023-24"
+          - "2024-25"
+        notes: "Хороший охват российских БК; данные о составах умеренного качества"
+      NHL:
+        name_ru: Национальная хоккейная лига (НХЛ)
+        active: false
+        priority: 4
+        country: usa_canada
+        notes: "Отключён — ограниченная поддержка в российских БК"
+    markets_focus:
+      - 1x2
+      - puck_line
+      - over_under

@@ -1,0 +1,148 @@
+# Конфигурация букмекеров для аналитики ставок
+# target_books — легальные российские БК, принимающие ставки
+# reference_books — зарубежные источники, используемые только для аналитики и построения справедливых линий
+
+# ─────────────────────────────────────────
+# Легальные российские букмекеры (целевые)
+# ─────────────────────────────────────────
+target_books:
+  fonbet:
+    name_ru: Фонбет
+    region: russia
+    legal: true
+    license: FNS  # Федеральная налоговая служба / СРО
+    api_available: true
+    api_notes: "Неофициальный веб-скрапинг; официального публичного API нет"
+    margin_range:
+      typical_pct: 5.0
+      min_pct: 3.5
+      max_pct: 9.0
+    priority: 1
+    notes: "Крупнейший легальный российский БК; высокая ликвидность по футболу"
+
+  winline:
+    name_ru: Винлайн
+    region: russia
+    legal: true
+    license: FNS
+    api_available: false
+    api_notes: "Только веб-скрапинг; нестабильная структура страниц"
+    margin_range:
+      typical_pct: 5.5
+      min_pct: 4.0
+      max_pct: 9.5
+    priority: 2
+    notes: "Активный БК с хорошим охватом футбола и хоккея"
+
+  betboom:
+    name_ru: БетБум
+    region: russia
+    legal: true
+    license: FNS
+    api_available: false
+    api_notes: "Только веб-скрапинг"
+    margin_range:
+      typical_pct: 6.0
+      min_pct: 4.5
+      max_pct: 10.0
+    priority: 3
+    notes: "Растущий игрок; охват РПЛ выше среднего"
+
+  olimpbet:
+    name_ru: Олимпбет
+    region: russia
+    legal: true
+    license: FNS
+    api_available: false
+    api_notes: "Только веб-скрапинг"
+    margin_range:
+      typical_pct: 6.5
+      min_pct: 5.0
+      max_pct: 10.5
+    priority: 3
+    notes: "Умеренная ликвидность; полезен как вторичный источник котировок"
+
+  pari:
+    name_ru: Пари
+    region: russia
+    legal: true
+    license: FNS
+    api_available: false
+    api_notes: "Только веб-скрапинг; ребрендинг из Париматч"
+    margin_range:
+      typical_pct: 6.0
+      min_pct: 4.5
+      max_pct: 10.0
+    priority: 3
+    notes: "Ранее Париматч; достаточный охват матчей"
+
+  bk_liga_stavok:
+    name_ru: Лига Ставок
+    region: russia
+    legal: true
+    license: FNS
+    api_available: false
+    api_notes: "Только веб-скрапинг"
+    margin_range:
+      typical_pct: 6.0
+      min_pct: 4.5
+      max_pct: 10.0
+    priority: 4
+    notes: "Один из старейших легальных российских БК; охват стабильный"
+
+# ─────────────────────────────────────────
+# Справочные/аналитические источники (только для построения fair line)
+# НЕ используются для размещения ставок
+# ─────────────────────────────────────────
+reference_books:
+  pinnacle:
+    name_ru: Пиннакл
+    region: international
+    legal_in_russia: false
+    reference_only: true
+    known_for: "Минимальная маржа; умные деньги; эталон эффективного рынка"
+    typical_margin_pct: 2.0
+    notes: >
+      Заблокирован Роскомнадзором для российских пользователей.
+      Используется исключительно как эталон справедливых котировок через агрегаторы
+      (The Odds API, OddsPortal). Прямой доступ недоступен из РФ.
+
+  bet365:
+    name_ru: Бет365
+    region: international
+    legal_in_russia: false
+    reference_only: true
+    known_for: "Высокая ликвидность; широкое покрытие рынков"
+    typical_margin_pct: 5.5
+    notes: >
+      Заблокирован в России. Применяется как вторичный справочный источник
+      для подтверждения движения линий. Более высокая маржа по сравнению с Pinnacle —
+      учитывать при девиггировании.
+
+  betfair_exchange:
+    name_ru: Бетфэйр Биржа
+    region: international
+    legal_in_russia: false
+    reference_only: true
+    known_for: "Биржевые котировки; наиболее «чистая» вероятность на рынке"
+    typical_margin_pct: 0.5  # Комиссия биржи, не маржа БК
+    notes: >
+      Заблокирован в России. Биржевые котировки считаются наиболее надёжным
+      индикатором справедливой вероятности. Доступ через исторические данные
+      или агрегаторы. Только для аналитики.
+
+# ─────────────────────────────────────────
+# Глобальные настройки
+# ─────────────────────────────────────────
+global_settings:
+  max_accepted_margin_pct: 8.0
+  preferred_reference: market_average_devigged
+  devig_sources:
+    - pinnacle
+    - betfair_exchange
+  scraping_delay_seconds: 3.0
+  respect_robots_txt: true
+  legal_disclaimer: >
+    Все ставки размещаются исключительно через легальных российских букмекеров,
+    лицензированных ФНС РФ. Зарубежные источники используются только
+    для построения аналитических моделей и не предполагают прямого участия.

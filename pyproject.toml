@@ -1,0 +1,115 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# pyproject.toml — Sports Betting Analytics MVP
+# ─────────────────────────────────────────────────────────────────────────────
+
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Метаданные проекта
+# ─────────────────────────────────────────────────────────────────────────────
+
+[project]
+name = "sports-betting-mvp"
+version = "0.1.0"
+description = "Аналитическая платформа для поиска ценности в ставках на спорт через легальных российских букмекеров (только бумажная торговля)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [
+    { name = "Sports Betting MVP", email = "dev@example.com" },
+]
+keywords = ["спорт", "ставки", "аналитика", "бэктест", "ценность"]
+
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    "requests>=2.31.0",
+    "httpx>=0.27.0",
+    "pandas>=2.0.0",
+    "polars>=0.20.0",
+    "pyarrow>=14.0.0",
+    "pydantic>=2.5.0",
+    "pyyaml>=6.0.1",
+    "python-dotenv>=1.0.0",
+    "scipy>=1.11.0",
+    "numpy>=1.26.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "black>=23.0.0",
+    "isort>=5.12.0",
+    "mypy>=1.7.0",
+    "jupyter>=1.0.0",
+    "ipykernel>=6.0.0",
+    "matplotlib>=3.8.0",
+    "seaborn>=0.13.0",
+]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Инструменты
+# ─────────────────────────────────────────────────────────────────────────────
+
+[tool.black]
+line-length = 100
+target-version = ["py311", "py312"]
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+    \.git
+  | \.venv
+  | __pycache__
+  | data
+  | notebooks
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 100
+known_first_party = ["src"]
+skip_glob = ["data/*", "notebooks/*"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = false
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_return_any = false
+show_error_codes = true
+exclude = ["data/", "notebooks/", "tests/"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-v",
+    "--tb=short",
+    "--strict-markers",
+]
+markers = [
+    "unit: быстрые юнит-тесты без внешних зависимостей",
+    "integration: интеграционные тесты, требующие API-ключей",
+    "slow: тесты, выполняемые длительное время",
+]
+
+[tool.coverage.run]
+source = ["src"]
+omit = ["tests/*", "data/*", "notebooks/*"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+fail_under = 60

@@ -1,0 +1,38 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+.env
+.env.*
+!.env.example
+*.pyc
+
+# Data (raw data не коммитим, только структуру)
+data/raw/*
+data/staging/*
+data/core/*
+!data/raw/.gitkeep
+!data/staging/.gitkeep
+!data/core/.gitkeep
+!data/reports/.gitkeep
+
+# Jupyter
+.ipynb_checkpoints/
+notebooks/*.ipynb
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets
+configs/secrets.yaml
+configs/secrets.local.yaml
+*.token
+*.key

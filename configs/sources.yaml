@@ -1,0 +1,238 @@
+# Конфигурация источников данных для аналитики ставок
+# Правовой статус: все источники используются исключительно для сбора публичных данных
+# и построения аналитических моделей. Ставки размещаются только через легальных
+# российских букмекеров, лицензированных ФНС РФ.
+
+# ─────────────────────────────────────────
+# Источники котировок / рыночных данных
+# ─────────────────────────────────────────
+odds_sources:
+
+  the_odds_api:
+    name_ru: The Odds API (агрегатор котировок)
+    base_url: "https://api.the-odds-api.com/v4"
+    api_key_env: THE_ODDS_API_KEY
+    active: true
+    # Правовой статус: публичный коммерческий API, агрегирующий открытые данные котировок.
+    # Использование разрешено согласно условиям сервиса. Данные зарубежных БК применяются
+    # исключительно в аналитических целях — построение справедливой линии (fair odds).
+    legal_status_note: >
+      Публичный платный API. Предоставляет агрегированные котировки международных
+      букмекеров (Pinnacle, Bet365, Betfair и др.) для аналитики. Юридически чист
+      для использования в РФ в качестве информационного источника.
+    reliability_note: >
+      Высокая надёжность. Основной источник справочных котировок для девиггирования.
+      Задержка обновления — от 1 до 5 минут в зависимости от тарифного плана.
+    rate_limit:
+      requests_per_month: 500        # Лимит на бесплатном тарифе
+      requests_per_minute: 10
+      paid_tier_available: true
+    sports_supported:
+      - soccer_epl
+      - soccer_spain_la_liga
+      - soccer_germany_bundesliga
+      - soccer_italy_serie_a
+      - soccer_france_ligue_one
+      - soccer_uefa_champs_league
+      - tennis_atp
+      - icehockey_nhl
+    devig_role: primary_reference     # Главный источник для построения fair line
+    response_format: json
+    timeout_seconds: 10
+
+  football_data_co_uk:
+    name_ru: Football-Data.co.uk (исторические данные)
+    base_url: "https://www.football-data.co.uk/mmz4281"
+    auth_required: false
+    active: true
+    # Правовой статус: бесплатный открытый ресурс с историческими CSV-данными по футболу.
+    # Данные публичны, без ограничений на использование в аналитических целях.
+    # Сайт не заблокирован Роскомнадзором.
+    legal_status_note: >
+      Свободно доступный публичный ресурс. Данные предоставляются в открытом виде
+      без авторизации. Юридически чист для использования в РФ.
+    reliability_note: >
+      Высокая надёжность для исторических данных (результаты, котировки, статистика).
+      Обновляется раз в несколько дней после туров. Не подходит для получения
+      котировок в реальном времени. Основное применение — бэктестинг стратегий.
+    data_format: csv
+    update_frequency: post_matchday   # Обновление после каждого тура
+    leagues_available:
+      EPL:
+        path_template: "{season}/E0.csv"
+        example: "2324/E0.csv"
+      championship:
+        path_template: "{season}/E1.csv"
+      la_liga:
+        path_template: "{season}/SP1.csv"
+      bundesliga:
+        path_template: "{season}/D1.csv"
+      serie_a:
+        path_template: "{season}/I1.csv"
+      ligue_1:
+        path_template: "{season}/F1.csv"
+    columns_of_interest:
+      - HomeTeam
+      - AwayTeam
+      - FTHG        # Голы хозяев по итогам матча
+      - FTAG        # Голы гостей по итогам матча
+      - FTR         # Результат (H/D/A)
+      - B365H       # Котировка Bet365 на хозяев
+      - B365D       # Котировка Bet365 на ничью
+      - B365A       # Котировка Bet365 на гостей
+      - PSH         # Котировка Pinnacle на хозяев
+      - PSD         # Котировка Pinnacle на ничью
+      - PSA         # Котировка Pinnacle на гостей
+    timeout_seconds: 30
+    devig_role: historical_reference  # Только для бэктестинга
+
+# ─────────────────────────────────────────
+# Коммерческие поставщики спортивных данных
+# ─────────────────────────────────────────
+data_providers:
+
+  sportsdata_io:
+    name_ru: SportsData.io (коммерческий поставщик)
+    base_url: "https://api.sportsdata.io/v3/soccer"
+    api_key_env: SPORTSDATA_IO_KEY
+    active: false
+    # Правовой статус: коммерческий API с платной подпиской.
+    # Юридически чист для использования в РФ. Требует оплаченной подписки.
+    # Отключён в MVP — подключить после получения ключа.
+    legal_status_note: >
+      Коммерческий поставщик данных. Легален для использования в РФ в качестве
+      информационного сервиса. Требует платной подписки ($$$). Отключён до
+      получения тестового или рабочего API-ключа.
+    reliability_note: >
+      Высокое качество данных о составах, травмах и статистике игроков.
+      Один из немногих коммерческих источников с покрытием РПЛ.
+      Рекомендован для production-версии после MVP.
+    disabled_reason: "Требуется платный ключ. Установить SPORTSDATA_IO_KEY в .env для активации."
+    endpoints:
+      standings: "/standings/{season}"
+      scores: "/scores/{date}"
+      players: "/players"
+      injuries: "/injuries"
+    rate_limit:
+      requests_per_minute: 60
+      requests_per_day: 1000
+    sports_covered:
+      - soccer
+      - hockey
+    timeout_seconds: 15
+
+  betfair_historical:
+    name_ru: Betfair Historical Data (исторические биржевые данные)
+    base_url: "https://historicdata.betfair.com/api"
+    requires_login: true
+    experimental: true
+    active: false
+    # Правовой статус: Betfair заблокирован Роскомнадзором для российских пользователей.
+    # Исторические данные доступны через портал, но требуют аккаунта Betfair.
+    # Использование в аналитических целях допустимо при наличии доступа через VPN/агрегаторы.
+    # Статус: экспериментальный — возможны юридические риски прямого подключения из РФ.
+    legal_status_note: >
+      ВНИМАНИЕ: Betfair заблокирован Роскомнадзором на территории РФ.
+      Прямое подключение к API из российских IP-адресов может нарушать российское
+      законодательство об азартных играх (ФЗ-244). Использовать только через
+      исторические архивы или сторонние агрегаторы, соблюдая правовые нормы.
+      Интеграция помечена как experimental до юридической проверки.
+    reliability_note: >
+      Исторические биржевые котировки считаются наиболее «чистым» индикатором
+      справедливых вероятностей (маржа ~0.5%). Ценнейший источник для калибровки
+      моделей при наличии легального доступа к архивам.
+    data_types:
+      - pre_match_odds_snapshots
+      - in_play_odds_movements
+      - matched_volume               # Объём сопоставленных ставок
+    disabled_reason: >
+      Требует аккаунта Betfair и юридической проверки допустимости в РФ.
+      Активировать только после консультации с юристом.
+    timeout_seconds: 20
+
+# ─────────────────────────────────────────
+# Фиды о травмах и составах
+# ─────────────────────────────────────────
+injury_feeds:
+
+  sportsdata_io_injuries:
+    name_ru: SportsData.io — фид травм и дисквалификаций
+    provider: sportsdata_io
+    api_key_env: SPORTSDATA_IO_KEY
+    active: false
+    # Правовой статус: часть коммерческого API SportsData.io. Легален при наличии подписки.
+    # Отключён вместе с основным провайдером до получения API-ключа.
+    legal_status_note: >
+      Коммерческий источник данных о травмах. Легален для использования в РФ.
+      Деактивирован до подключения платного API-ключа SportsData.io.
+    reliability_note: >
+      Один из немногих источников с актуальными данными о травмах и дисквалификациях
+      по РПЛ. Критически важен для стратегии illness_shock_soccer.
+    data_fields:
+      - player_id
+      - player_name
+      - team
+      - status              # Активен / Травмирован / Под вопросом / Дисквалифицирован
+      - injury_description
+      - estimated_return
+      - updated_at
+    update_frequency_minutes: 60
+    disabled_reason: "Зависит от SPORTSDATA_IO_KEY. Совместно активировать с основным провайдером."
+
+  official_sources_only:
+    name_ru: Официальные источники (пресс-конференции, сайты клубов)
+    active: true
+    type: manual_or_rss
+    # Правовой статус: публичная информация с официальных сайтов клубов, федераций и
+    # пресс-служб. Полностью легально для парсинга публичных данных согласно robots.txt.
+    legal_status_note: >
+      Публично доступные данные с официальных источников (сайты клубов, РПЛ,
+      пресс-конференции тренеров, официальные аккаунты в соцсетях).
+      Полностью легальный источник. Рекомендован как основной в MVP.
+    reliability_note: >
+      Наиболее достоверный источник информации о составах и травмах.
+      Основной недостаток — задержка публикации (обычно за 1–2 часа до матча).
+      Требует ручной обработки или парсера RSS/Telegram-каналов клубов.
+    sources_list:
+      - "https://www.premierleague.com/news"     # АПЛ — официальные новости
+      - "https://www.rpl.ru/news"                # РПЛ — официальный сайт
+      - "https://www.bundesliga.com/en/news"     # Бундеслига — официальный сайт
+      - "https://www.laliga.com/noticias"        # Ла Лига — официальный сайт
+    rss_parsing: true
+    telegram_channels_supported: true   # Телеграм-каналы клубов РПЛ — важный источник по РФ
+    respect_robots_txt: true
+    scraping_delay_seconds: 5.0
+
+# ─────────────────────────────────────────
+# Глобальные настройки источников
+# ─────────────────────────────────────────
+global_source_settings:
+  default_timeout_seconds: 15
+  max_retries: 3
+  retry_delay_seconds: 5
+  cache_ttl_minutes: 5               # Время кэширования ответов API
+  log_all_requests: true
+  log_failed_requests: true
+  save_raw_responses: false          # Включить при отладке; выключить в production для экономии дискового пространства
+
+  data_quality:
+    min_acceptable_quality_score: 0.7  # Соответствует порогу no_bet_if_data_quality_below в strategy_rules.yaml
+    quality_factors:
+      - source_reliability            # Официальный vs неофициальный источник
+      - data_freshness                # Время с последнего обновления
+      - completeness                  # Процент заполненных полей
+      - corroboration                 # Подтверждено ли несколькими источниками
+
+  legal_compliance:
+    # Все операции по сбору данных выполняются в соответствии с
+    # российским законодательством и условиями использования источников.
+    respect_terms_of_service: true
+    no_direct_betting_api_calls: true   # Никаких прямых API-запросов к иностранным БК для размещения ставок
+    analytics_only_for_foreign_sources: true
+    disclaimer: >
+      Иностранные источники данных (The Odds API, Football-Data.co.uk и др.)
+      используются исключительно в аналитических целях — для построения
+      справедливых вероятностных моделей. Все ставки размещаются только через
+      легальных российских букмекеров, лицензированных ФНС РФ в соответствии
+      с Федеральным законом № 244-ФЗ «О государственном регулировании деятельности
+      по организации и проведению азартных игр».
