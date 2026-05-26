@@ -1,0 +1,51 @@
+{
+  "_comment": "Основной конфигурационный файл Ruflo для проекта sports-betting-mvp",
+  "version": "3.7.0",
+  "agents": {
+    "maxConcurrent": 6,
+    "topology": "hierarchical",
+    "queue": { "enabled": true, "maxSize": 50 }
+  },
+  "memory": {
+    "type": "hybrid",
+    "providers": ["hnsw", "sqlite"],
+    "persistence": true,
+    "namespaces": ["signals", "backtest", "odds_patterns", "strategies"]
+  },
+  "providers": {
+    "default": "anthropic",
+    "models": {
+      "cheap": "haiku",
+      "medium": "sonnet",
+      "expensive": "opus"
+    },
+    "routing": "cost-optimized",
+    "taskRouting": {
+      "normalization": "haiku",
+      "signal_scan": "sonnet",
+      "backtesting": "sonnet",
+      "modeling": "opus",
+      "reporting": "haiku"
+    }
+  },
+  "hooks": {
+    "enabled": true,
+    "logLevel": "info",
+    "autoTriggers": {
+      "onDataUpdate": ["qc-normalizer", "signal-engine"],
+      "onDailySchedule": ["reporter", "signal-engine"],
+      "onBacktestComplete": ["reporter"]
+    }
+  },
+  "security": {
+    "validation": "strict",
+    "threatDetection": "enabled",
+    "paperTradingEnforced": true
+  },
+  "project": {
+    "name": "sports-betting-mvp",
+    "language": "ru",
+    "region": "russia",
+    "mode": "paper_trading_only"
+  }
+}
