@@ -1,0 +1,7 @@
+{
+  "method": "sendMessage",
+  "chat_id": "${TELEGRAM_CHAT_ID}",
+  "text": "📊 *Sports Betting Analytics MVP*\n🗓 26.05.2026 17:41 UTC \\| Демо\\-отчёт\n\n━━━━━━━━━━━━━━━━━━━━\n📈 *Бэктест \\(бумажная торговля\\)*\n  Ставок: `2`\n  ROI\\*: `-100.00%`\n  Win Rate\\*: `0.0%`\n  \\*случайные исходы, только демо\n\n🔔 *Сигналы \\(предстоящие матчи\\)*\n  • *Arsenal vs Liverpool* \\| fonbet \\| Arsenal \\(Хозяева\\)\n    Кеф\\. `2.580` \\| Edge `7.74%`\n  • *Manchester City vs Chelsea* \\| winline \\| Chelsea \\(Гости\\)\n    Кеф\\. `4.200` \\| Edge `4.06%`\n\n━━━━━━━━━━━━━━━━━━━━\n⚠️ _Только бумажная торговля\\. Не является торговой рекомендацией\\._",
+  "parse_mode": "MarkdownV2",
+  "disable_web_page_preview": true
+}

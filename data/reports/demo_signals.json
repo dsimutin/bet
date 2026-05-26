@@ -1,0 +1,34 @@
+[
+  {
+    "signal_id": "SIG_0001",
+    "generated_at": "2026-05-26T17:41:23.020391Z",
+    "event_id": "epl_2526_future_001",
+    "home_team": "Arsenal",
+    "away_team": "Liverpool",
+    "event_ts": "2026-05-27T19:41:23.020391Z",
+    "bookmaker": "fonbet",
+    "selection": "Arsenal (Хозяева)",
+    "target_odds": 2.58,
+    "ref_fair_odds": 2.4896,
+    "edge_pct": 7.74,
+    "strategy": "ref_value_soccer_1x2",
+    "paper_only": true,
+    "note": "Синтетический демо-сигнал. Не является торговой рекомендацией."
+  },
+  {
+    "signal_id": "SIG_0002",
+    "generated_at": "2026-05-26T17:41:23.020391Z",
+    "event_id": "epl_2526_future_002",
+    "home_team": "Manchester City",
+    "away_team": "Chelsea",
+    "event_ts": "2026-05-28T19:41:23.020391Z",
+    "bookmaker": "winline",
+    "selection": "Chelsea (Гости)",
+    "target_odds": 4.2,
+    "ref_fair_odds": 4.3243,
+    "edge_pct": 4.06,
+    "strategy": "ref_value_soccer_1x2",
+    "paper_only": true,
+    "note": "Синтетический демо-сигнал. Не является торговой рекомендацией."
+  }
+]
