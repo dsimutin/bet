@@ -1,0 +1,25 @@
+name: Keep Render Alive
+
+on:
+  schedule:
+    - cron: "*/14 * * * *"   # every 14 min — Render sleeps after 15 min inactivity
+  workflow_dispatch:
+
+jobs:
+  ping:
+    name: Ping health endpoint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping /health
+        env:
+          RENDER_URL: ${{ vars.RENDER_URL }}
+        run: |
+          if [ -z "$RENDER_URL" ]; then
+            echo "RENDER_URL variable not set — skipping ping."
+            exit 0
+          fi
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "${RENDER_URL}/health")
+          echo "GET ${RENDER_URL}/health → HTTP ${STATUS}"
+          if [ "$STATUS" != "200" ]; then
+            echo "::warning::Health check returned ${STATUS}, service may be starting up."
+          fi
