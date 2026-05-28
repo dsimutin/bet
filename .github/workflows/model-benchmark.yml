@@ -1,0 +1,67 @@
+name: Model Benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      leagues:
+        description: "football-data league codes"
+        default: "E0,SP1,D1,I1,F1"
+        required: true
+      seasons:
+        description: "football-data seasons"
+        default: "2122,2223,2324,2425,2526"
+        required: true
+      max_windows:
+        description: "Optional cap for faster research runs"
+        default: ""
+        required: false
+  schedule:
+    - cron: "0 7 * * 1"
+
+jobs:
+  benchmark:
+    name: Walk-forward probability benchmark
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Run benchmark
+        env:
+          LEAGUES: ${{ github.event.inputs.leagues || 'E0,SP1,D1,I1,F1' }}
+          SEASONS: ${{ github.event.inputs.seasons || '2122,2223,2324,2425,2526' }}
+          MAX_WINDOWS: ${{ github.event.inputs.max_windows }}
+        run: |
+          args=(
+            --download-football-data
+            --leagues "$LEAGUES"
+            --seasons "$SEASONS"
+            --output-dir data/reports
+            --min-train-matches 120
+            --test-window-days 30
+            --dixon-coles-max-iterations 80
+          )
+          if [ -n "$MAX_WINDOWS" ]; then
+            args+=(--max-windows "$MAX_WINDOWS")
+          fi
+          uv run --extra dev python -m src.models.run_model_benchmark "${args[@]}"
+
+      - name: Upload benchmark reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: model-benchmark-reports
+          path: |
+            data/reports/model_probability_benchmark.json
+            data/reports/model_probability_benchmark.md

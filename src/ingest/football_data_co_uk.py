@@ -34,53 +34,53 @@ _SOURCE_NOTE: Final[str] = "football-data.co.uk — исторический и�
 
 COLUMN_MAPPING: Final[dict[str, str]] = {
     # Основная информация о матче
-    "Div":      "league_code",
-    "Date":     "match_date",
-    "Time":     "match_time",
+    "Div": "league_code",
+    "Date": "match_date",
+    "Time": "match_time",
     "HomeTeam": "home_team",
     "AwayTeam": "away_team",
-    "FTHG":     "goals_home_ft",
-    "FTAG":     "goals_away_ft",
-    "FTR":      "result_ft",          # H / D / A
-    "HTHG":     "goals_home_ht",
-    "HTAG":     "goals_away_ht",
-    "HTR":      "result_ht",
+    "FTHG": "goals_home_ft",
+    "FTAG": "goals_away_ft",
+    "FTR": "result_ft",  # H / D / A
+    "HTHG": "goals_home_ht",
+    "HTAG": "goals_away_ht",
+    "HTR": "result_ht",
     # Статистика матча
-    "HS":       "shots_home",
-    "AS":       "shots_away",
-    "HST":      "shots_on_target_home",
-    "AST":      "shots_on_target_away",
-    "HF":       "fouls_home",
-    "AF":       "fouls_away",
-    "HC":       "corners_home",
-    "AC":       "corners_away",
-    "HY":       "yellow_cards_home",
-    "AY":       "yellow_cards_away",
-    "HR":       "red_cards_home",
-    "AR":       "red_cards_away",
+    "HS": "shots_home",
+    "AS": "shots_away",
+    "HST": "shots_on_target_home",
+    "AST": "shots_on_target_away",
+    "HF": "fouls_home",
+    "AF": "fouls_away",
+    "HC": "corners_home",
+    "AC": "corners_away",
+    "HY": "yellow_cards_home",
+    "AY": "yellow_cards_away",
+    "HR": "red_cards_home",
+    "AR": "red_cards_away",
     # Коэффициенты Bet365
-    "B365H":    "b365_odds_home",
-    "B365D":    "b365_odds_draw",
-    "B365A":    "b365_odds_away",
+    "B365H": "b365_odds_home",
+    "B365D": "b365_odds_draw",
+    "B365A": "b365_odds_away",
     # Коэффициенты Betfair
-    "BFH":      "betfair_odds_home",
-    "BFD":      "betfair_odds_draw",
-    "BFA":      "betfair_odds_away",
+    "BFH": "betfair_odds_home",
+    "BFD": "betfair_odds_draw",
+    "BFA": "betfair_odds_away",
     # Коэффициенты William Hill
-    "WHH":      "wh_odds_home",
-    "WHD":      "wh_odds_draw",
-    "WHA":      "wh_odds_away",
+    "WHH": "wh_odds_home",
+    "WHD": "wh_odds_draw",
+    "WHA": "wh_odds_away",
     # Коэффициенты Pinnacle
-    "PSH":      "pinnacle_odds_home",
-    "PSD":      "pinnacle_odds_draw",
-    "PSA":      "pinnacle_odds_away",
+    "PSH": "pinnacle_odds_home",
+    "PSD": "pinnacle_odds_draw",
+    "PSA": "pinnacle_odds_away",
     # Средние рыночные коэффициенты
-    "MaxH":     "max_odds_home",
-    "MaxD":     "max_odds_draw",
-    "MaxA":     "max_odds_away",
-    "AvgH":     "avg_odds_home",
-    "AvgD":     "avg_odds_draw",
-    "AvgA":     "avg_odds_away",
+    "MaxH": "max_odds_home",
+    "MaxD": "max_odds_draw",
+    "MaxA": "max_odds_away",
+    "AvgH": "avg_odds_home",
+    "AvgD": "avg_odds_draw",
+    "AvgA": "avg_odds_away",
 }
 
 
@@ -117,6 +117,7 @@ def _build_session(max_retries: int = 3, backoff_factor: float = 1.5) -> request
 # Основной загрузчик
 # ---------------------------------------------------------------------------
 
+
 class FootballDataLoader:
     """
     Загрузчик исторических CSV-данных с football-data.co.uk.
@@ -134,34 +135,34 @@ class FootballDataLoader:
     # Формат URL: https://www.football-data.co.uk/mmz4281/{season}/{league}.csv
     LEAGUE_URLS: Final[dict[str, str]] = {
         # Англия
-        "E0": "https://www.football-data.co.uk/mmz4281/{season}/E0.csv",   # Премьер-лига
-        "E1": "https://www.football-data.co.uk/mmz4281/{season}/E1.csv",   # Чемпионшип
-        "E2": "https://www.football-data.co.uk/mmz4281/{season}/E2.csv",   # Лига 1 Англии
-        "E3": "https://www.football-data.co.uk/mmz4281/{season}/E3.csv",   # Лига 2 Англии
+        "E0": "https://www.football-data.co.uk/mmz4281/{season}/E0.csv",  # Премьер-лига
+        "E1": "https://www.football-data.co.uk/mmz4281/{season}/E1.csv",  # Чемпионшип
+        "E2": "https://www.football-data.co.uk/mmz4281/{season}/E2.csv",  # Лига 1 Англии
+        "E3": "https://www.football-data.co.uk/mmz4281/{season}/E3.csv",  # Лига 2 Англии
         # Германия
-        "D1": "https://www.football-data.co.uk/mmz4281/{season}/D1.csv",   # Бундеслига
-        "D2": "https://www.football-data.co.uk/mmz4281/{season}/D2.csv",   # 2-я Бундеслига
+        "D1": "https://www.football-data.co.uk/mmz4281/{season}/D1.csv",  # Бундеслига
+        "D2": "https://www.football-data.co.uk/mmz4281/{season}/D2.csv",  # 2-я Бундеслига
         # Испания
-        "SP1": "https://www.football-data.co.uk/mmz4281/{season}/SP1.csv", # Ла Лига
-        "SP2": "https://www.football-data.co.uk/mmz4281/{season}/SP2.csv", # Сегунда
+        "SP1": "https://www.football-data.co.uk/mmz4281/{season}/SP1.csv",  # Ла Лига
+        "SP2": "https://www.football-data.co.uk/mmz4281/{season}/SP2.csv",  # Сегунда
         # Италия
-        "I1": "https://www.football-data.co.uk/mmz4281/{season}/I1.csv",   # Серия А
-        "I2": "https://www.football-data.co.uk/mmz4281/{season}/I2.csv",   # Серия Б
+        "I1": "https://www.football-data.co.uk/mmz4281/{season}/I1.csv",  # Серия А
+        "I2": "https://www.football-data.co.uk/mmz4281/{season}/I2.csv",  # Серия Б
         # Франция
-        "F1": "https://www.football-data.co.uk/mmz4281/{season}/F1.csv",   # Лига 1 Франции
-        "F2": "https://www.football-data.co.uk/mmz4281/{season}/F2.csv",   # Лига 2 Франции
+        "F1": "https://www.football-data.co.uk/mmz4281/{season}/F1.csv",  # Лига 1 Франции
+        "F2": "https://www.football-data.co.uk/mmz4281/{season}/F2.csv",  # Лига 2 Франции
         # Нидерланды
-        "N1": "https://www.football-data.co.uk/mmz4281/{season}/N1.csv",   # Эредивизи
+        "N1": "https://www.football-data.co.uk/mmz4281/{season}/N1.csv",  # Эредивизи
         # Бельгия
-        "B1": "https://www.football-data.co.uk/mmz4281/{season}/B1.csv",   # Жюпилер Про Лига
+        "B1": "https://www.football-data.co.uk/mmz4281/{season}/B1.csv",  # Жюпилер Про Лига
         # Португалия
-        "P1": "https://www.football-data.co.uk/mmz4281/{season}/P1.csv",   # Примейра
+        "P1": "https://www.football-data.co.uk/mmz4281/{season}/P1.csv",  # Примейра
         # Турция
-        "T1": "https://www.football-data.co.uk/mmz4281/{season}/T1.csv",   # Суперлига
+        "T1": "https://www.football-data.co.uk/mmz4281/{season}/T1.csv",  # Суперлига
         # Греция
-        "G1": "https://www.football-data.co.uk/mmz4281/{season}/G1.csv",   # Суперлига Греции
+        "G1": "https://www.football-data.co.uk/mmz4281/{season}/G1.csv",  # Суперлига Греции
         # Шотландия
-        "SC0": "https://www.football-data.co.uk/mmz4281/{season}/SC0.csv", # Шотландская Премьершип
+        "SC0": "https://www.football-data.co.uk/mmz4281/{season}/SC0.csv",  # Шотландская Премьершип
     }
 
     def __init__(self, timeout_sec: float = 30.0) -> None:
@@ -211,7 +212,9 @@ class FootballDataLoader:
         url = self.LEAGUE_URLS[league].format(season=season)
         logger.info(
             "Загрузка исторических данных: лига=%s, сезон=%s, URL=%s",
-            league, season, url,
+            league,
+            season,
+            url,
         )
 
         response = self._session.get(url, timeout=self.timeout_sec)
@@ -264,11 +267,7 @@ class FootballDataLoader:
         logger.info("Загружено строк: %d, столбцов: %d", len(df), len(df.columns))
 
         # Применяем маппинг столбцов (только те, что присутствуют в файле)
-        cols_to_rename = {
-            old: new
-            for old, new in COLUMN_MAPPING.items()
-            if old in df.columns
-        }
+        cols_to_rename = {old: new for old, new in COLUMN_MAPPING.items() if old in df.columns}
         df = df.rename(columns=cols_to_rename)
         logger.debug("Переименовано столбцов: %d", len(cols_to_rename))
 
@@ -284,8 +283,16 @@ class FootballDataLoader:
                 logger.warning("Не удалось распарсить дат: %d", invalid_dates)
 
         # Приводим коэффициенты и числовые поля к float
-        odds_cols = [c for c in df.columns if "odds" in c or "goals" in c
-                     or "shots" in c or "corners" in c or "cards" in c or "fouls" in c]
+        odds_cols = [
+            c
+            for c in df.columns
+            if "odds" in c
+            or "goals" in c
+            or "shots" in c
+            or "corners" in c
+            or "cards" in c
+            or "fouls" in c
+        ]
         for col in odds_cols:
             df[col] = pd.to_numeric(df[col], errors="coerce")
 

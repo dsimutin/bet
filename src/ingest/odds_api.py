@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 # Pydantic-модели
 # ---------------------------------------------------------------------------
 
+
 class OddsOutcome(BaseModel):
     """Исход ставки (например, победа команды или ничья)."""
 
@@ -68,6 +69,7 @@ class OddsSnapshot(BaseModel):
 # Вспомогательная функция: создание сессии с автоматическими повторными попытками
 # ---------------------------------------------------------------------------
 
+
 def _build_session(max_retries: int = 3, backoff_factor: float = 1.5) -> requests.Session:
     """
     Создаёт HTTP-сессию с настроенной логикой повторных попыток.
@@ -101,6 +103,7 @@ def _build_session(max_retries: int = 3, backoff_factor: float = 1.5) -> request
 # ---------------------------------------------------------------------------
 # Основной клиент
 # ---------------------------------------------------------------------------
+
 
 class OddsAPIClient:
     """
@@ -164,7 +167,9 @@ class OddsAPIClient:
         if params:
             query.update(params)
 
-        logger.debug("Запрос: GET %s | параметры: %s", url, {k: v for k, v in query.items() if k != "apiKey"})
+        logger.debug(
+            "Запрос: GET %s | параметры: %s", url, {k: v for k, v in query.items() if k != "apiKey"}
+        )
 
         # Пауза для соблюдения ограничений частоты запросов
         time.sleep(self.request_delay_sec)
@@ -180,8 +185,7 @@ class OddsAPIClient:
         if response.status_code == 429:
             # Попытки уже исчерпаны адаптером — сообщаем об ошибке
             raise RuntimeError(
-                "Превышен лимит запросов к The Odds API (429). "
-                "Повторные попытки исчерпаны."
+                "Превышен лимит запросов к The Odds API (429). " "Повторные попытки исчерпаны."
             )
 
         response.raise_for_status()
@@ -249,7 +253,9 @@ class OddsAPIClient:
 
         logger.info(
             "Запрос коэффициентов: спорт=%s, регионы=%s, рынки=%s",
-            sport, regions, markets,
+            sport,
+            regions,
+            markets,
         )
         data: list[dict] = self._get(f"sports/{sport}/odds", params=params)
         logger.info("Получено событий с коэффициентами: %d", len(data))

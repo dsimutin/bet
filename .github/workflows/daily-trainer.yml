@@ -1,0 +1,136 @@
+name: Daily Model Trainer
+
+on:
+  workflow_dispatch:
+    inputs:
+      league:
+        description: "League code"
+        default: "EPL"
+        required: true
+      cutoff_date:
+        description: "YYYY-MM-DD cutoff date"
+        default: ""
+        required: false
+      football_data_leagues:
+        description: "football-data league codes used for training"
+        default: "E0"
+        required: true
+      seasons:
+        description: "football-data seasons"
+        default: "2122,2223,2324,2425,2526"
+        required: true
+      history_source:
+        description: "Training history source: football-data or openfootball"
+        default: "openfootball"
+        required: true
+      openfootball_leagues:
+        description: "OpenFootball league codes used for training"
+        default: "EPL"
+        required: true
+      openfootball_seasons:
+        description: "OpenFootball seasons"
+        default: "2021-22,2022-23,2023-24,2024-25"
+        required: true
+  schedule:
+    - cron: "0 6 * * *"
+
+permissions:
+  contents: write
+
+jobs:
+  train:
+    name: Train and promote Dixon-Coles model
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Run trainer
+        env:
+          LEAGUE: ${{ github.event.inputs.league || 'EPL' }}
+          CUTOFF_DATE: ${{ github.event.inputs.cutoff_date }}
+          FOOTBALL_DATA_LEAGUES: ${{ github.event.inputs.football_data_leagues || 'E0' }}
+          SEASONS: ${{ github.event.inputs.seasons || '2122,2223,2324,2425,2526' }}
+          HISTORY_SOURCE: ${{ github.event.inputs.history_source || 'openfootball' }}
+          OPENFOOTBALL_LEAGUES: ${{ github.event.inputs.openfootball_leagues || 'EPL' }}
+          OPENFOOTBALL_SEASONS: ${{ github.event.inputs.openfootball_seasons || '2021-22,2022-23,2023-24,2024-25' }}
+        run: |
+          cutoff_args=()
+          if [ -n "$CUTOFF_DATE" ]; then
+            cutoff_args=(--cutoff-date "$CUTOFF_DATE")
+          fi
+          source_args=()
+          if [ "$HISTORY_SOURCE" = "openfootball" ]; then
+            source_args=(
+              --download-openfootball
+              --openfootball-leagues "$OPENFOOTBALL_LEAGUES"
+              --openfootball-seasons "$OPENFOOTBALL_SEASONS"
+            )
+          else
+            source_args=(
+              --download-football-data
+              --football-data-leagues "$FOOTBALL_DATA_LEAGUES"
+              --seasons "$SEASONS"
+            )
+          fi
+          uv run --extra dev python -m src.models.run_daily_trainer \
+            --league "$LEAGUE" \
+            "${cutoff_args[@]}" \
+            "${source_args[@]}" \
+            --model-dir data/models \
+            --output-dir data/reports
+
+      - name: Upload training artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-model-training
+          if-no-files-found: ignore
+          path: |
+            data/models/*.pkl
+            data/models/*.meta.json
+            data/models/calibration_*.pkl
+            data/reports/daily_training_*.json
+
+      - name: Persist model state
+        if: success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          state_files=()
+          for pattern in "data/models/*.pkl" \
+                         "data/models/*.meta.json" \
+                         "data/models/calibration_*.pkl" \
+                         "data/reports/daily_training_*.json"; do
+            while IFS= read -r path; do
+              state_files+=("$path")
+            done < <(compgen -G "$pattern" || true)
+          done
+
+          if [ ${#state_files[@]} -eq 0 ]; then
+            echo "No model state files found to persist."
+            exit 0
+          fi
+
+          git add -f "${state_files[@]}"
+          if git diff --cached --quiet; then
+            echo "No model state changes to persist."
+            exit 0
+          fi
+
+          git commit -m "chore: persist daily model state"
+          git pull --rebase
+          git push

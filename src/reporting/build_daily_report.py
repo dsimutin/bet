@@ -288,7 +288,9 @@ class DailyReportBuilder:
             # Форматирование числовых значений
             entry_str = f"{entry:.3f}" if isinstance(entry, float) else str(entry)
             ref_str = f"{ref:.3f}" if isinstance(ref, float) else str(ref)
-            edge_str = f"+{edge:.2f}%" if isinstance(edge, (int, float)) and edge >= 0 else f"{edge:.2f}%"
+            edge_str = (
+                f"+{edge:.2f}%" if isinstance(edge, (int, float)) and edge >= 0 else f"{edge:.2f}%"
+            )
             conf_str = f"{conf:.0%}" if isinstance(conf, float) else str(conf)
 
             lines.append(
@@ -327,9 +329,7 @@ class DailyReportBuilder:
         for strat_id in self.config.strategies:
             metrics = strategies_data.get(strat_id, {})
             if not metrics:
-                lines.append(
-                    f"| {strat_id} | — | — | — | — | — | — | — | _нет данных_ |"
-                )
+                lines.append(f"| {strat_id} | — | — | — | — | — | — | — | _нет данных_ |")
                 continue
 
             n_bets = metrics.get("n_bets", 0)
@@ -359,7 +359,9 @@ class DailyReportBuilder:
             total_roi = summary.get("total_roi", None)
             total_roi_str = f"{total_roi:+.1f}%" if isinstance(total_roi, (int, float)) else "—"
             lines.append("")
-            lines.append(f"**Итого по всем стратегиям:** {total_bets} ставок, ROI = {total_roi_str}")
+            lines.append(
+                f"**Итого по всем стратегиям:** {total_bets} ставок, ROI = {total_roi_str}"
+            )
 
         return "\n".join(lines) + "\n"
 
@@ -414,12 +416,15 @@ class DailyReportBuilder:
         ]
 
         for hyp_id in HYPOTHESIS_IDS:
-            meta = hypothesis_meta.get(hyp_id, {
-                "name": "—",
-                "status": "—",
-                "phase": "—",
-                "n_signals": "—",
-            })
+            meta = hypothesis_meta.get(
+                hyp_id,
+                {
+                    "name": "—",
+                    "status": "—",
+                    "phase": "—",
+                    "n_signals": "—",
+                },
+            )
             lines.append(
                 f"| {hyp_id} | {meta['name']} | {meta['status']} | {meta['phase']} | {meta['n_signals']} |"
             )
@@ -500,9 +505,7 @@ class DailyReportBuilder:
         # ---- Раздел сигналов ----
         if self.config.include_signals:
             sections.append(
-                f"## Сигналы за {report_date_str}\n"
-                f"\n"
-                + self._format_signal_section(signals)
+                f"## Сигналы за {report_date_str}\n" f"\n" + self._format_signal_section(signals)
             )
 
         # ---- Раздел производительности ----
@@ -512,8 +515,7 @@ class DailyReportBuilder:
                 "\n"
                 "> Метрики рассчитаны по paper trading журналу. "
                 "Малые выборки (N<30) имеют низкую статистическую значимость.\n"
-                "\n"
-                + self._format_performance_section(performance)
+                "\n" + self._format_performance_section(performance)
             )
 
         # ---- Раздел качества данных ----
@@ -525,7 +527,9 @@ class DailyReportBuilder:
                 src_records = src_data.get("records", "—")
                 sources_lines.append(f"- **{src_name}**: score={src_score}, записей={src_records}")
 
-            sources_block = "\n".join(sources_lines) if sources_lines else "_Нет данных об источниках._"
+            sources_block = (
+                "\n".join(sources_lines) if sources_lines else "_Нет данных об источниках._"
+            )
             issues_block = (
                 "\n".join(f"- ⚠️ {issue}" for issue in qc_issues)
                 if qc_issues
@@ -547,11 +551,7 @@ class DailyReportBuilder:
             )
 
         # ---- Таблица статусов гипотез ----
-        sections.append(
-            "## Статус валидации гипотез\n"
-            "\n"
-            + self._format_hypothesis_status()
-        )
+        sections.append("## Статус валидации гипотез\n" "\n" + self._format_hypothesis_status())
 
         # ---- Подвал с дисклеймером ----
         sections.append(

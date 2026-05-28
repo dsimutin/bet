@@ -31,17 +31,19 @@ logger = logging.getLogger(__name__)
 TELEGRAM_API_BASE = "https://api.telegram.org/bot{token}/sendMessage"
 
 # Обязательные поля сигнала для валидации перед отправкой
-REQUIRED_SIGNAL_FIELDS: frozenset[str] = frozenset({
-    "strategy_id",
-    "home_team",
-    "away_team",
-    "bookmaker",
-    "market_key",
-    "entry_odds",
-    "reference_fair_odds",
-    "edge_pct",
-    "timestamp_utc",
-})
+REQUIRED_SIGNAL_FIELDS: frozenset[str] = frozenset(
+    {
+        "strategy_id",
+        "home_team",
+        "away_team",
+        "bookmaker",
+        "market_key",
+        "entry_odds",
+        "reference_fair_odds",
+        "edge_pct",
+        "timestamp_utc",
+    }
+)
 
 
 # ---------------------------------------------------------------------------
@@ -162,6 +164,7 @@ class TelegramSender:
         "Коэфф.: {entry_odds}\n"
         "Справедливая цена: {reference_fair_odds}\n"
         "Edge: +{edge_pct:.2f}%\n"
+        "Paper stake: {paper_stake_units:.2f}u\n"
         "Комментарий: {explain_formatted}\n"
         "Статус: только paper trading\n"
         "🕐 {timestamp_utc}"
@@ -215,6 +218,7 @@ class TelegramSender:
         entry_odds = signal.get("entry_odds", 0.0)
         reference_fair_odds = signal.get("reference_fair_odds", 0.0)
         edge_pct = signal.get("edge_pct", 0.0)
+        paper_stake_units = float(signal.get("paper_stake_units", signal.get("stake_units", 1.0)))
         explain_formatted = signal.get("explain_formatted", signal.get("comment", "—"))
         timestamp_utc = signal.get("timestamp_utc", "—")
 
@@ -237,6 +241,7 @@ class TelegramSender:
             entry_odds=entry_odds_str,
             reference_fair_odds=ref_odds_str,
             edge_pct=edge_pct_val,
+            paper_stake_units=paper_stake_units,
             explain_formatted=explain_formatted,
             timestamp_utc=timestamp_utc,
         )
@@ -383,9 +388,7 @@ class TelegramSender:
         n_strategies = summary.get("n_strategies", 0)
         notes = summary.get("notes", "")
 
-        top_edge_str = (
-            f"+{top_edge:.2f}%" if isinstance(top_edge, (int, float)) else str(top_edge)
-        )
+        top_edge_str = f"+{top_edge:.2f}%" if isinstance(top_edge, (int, float)) else str(top_edge)
 
         lines = [
             f"📊 Ежедневная сводка — {report_date}",

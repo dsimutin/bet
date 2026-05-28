@@ -16,7 +16,6 @@ import pytest
 
 from src.features.illness_features import IllnessEvent, IllnessFeatureBuilder
 
-
 # ---------------------------------------------------------------------------
 # Вспомогательные функции для генерации синтетических данных
 # ---------------------------------------------------------------------------
@@ -142,8 +141,7 @@ def test_illness_filter_blocks_future_events(
     filtered = illness_builder.filter_by_cutoff(future_events, cutoff_ts=match_time_utc)
 
     assert len(filtered) == 0, (
-        f"Ожидалось 0 событий после фильтра (все из будущего), "
-        f"получено {len(filtered)}"
+        f"Ожидалось 0 событий после фильтра (все из будущего), " f"получено {len(filtered)}"
     )
 
 
@@ -172,9 +170,7 @@ def test_illness_filter_allows_past_events(
 
     filtered = illness_builder.filter_by_cutoff(past_events, cutoff_ts=match_time_utc)
 
-    assert len(filtered) == 3, (
-        f"Ожидалось 3 события (все из прошлого), получено {len(filtered)}"
-    )
+    assert len(filtered) == 3, f"Ожидалось 3 события (все из прошлого), получено {len(filtered)}"
     for evt in filtered:
         assert evt.report_ts < match_time_utc, (
             f"Событие с report_ts={evt.report_ts} прошло фильтр, "
@@ -212,9 +208,9 @@ def test_backtest_no_closing_odds_as_input(match_time_utc: datetime) -> None:
         entry_ts=entry_ts,
         closing_ts=closing_ts,
     )
-    assert _backtest_closing_odds_not_used_at_entry(trade_valid) is True, (
-        "Ожидалось True: entry_odds != closing_odds при закрытии после входа"
-    )
+    assert (
+        _backtest_closing_odds_not_used_at_entry(trade_valid) is True
+    ), "Ожидалось True: entry_odds != closing_odds при закрытии после входа"
 
     # Подозрительный случай: одинаковые коэффициенты при закрытии после входа
     trade_suspicious = _SyntheticBacktestTrade(
@@ -223,9 +219,9 @@ def test_backtest_no_closing_odds_as_input(match_time_utc: datetime) -> None:
         entry_ts=entry_ts,
         closing_ts=closing_ts,
     )
-    assert _backtest_closing_odds_not_used_at_entry(trade_suspicious) is False, (
-        "Ожидалось False: entry_odds == closing_odds при закрытии позже — подозрение на утечку"
-    )
+    assert (
+        _backtest_closing_odds_not_used_at_entry(trade_suspicious) is False
+    ), "Ожидалось False: entry_odds == closing_odds при закрытии позже — подозрение на утечку"
 
 
 # ---------------------------------------------------------------------------
@@ -255,9 +251,9 @@ def test_signal_timestamp_before_match(match_time_utc: datetime) -> None:
     if signal_ts.tzinfo is None:
         signal_ts = signal_ts.replace(tzinfo=timezone.utc)
 
-    assert signal_ts < event_start, (
-        f"Сигнал timestamp_utc={signal_ts} должен быть раньше event_start={event_start}"
-    )
+    assert (
+        signal_ts < event_start
+    ), f"Сигнал timestamp_utc={signal_ts} должен быть раньше event_start={event_start}"
 
     # Некорректный сигнал — создан после начала матча (look-ahead)
     signal_invalid = {
@@ -271,14 +267,14 @@ def test_signal_timestamp_before_match(match_time_utc: datetime) -> None:
     if invalid_ts.tzinfo is None:
         invalid_ts = invalid_ts.replace(tzinfo=timezone.utc)
 
-    assert invalid_ts >= event_start, (
-        "Второй сигнал должен быть ПОСЛЕ начала матча (демонстрируем некорректный случай)"
-    )
+    assert (
+        invalid_ts >= event_start
+    ), "Второй сигнал должен быть ПОСЛЕ начала матча (демонстрируем некорректный случай)"
     # Сигнал с timestamp >= event_start недопустим в системе
     is_valid_signal = invalid_ts < event_start
-    assert not is_valid_signal, (
-        "Сигнал с timestamp после начала матча не должен проходить валидацию"
-    )
+    assert (
+        not is_valid_signal
+    ), "Сигнал с timestamp после начала матча не должен проходить валидацию"
 
 
 # ---------------------------------------------------------------------------
@@ -313,9 +309,7 @@ def test_injury_join_cutoff_respected(
     # Фильтруем по cutoff_ts
     filtered = illness_builder.filter_by_cutoff(all_events, cutoff_ts=cutoff)
 
-    assert len(filtered) == 2, (
-        f"После фильтра должно остаться 2 события, получено {len(filtered)}"
-    )
+    assert len(filtered) == 2, f"После фильтра должно остаться 2 события, получено {len(filtered)}"
 
     # Проверяем, что отсутствие учитывается только для отфильтрованных событий
     score = illness_builder.compute_team_absence_score(filtered, team_id="TEAM_A")
@@ -345,11 +339,13 @@ def test_walk_forward_no_future_data() -> None:
     base_date = datetime(2024, 1, 1, tzinfo=timezone.utc)
     dates = [base_date + timedelta(days=i) for i in range(90)]
 
-    df = pd.DataFrame({
-        "event_date": dates,
-        "odds": [2.0 + i * 0.01 for i in range(90)],
-        "result": [1 if i % 2 == 0 else 0 for i in range(90)],
-    })
+    df = pd.DataFrame(
+        {
+            "event_date": dates,
+            "odds": [2.0 + i * 0.01 for i in range(90)],
+            "result": [1 if i % 2 == 0 else 0 for i in range(90)],
+        }
+    )
 
     # Walk-forward разбивка: 60 train / 30 test
     train_size = 60
@@ -369,6 +365,4 @@ def test_walk_forward_no_future_data() -> None:
     test_dates = set(test_df["event_date"].dt.date)
     intersection = train_dates & test_dates
 
-    assert len(intersection) == 0, (
-        f"Пересечение дат train и test фолдов: {intersection}"
-    )
+    assert len(intersection) == 0, f"Пересечение дат train и test фолдов: {intersection}"

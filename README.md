@@ -79,6 +79,347 @@ pytest -m unit              # Только юнит-тесты
 pytest --cov=src            # С покрытием кода
 ```
 
+### 5. Historical value model
+
+Модель обучается на исторических CSV в формате football-data.co.uk, калибрует
+рыночные вероятности по прошлым матчам и проверяет paper-trading сигналы на
+walk-forward окнах, включая последние 7 и 30 дней.
+
+```bash
+uv run --extra dev python -m src.models.run_historical_value_model \
+  --input data/raw/football_data/E0/2425/data.csv \
+  --output-dir data/reports \
+  --bookmaker-prefix B365 \
+  --min-edge-pct 2.0 \
+  --min-signal-probability 0.45
+```
+
+Результаты сохраняются в `historical_value_model_report.json` и
+`historical_value_model_report.md`. Это исследовательский baseline, не гарантия
+прибыльности и не механизм реальных ставок.
+
+Чтобы получить Telegram-ready paper-сигналы по текущим/ручным линиям, передайте
+отдельный CSV с колонками `Date`, `HomeTeam`, `AwayTeam`, `B365H`, `B365D`,
+`B365A`:
+
+```bash
+uv run --extra dev python -m src.models.run_historical_value_model \
+  --input data/raw/football_data/E0/2425/data.csv \
+  --upcoming-input data/manual/upcoming_odds.csv \
+  --output-dir data/reports \
+  --min-edge-pct 2.0 \
+  --min-signal-probability 0.45 \
+  --consensus \
+  --telegram-payload
+```
+
+Историю можно собрать сразу по нескольким лигам football-data.co.uk без ручной
+подготовки файлов:
+
+```bash
+uv run --extra dev python -m src.models.run_historical_value_model \
+  --download-football-data \
+  --leagues E0,SP1,D1,I1,F1 \
+  --seasons 2122,2223,2324,2425,2526 \
+  --upcoming-input data/manual/upcoming_odds.csv \
+  --output-dir data/reports \
+  --consensus \
+  --telegram-payload
+```
+
+С флагом `--consensus` сигнал попадёт в Telegram payload только если две
+независимые модели согласны по исходу:
+
+- historical market calibration;
+- Poisson team-strength model по голам и силе команд.
+
+Команда сохранит `consensus_signals_YYYYMMDD.json` и dry-run Telegram payload.
+По умолчанию включён quality gate: если validation на последних 30 днях не даёт
+минимальный win-rate/ROI/размер выборки, список сигналов будет пустым, а причина
+сохранится в `consensus_quality_gate.json`.
+
+Для цели "меньше сигналов, но выше процент сбывания" включайте строгий профиль:
+
+```bash
+uv run --extra dev python -m src.models.run_historical_value_model \
+  --download-football-data \
+  --leagues E0,SP1,D1,I1,F1 \
+  --seasons 2122,2223,2324,2425,2526 \
+  --upcoming-input data/manual/upcoming_odds.csv \
+  --output-dir data/reports \
+  --consensus \
+  --high-hit-mode \
+  --telegram-payload
+```
+
+`--high-hit-mode` поднимает минимальную вероятность сигнала до 58%, требует
+минимум 55% win-rate на свежем validation-окне и ограничивает входные
+коэффициенты сверху `1.85` через `--max-entry-odds`. Такой режим специально
+может возвращать пустой список: это означает, что на текущих данных нет
+достаточно сильного сигнала для Telegram.
+
+В безопасном `run_signal_pipeline` дополнительно включён
+`--auto-high-hit-profile`: перед доставкой он перебирает исторические пороги
+`min_probability / max_odds / min_edge`, выбирает профиль с целевым hit-rate
+на walk-forward данных и сохраняет `high_hit_profile_report.json`. Если
+`--require-auto-high-hit-profile` включён и ни один профиль не достиг цели,
+доставка блокируется. Цель можно менять флагами `--target-hit-rate` и
+`--min-profile-bets`.
+
+Чтобы брать предстоящие матчи и реальные коэффициенты напрямую из The Odds API,
+используйте безопасный pipeline: он сначала строит свежий probability benchmark,
+закрывает старые open-сигналы результатами из football-data, а потом запускает
+live/current сигналы с model-quality и ledger-quality gates:
+
+```bash
+uv run --extra dev python -m src.models.run_signal_pipeline \
+  --leagues E0,SP1,D1,I1,F1 \
+  --seasons 2122,2223,2324,2425,2526 \
+  --live-odds \
+  --live-sport-keys soccer_epl,soccer_spain_la_liga,soccer_germany_bundesliga \
+  --odds-regions eu,uk \
+  --preferred-bookmakers bet365,pinnacle \
+  --output-dir data/reports \
+  --ledger-path data/core/paper_signal_ledger.json \
+  --min-ledger-settled 20 \
+  --min-ledger-win-rate 0.55 \
+  --min-ledger-roi-pct 0.0 \
+  --telegram-payload
+```
+
+Pipeline сохраняет `model_probability_benchmark.json`, `football_data_combined.csv`,
+raw live odds, upcoming CSV, quality-gate отчёты, сигналы и ledger. По умолчанию
+он также вызывает settlement перед новой доставкой, чтобы `ledger-quality gate`
+смотрел на уже закрытые исходы. Отчёт settlement сохраняется в
+`signal_ledger_settlement_report.json`. Для исследовательских прогонов settlement
+можно выключить флагом `--no-settle-ledger` или указать отдельный файл
+результатов через `--settle-results-input`. Для реальной отправки замените
+`--telegram-payload` на `--send-telegram`; без этого создаётся только dry-run
+payload.
+
+Если платный/live API не нужен, можно складывать бесплатные источники в inbox
+`data/staging/free_sources/`: CSV/JSON из ручных таблиц, Telegram export JSON,
+Discord JSONL/NDJSON или обычные TXT-блоки из каналов и календарей событий.
+Для структурированных файлов поддерживаются колонки `date`, `home_team`,
+`away_team`, `home_odds`, `draw_odds`, `away_odds` или уже football-data-имена
+`Date`, `HomeTeam`, `AwayTeam`, `B365H`, `B365D`, `B365A`. Дополнительно можно
+передать `source_channel`, `bookmaker`, `source_event_id`.
+
+Для сырых сообщений достаточно блока вида:
+
+```text
+29/05/2026
+Arsenal vs Chelsea
+1X2: 1.90 3.40 4.20
+```
+
+```bash
+uv run --extra dev python -m src.models.run_signal_pipeline \
+  --leagues E0 \
+  --seasons 2122,2223,2324,2425,2526 \
+  --free-source-inbox data/staging/free_sources \
+  --production-dixon-coles \
+  --output-dir data/reports \
+  --ledger-path data/core/paper_signal_ledger.json \
+  --telegram-payload
+```
+
+Загрузчик нормализует эти строки в общий формат, объединяет их с ручным
+`--upcoming-input` или live odds, сохраняет `free_source_inbox_report.json` и
+дальше прогоняет тот же quality-gated signal/ledger/Telegram контур.
+Если источник публичный и не содержит приватных сообщений, такие `.csv`,
+`.json`, `.jsonl`, `.ndjson` и `.txt` файлы можно коммитить в
+`data/staging/free_sources/`, чтобы scheduled workflow видел их без API.
+Для автоматического обновления inbox без ручного коммита добавьте публичные URL
+или локальные exports в `configs/free_sources.yaml`; scheduled workflow перед
+сканированием запустит `src.ingest.run_free_source_ingest`, сложит свежие файлы
+в `data/staging/free_sources/` и сохранит `free_source_ingest_report.json`.
+
+Каждый найденный сигнал записывается в `paper_signal_ledger.json`. Повторный
+запуск с тем же `signal_id` не отправит дубль в Telegram; для отладки это можно
+переопределить флагом `--allow-duplicate-signals`. Ledger хранит open/settled
+статусы, P&L, CLV и summary-метрики, чтобы проверять реальный процент
+сбывания после завершения матчей.
+
+`--require-ledger-quality` включает предохранитель на реальной истории уже
+доставленных сигналов. Пока закрыто меньше `--min-ledger-settled` сигналов,
+работает warmup-режим; после накопления выборки Telegram delivery блокируется,
+если фактические `win_rate` или `roi_pct` ниже заданных порогов. Отчёт
+сохраняется в `ledger_delivery_quality_gate.json`.
+
+`--require-model-quality` использует последний
+`model_probability_benchmark.json` как допуск моделей. Для `--consensus` по
+умолчанию проверяются именно модели текущей стратегии:
+`historical_calibration` и `poisson_team_strength`; с `--model-quality-mode all`
+обе должны побеждать `market_implied` по Brier/log loss на свежем
+walk-forward окне. Если нужно исследовать другой набор, используйте
+`--model-quality-candidates historical_calibration,dixon_coles_time_decay` и
+`--model-quality-mode any|all`. Для исследовательских прогонов можно поставить
+`--model-quality-scope overall`, но для бота лучше держать свежую проверку.
+Отчёт сохраняется в `model_delivery_quality_gate.json`.
+
+Когда матчи завершились, ledger можно закрыть результатами из football-data CSV:
+
+```bash
+uv run --extra dev python -m src.models.settle_signal_ledger \
+  --ledger-path data/core/paper_signal_ledger.json \
+  --results-input data/reports/football_data_combined.csv
+```
+
+После этого summary внутри ledger покажет фактические `win_rate`, `roi_pct`,
+число открытых и закрытых сигналов.
+
+Перед допуском модели в Telegram полезно сравнить качество вероятностей на
+walk-forward окнах. Benchmark показывает Brier score, log loss и top-1 accuracy
+для market baseline, historical calibration, Poisson и Dixon-Coles/time-decay:
+
+```bash
+uv run --extra dev python -m src.models.run_model_benchmark \
+  --download-football-data \
+  --leagues E0,SP1,D1,I1,F1 \
+  --seasons 2122,2223,2324,2425,2526 \
+  --output-dir data/reports \
+  --min-train-matches 120 \
+  --dixon-coles-max-iterations 80
+```
+
+Сохраняются `model_probability_benchmark.json` и
+`model_probability_benchmark.md`. Для точности ниже лучше: модель должна
+побеждать рынок по Brier/log loss на walk-forward данных, иначе её нельзя
+считать преимуществом для Telegram-сигналов.
+
+### Production Dixon-Coles model
+
+Для настоящего value betting добавлен production-слой модели, независимый от
+рыночного edge:
+
+- `src/models/dixon_coles.py` — Dixon-Coles параметры, time decay,
+  `partial_fit`, `predict_1x2`, `predict_ou`, `predict_btts`, `dataset_hash`.
+- `src/models/calibrator.py` — multiclass Platt-style калибровка вероятностей.
+- `src/models/model_registry.py` — версии моделей в `data/models/`, metadata и
+  promotion в production; рядом с моделью сохраняется `calibration_<model_id>.pkl`.
+- `src/models/trainer.py` и `src/models/run_daily_trainer.py` — ежедневное
+  обучение/дообучение и leakage-free OOS Brier validation: validation-модель
+  обучается только на матчах до holdout-окна, а production-модель после этого
+  обучается на полном cutoff-наборе.
+- `src/models/predictor.py` — сравнение `model_prob` против bookmaker odds и
+  devigged market probability: это уже model value, а не арбитраж.
+
+Пример обучения из football-data:
+
+```bash
+uv run --extra dev python -m src.models.run_daily_trainer \
+  --league EPL \
+  --download-football-data \
+  --football-data-leagues E0 \
+  --seasons 2122,2223,2324,2425,2526 \
+  --model-dir data/models \
+  --output-dir data/reports
+```
+
+Альтернатива из ветки `admiring-thompson`, оставленная в основном контуре:
+OpenFootball GitHub raw. Это бесплатные реальные результаты матчей без API-ключа
+и без букмекерских котировок, поэтому источник подходит для обучения
+Dixon-Coles и закрытия paper ledger, но не заменяет live/upcoming odds:
+
+```bash
+uv run --extra dev python -m src.models.run_daily_trainer \
+  --league EPL \
+  --download-openfootball \
+  --openfootball-leagues EPL \
+  --openfootball-seasons 2021-22,2022-23,2023-24,2024-25 \
+  --model-dir data/models \
+  --output-dir data/reports
+```
+
+`src/ingest/openfootball.py` сохраняет кэш в `data/raw/openfootball/` и пишет
+совместимый `data/reports/openfootball_combined.csv` с колонками
+`Date/HomeTeam/AwayTeam/FTHG/FTAG/FTR`. В `run_signal_pipeline` можно включить
+обучение production-модели от OpenFootball через
+`--production-train-openfootball`; сам benchmark рынка всё ещё использует
+football-data, потому что там есть historical odds.
+
+Модель сохраняет `.pkl` и `.meta.json` с `model_id`, `trained_on`,
+`dataset_hash`, `brier_score`, статусом версии, числом матчей и ссылкой на
+calibration sidecar. В signal layer используется `ModelValuePredictor` с
+загруженным calibrator: сигнал допустим только когда откалиброванный
+`model_prob` даёт `edge_vs_fair` выше порога и проходит минимальную уверенность.
+
+Чтобы live/current pipeline использовал production Dixon-Coles вместо
+рыночной calibration/consensus логики, добавьте флаг `--production-dixon-coles`:
+
+```bash
+uv run --extra dev python -m src.models.run_signal_pipeline \
+  --leagues E0 \
+  --seasons 2122,2223,2324,2425,2526 \
+  --live-odds \
+  --live-sport-keys soccer_epl \
+  --production-dixon-coles \
+  --production-model-dir data/models \
+  --production-league EPL \
+  --telegram-payload
+```
+
+В этом режиме сигнал строится как `model_prob - fair_market_probability`, а в
+payload/ledger попадает `model_id`, `market_probability`,
+`fair_market_probability`, `edge_vs_market_pct`, `edge_vs_fair_pct` и
+`paper_stake_units`. Размер бумажной ставки считается консервативным fractional
+Kelly от откалиброванной вероятности и ограничен сверху, чтобы даже сильный
+edge не разгонял paper exposure.
+По умолчанию `run_signal_pipeline` перед production-сигналами также запускает
+`run_daily_trainer` на свежем `football_data_combined.csv`; это можно отключить
+через `--no-train-production-model`, если в `data/models` уже лежит нужная
+production-версия. Trainer промоутит модель только если она проходит абсолютный
+OOS Brier gate `--max-brier-score` (по умолчанию `0.60`) и улучшает текущую
+production-версию; иначе версия сохраняется как `candidate` и не используется
+для Telegram-сигналов. Если production-версии нет, signal step не падает без
+объяснения: он сохраняет `production_model_quality_gate.json` с причиной
+`no_promoted_production_model` и отдаёт пустой список сигналов.
+
+Для реальной отправки в Telegram нужны `TELEGRAM_BOT_TOKEN` и
+`TELEGRAM_CHAT_ID` в `.env`, а также явный флаг `--send-telegram`. Без него
+создаётся только dry-run payload для проверки текста сообщения.
+
+Для быстрой офлайн-проверки полного дневного контура без API и без реального
+Telegram можно запустить smoke runner:
+
+```bash
+uv run --extra dev python -m src.models.run_daily_bot_smoke \
+  --output-dir data/reports/smoke
+```
+
+Он создаёт synthetic history/upcoming fixtures, обучает модель, генерирует
+paper-сигнал с `paper_stake_units`, предварительно закрывает старый open-сигнал
+по synthetic результатам, пишет `paper_signal_ledger.json` и сохраняет dry-run
+Telegram payload. Это быстрый sanity check перед включением scheduled delivery.
+
+### GitHub Actions automation
+
+В репозитории есть четыре workflow:
+
+- `CI` — на каждый push/PR проверяет тесты, типы и форматирование.
+- `Daily Model Trainer` — ежедневно в 06:00 UTC обучает/промоутит
+  Dixon-Coles production-модель; по умолчанию берёт OpenFootball GitHub raw,
+  а football-data можно выбрать вручную через `history_source=football-data`.
+- `Model Benchmark` — раз в неделю и вручную строит walk-forward benchmark на
+  football-data и сохраняет отчёты как artifact.
+- `Live Signal Pipeline` — ежедневно запускает dry-run на live odds, если в
+  GitHub Secrets задан `THE_ODDS_API_KEY`, или на файлах
+  `data/staging/free_sources/*.csv|*.json|*.jsonl|*.ndjson|*.txt`, если
+  API-ключа нет.
+
+Для реальной доставки из GitHub Actions добавьте `TELEGRAM_BOT_TOKEN` и
+`TELEGRAM_CHAT_ID`; `THE_ODDS_API_KEY` нужен только для live odds, а free-source
+inbox может работать без него. Затем запустите `Live Signal Pipeline` вручную с
+`send_telegram=true`. Scheduled-запуск по умолчанию остаётся dry-run: он
+сохраняет артефакты и ledger, но не отправляет сообщения без явного ручного
+разрешения. Чтобы бот действительно отправлял сигналы сам по расписанию,
+добавьте Repository Variable `SCHEDULED_SEND_TELEGRAM=true`; workflow всё равно
+потребует Telegram secrets и продолжит писать paper ledger перед отправкой.
+Production-модели, calibration sidecar, `paper_signal_ledger.json` и ключевые
+quality-gate отчёты коммитятся обратно в репозиторий, поэтому следующий
+scheduled run стартует с накопленной памятью, а не с пустого checkout.
+
 ---
 
 ## Структура проекта
@@ -88,7 +429,8 @@ bet/
 ├── src/                        # Основной исходный код
 │   ├── ingest/                 # Загрузка данных из источников
 │   │   ├── odds_api.py         # Клиент The Odds API
-│   │   └── football_data_co_uk.py  # Исторические результаты
+│   │   ├── football_data_co_uk.py  # Исторические результаты
+│   │   └── openfootball.py     # Бесплатные реальные результаты с GitHub raw
 │   ├── normalize/              # Нормализация и девиггирование котировок
 │   ├── features/               # Инженерия признаков
 │   │   └── illness_features.py # Признаки травм/дисквалификаций (с защитой от look-ahead bias)

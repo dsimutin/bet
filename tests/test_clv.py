@@ -20,7 +20,6 @@ import pytest
 
 from src.features.clv_features import CLVAnalyzer, CLVRecord
 
-
 # ---------------------------------------------------------------------------
 # Фикстуры
 # ---------------------------------------------------------------------------
@@ -98,9 +97,7 @@ def test_clv_positive_when_entry_better_than_close(analyzer: CLVAnalyzer) -> Non
 
     # Проверяем приближённое значение
     expected_clv = (entry_odds / closing_odds - 1) * 100
-    assert abs(clv - expected_clv) < 1e-10, (
-        f"CLV={clv:.6f}%, ожидалось {expected_clv:.6f}%"
-    )
+    assert abs(clv - expected_clv) < 1e-10, f"CLV={clv:.6f}%, ожидалось {expected_clv:.6f}%"
 
     # Метод is_positive должен вернуть True
     assert analyzer.is_positive(clv) is True
@@ -148,9 +145,7 @@ def test_clv_zero_when_equal(analyzer: CLVAnalyzer) -> None:
     odds = 2.00
     clv = analyzer.compute_clv(odds, odds)
 
-    assert abs(clv) < 1e-10, (
-        f"Ожидался CLV ≈ 0.0 при entry=closing={odds}, получено {clv}"
-    )
+    assert abs(clv) < 1e-10, f"Ожидался CLV ≈ 0.0 при entry=closing={odds}, получено {clv}"
 
 
 # ---------------------------------------------------------------------------
@@ -167,18 +162,18 @@ def test_clv_formula(analyzer: CLVAnalyzer) -> None:
     """
     test_cases = [
         # (entry_odds, closing_odds, expected_clv)
-        (2.10, 2.00, (2.10 / 2.00 - 1) * 100),   # +5.0%
-        (1.90, 2.10, (1.90 / 2.10 - 1) * 100),   # ≈ -9.52%
-        (3.00, 3.00, 0.0),                         # 0.0%
-        (2.50, 2.20, (2.50 / 2.20 - 1) * 100),   # ≈ +13.64%
-        (1.50, 1.60, (1.50 / 1.60 - 1) * 100),   # ≈ -6.25%
+        (2.10, 2.00, (2.10 / 2.00 - 1) * 100),  # +5.0%
+        (1.90, 2.10, (1.90 / 2.10 - 1) * 100),  # ≈ -9.52%
+        (3.00, 3.00, 0.0),  # 0.0%
+        (2.50, 2.20, (2.50 / 2.20 - 1) * 100),  # ≈ +13.64%
+        (1.50, 1.60, (1.50 / 1.60 - 1) * 100),  # ≈ -6.25%
     ]
 
     for entry, closing, expected in test_cases:
         computed = analyzer.compute_clv(entry, closing)
-        assert abs(computed - expected) < 1e-10, (
-            f"CLV({entry}, {closing}): вычислено {computed:.6f}%, ожидалось {expected:.6f}%"
-        )
+        assert (
+            abs(computed - expected) < 1e-10
+        ), f"CLV({entry}, {closing}): вычислено {computed:.6f}%, ожидалось {expected:.6f}%"
 
 
 # ---------------------------------------------------------------------------
@@ -193,11 +188,13 @@ def test_clv_batch_compute(analyzer: CLVAnalyzer) -> None:
     Ожидаемые добавленные колонки: clv_pct, is_positive_clv.
     Проверяет корректность значений для каждой строки.
     """
-    df = pd.DataFrame({
-        "event_id": ["E1", "E2", "E3", "E4"],
-        "entry_odds":   [2.10, 1.85, 2.00, 3.00],
-        "closing_odds": [1.95, 2.05, 2.00, 2.80],
-    })
+    df = pd.DataFrame(
+        {
+            "event_id": ["E1", "E2", "E3", "E4"],
+            "entry_odds": [2.10, 1.85, 2.00, 3.00],
+            "closing_odds": [1.95, 2.05, 2.00, 2.80],
+        }
+    )
 
     result = analyzer.batch_compute(df)
 
@@ -218,9 +215,9 @@ def test_clv_batch_compute(analyzer: CLVAnalyzer) -> None:
 
     for i, expected in enumerate(expected_clv_values):
         actual = result.iloc[i]["clv_pct"]
-        assert abs(actual - expected) < 1e-10, (
-            f"Строка {i}: clv_pct={actual:.6f}%, ожидалось {expected:.6f}%"
-        )
+        assert (
+            abs(actual - expected) < 1e-10
+        ), f"Строка {i}: clv_pct={actual:.6f}%, ожидалось {expected:.6f}%"
 
     # Проверяем флаги is_positive_clv
     assert result.iloc[0]["is_positive_clv"] is True or result.iloc[0]["is_positive_clv"] == True
@@ -253,10 +250,7 @@ def test_clv_summary_stats(analyzer: CLVAnalyzer, fixed_ts: datetime) -> None:
         (1.75, 1.90),  # CLV ≈ -7.89% (отрицательный)
     ]
 
-    clv_records = [
-        _make_clv_record(entry, closing, fixed_ts)
-        for entry, closing in records_data
-    ]
+    clv_records = [_make_clv_record(entry, closing, fixed_ts) for entry, closing in records_data]
 
     # Ожидаемые значения
     expected_clv_values = [(e / c - 1) * 100 for e, c in records_data]
@@ -270,20 +264,24 @@ def test_clv_summary_stats(analyzer: CLVAnalyzer, fixed_ts: datetime) -> None:
     assert stats["n_records"] == 5, f"Ожидалось 5 записей, получено {stats['n_records']}"
 
     # Среднее CLV
-    assert abs(stats["mean_clv_pct"] - expected_mean) < 0.01, (
-        f"mean_clv_pct={stats['mean_clv_pct']:.4f}%, ожидалось {expected_mean:.4f}%"
-    )
+    assert (
+        abs(stats["mean_clv_pct"] - expected_mean) < 0.01
+    ), f"mean_clv_pct={stats['mean_clv_pct']:.4f}%, ожидалось {expected_mean:.4f}%"
 
     # Доля положительных CLV (2 из 5 = 40%)
-    assert abs(stats["positive_clv_rate"] - expected_positive_rate) < 0.01, (
-        f"positive_clv_rate={stats['positive_clv_rate']:.2f}%, ожидалось {expected_positive_rate:.2f}%"
-    )
+    assert (
+        abs(stats["positive_clv_rate"] - expected_positive_rate) < 0.01
+    ), f"positive_clv_rate={stats['positive_clv_rate']:.2f}%, ожидалось {expected_positive_rate:.2f}%"
 
     # Min и max CLV
-    assert stats["min_clv_pct"] == min(round(v, 4) for v in expected_clv_values) or \
-           abs(stats["min_clv_pct"] - min(expected_clv_values)) < 0.01
-    assert stats["max_clv_pct"] == max(round(v, 4) for v in expected_clv_values) or \
-           abs(stats["max_clv_pct"] - max(expected_clv_values)) < 0.01
+    assert (
+        stats["min_clv_pct"] == min(round(v, 4) for v in expected_clv_values)
+        or abs(stats["min_clv_pct"] - min(expected_clv_values)) < 0.01
+    )
+    assert (
+        stats["max_clv_pct"] == max(round(v, 4) for v in expected_clv_values)
+        or abs(stats["max_clv_pct"] - max(expected_clv_values)) < 0.01
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -319,16 +317,16 @@ def test_clv_significance(analyzer: CLVAnalyzer) -> None:
 
     # Тест с пограничным значением: entry == closing → CLV = 0.0
     clv_zero = analyzer.compute_clv(2.0, 2.0)
-    assert analyzer.is_positive(clv_zero, threshold=0.0) is False, (
-        "CLV=0.0% не должен считаться значимым при пороге 0.0% (strict >)"
-    )
+    assert (
+        analyzer.is_positive(clv_zero, threshold=0.0) is False
+    ), "CLV=0.0% не должен считаться значимым при пороге 0.0% (strict >)"
 
     # Тест с отрицательным CLV
     clv_negative = analyzer.compute_clv(1.85, 2.05)  # ≈ -9.76%
     assert analyzer.is_positive(clv_negative, threshold=0.0) is False
-    assert analyzer.is_positive(clv_negative, threshold=-5.0) is False, (
-        "CLV ≈ -9.76% не должен превышать порог -5.0%"
-    )
-    assert analyzer.is_positive(clv_negative, threshold=-15.0) is True, (
-        "CLV ≈ -9.76% должен превышать порог -15.0%"
-    )
+    assert (
+        analyzer.is_positive(clv_negative, threshold=-5.0) is False
+    ), "CLV ≈ -9.76% не должен превышать порог -5.0%"
+    assert (
+        analyzer.is_positive(clv_negative, threshold=-15.0) is True
+    ), "CLV ≈ -9.76% должен превышать порог -15.0%"

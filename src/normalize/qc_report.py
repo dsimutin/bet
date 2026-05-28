@@ -58,9 +58,7 @@ class DataQualityReport:
     duplicate_snapshots: int = 0
     quality_score: float = 0.0
     details: dict[str, Any] = field(default_factory=dict)
-    generated_at_utc: datetime = field(
-        default_factory=lambda: datetime.now(timezone.utc)
-    )
+    generated_at_utc: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     def __post_init__(self) -> None:
         """Проверяет корректность оценки качества после инициализации."""
@@ -164,7 +162,9 @@ class QCNormalizer:
         stale_count = stale_mask.sum()
         logger.info(
             "Проверка актуальности (порог=%.1f ч): устаревших=%d из %d",
-            max_age_hours, stale_count, len(df),
+            max_age_hours,
+            stale_count,
+            len(df),
         )
         return stale_mask
 
@@ -197,15 +197,14 @@ class QCNormalizer:
         available_keys = [c for c in key_cols if c in df.columns]
 
         if not available_keys:
-            logger.warning(
-                "Ни один из ключевых столбцов для дедупликации не найден в датафрейме"
-            )
+            logger.warning("Ни один из ключевых столбцов для дедупликации не найден в датафрейме")
             return df.iloc[0:0]  # Пустой датафрейм с той же структурой
 
         duplicates = df[df.duplicated(subset=available_keys, keep="first")]
         logger.info(
             "Проверка дубликатов: найдено %d дублирующихся записей из %d",
-            len(duplicates), len(df),
+            len(duplicates),
+            len(df),
         )
         return duplicates
 
@@ -300,9 +299,7 @@ class QCNormalizer:
             invalid_mask = ~df["odds_decimal"].apply(self.validate_decimal_odds)
             invalid_odds_count = int(invalid_mask.sum())
             details["некорректных_коэффициентов"] = invalid_odds_count
-            details["доля_корректных_коэффициентов"] = round(
-                1.0 - invalid_odds_count / total, 4
-            )
+            details["доля_корректных_коэффициентов"] = round(1.0 - invalid_odds_count / total, 4)
         else:
             details["некорректных_коэффициентов"] = None
             logger.warning("Столбец odds_decimal отсутствует в датафрейме")
@@ -312,8 +309,8 @@ class QCNormalizer:
         # ------------------------------------------------------------------
         invalid_tz_count = 0
         if "snapshot_ts_utc" in df.columns:
-            tz_mask = df["snapshot_ts_utc"].astype(str).apply(
-                lambda x: not self.validate_timezone(x)
+            tz_mask = (
+                df["snapshot_ts_utc"].astype(str).apply(lambda x: not self.validate_timezone(x))
             )
             invalid_tz_count = int(tz_mask.sum())
             details["некорректных_временных_зон"] = invalid_tz_count
@@ -376,18 +373,15 @@ class QCNormalizer:
         score_tz = 1.0 - (invalid_tz_count / total) if total > 0 else 0.0
 
         quality_score = (
-            0.40 * score_odds
-            + 0.25 * score_dedup
-            + 0.25 * score_stale
-            + 0.10 * score_tz
+            0.40 * score_odds + 0.25 * score_dedup + 0.25 * score_stale + 0.10 * score_tz
         )
         quality_score = round(max(0.0, min(1.0, quality_score)), 4)
 
         details["компоненты_оценки"] = {
             "корректность_коэффициентов": round(score_odds, 4),
-            "уникальность":               round(score_dedup, 4),
-            "актуальность":               round(score_stale, 4),
-            "временные_зоны":             round(score_tz, 4),
+            "уникальность": round(score_dedup, 4),
+            "актуальность": round(score_stale, 4),
+            "временные_зоны": round(score_tz, 4),
         }
 
         report = DataQualityReport(
@@ -403,6 +397,8 @@ class QCNormalizer:
 
         logger.info(
             "Отчёт сформирован: оценка качества=%.2f%%, валидных=%d/%d",
-            quality_score * 100, valid_records, total,
+            quality_score * 100,
+            valid_records,
+            total,
         )
         return report

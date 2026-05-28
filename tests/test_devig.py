@@ -12,7 +12,6 @@ import pytest
 
 from src.normalize.odds_normalizer import OddsNormalizer
 
-
 # ---------------------------------------------------------------------------
 # Фикстуры
 # ---------------------------------------------------------------------------
@@ -157,25 +156,25 @@ def test_devig_overround(normalizer: OddsNormalizer) -> None:
     # Рынок без маржи: 2.0/2.0 → overround = 1.0
     no_vig_odds = [2.0, 2.0]
     overround_no_vig = _compute_overround(no_vig_odds)
-    assert abs(overround_no_vig - 1.0) < 1e-10, (
-        f"Overround для рынка без маржи должен быть 1.0, получено {overround_no_vig}"
-    )
+    assert (
+        abs(overround_no_vig - 1.0) < 1e-10
+    ), f"Overround для рынка без маржи должен быть 1.0, получено {overround_no_vig}"
 
     # Рынок с ~5% маржой: 1.91/1.91 → overround ≈ 1.047
     five_pct_odds = [1.91, 1.91]
     overround_5pct = _compute_overround(five_pct_odds)
     assert overround_5pct > 1.0, "Overround должен быть > 1.0 для рынка с маржой"
-    assert 1.04 < overround_5pct < 1.06, (
-        f"Ожидался overround ≈ 1.047 для 1.91/1.91, получено {overround_5pct:.4f}"
-    )
+    assert (
+        1.04 < overround_5pct < 1.06
+    ), f"Ожидался overround ≈ 1.047 для 1.91/1.91, получено {overround_5pct:.4f}"
 
     # Рынок с высокой маржой (~10%): 1.80/1.80 → overround ≈ 1.111
     high_margin_odds = [1.80, 1.80]
     overround_high = _compute_overround(high_margin_odds)
     assert overround_high > 1.0
-    assert 1.10 < overround_high < 1.12, (
-        f"Ожидался overround ≈ 1.111 для 1.80/1.80, получено {overround_high:.4f}"
-    )
+    assert (
+        1.10 < overround_high < 1.12
+    ), f"Ожидался overround ≈ 1.111 для 1.80/1.80, получено {overround_high:.4f}"
 
 
 # ---------------------------------------------------------------------------
@@ -202,16 +201,16 @@ def test_devig_preserves_relative_probs(normalizer: OddsNormalizer) -> None:
     # Мультипликативный девиггинг
     fair_odds_mult = normalizer.devig_multiplicative(raw_odds)
     fair_probs_mult = _odds_to_probs(fair_odds_mult)
-    assert fair_probs_mult[0] > fair_probs_mult[1], (
-        "После мультипликативного девиггинга фаворит должен оставаться фаворитом"
-    )
+    assert (
+        fair_probs_mult[0] > fair_probs_mult[1]
+    ), "После мультипликативного девиггинга фаворит должен оставаться фаворитом"
 
     # Степенной девиггинг
     fair_odds_pow = normalizer.devig_power(raw_odds)
     fair_probs_pow = _odds_to_probs(fair_odds_pow)
-    assert fair_probs_pow[0] > fair_probs_pow[1], (
-        "После степенного девиггинга фаворит должен оставаться фаворитом"
-    )
+    assert (
+        fair_probs_pow[0] > fair_probs_pow[1]
+    ), "После степенного девиггинга фаворит должен оставаться фаворитом"
 
 
 # ---------------------------------------------------------------------------
@@ -231,8 +230,8 @@ def test_market_average_devigged(normalizer: OddsNormalizer) -> None:
     # Три букмекера с близкими, но разными коэффициентами для двух исходов
     book_odds = {
         "pinnacle": [2.05, 1.87],
-        "bet365":   [2.00, 1.83],
-        "betfair":  [2.10, 1.90],
+        "bet365": [2.00, 1.83],
+        "betfair": [2.10, 1.90],
     }
 
     avg_fair_odds = normalizer.market_average_devigged(book_odds)
@@ -241,9 +240,9 @@ def test_market_average_devigged(normalizer: OddsNormalizer) -> None:
 
     # Сумма вероятностей должна быть ≈ 1.0
     prob_sum = sum(1.0 / o for o in avg_fair_odds)
-    assert abs(prob_sum - 1.0) < 1e-6, (
-        f"Сумма вероятностей после усреднения: {prob_sum:.8f}, ожидалось ≈ 1.0"
-    )
+    assert (
+        abs(prob_sum - 1.0) < 1e-6
+    ), f"Сумма вероятностей после усреднения: {prob_sum:.8f}, ожидалось ≈ 1.0"
 
     # Все коэффициенты должны быть > 1.0
     for i, o in enumerate(avg_fair_odds):
@@ -270,14 +269,14 @@ def test_devig_extreme_odds(normalizer: OddsNormalizer) -> None:
 
     assert len(fair_extreme) == 2
     prob_sum_extreme = sum(1.0 / o for o in fair_extreme)
-    assert abs(prob_sum_extreme - 1.0) < 1e-9, (
-        f"Экстремальные коэффициенты: сумма вероятностей = {prob_sum_extreme}, ожидалось 1.0"
-    )
+    assert (
+        abs(prob_sum_extreme - 1.0) < 1e-9
+    ), f"Экстремальные коэффициенты: сумма вероятностей = {prob_sum_extreme}, ожидалось 1.0"
     # Фаворит с 1.02 должен иметь очень высокую вероятность
     fav_prob = 1.0 / fair_extreme[0]
-    assert fav_prob > 0.95, (
-        f"Вероятность фаворита (odds=1.02) должна быть > 95%, получено {fav_prob:.2%}"
-    )
+    assert (
+        fav_prob > 0.95
+    ), f"Вероятность фаворита (odds=1.02) должна быть > 95%, получено {fav_prob:.2%}"
 
     # Сценарий 2: почти уверенный исход в трёхисходном рынке
     near_certain_odds = [1.01, 20.0, 30.0]
@@ -285,6 +284,6 @@ def test_devig_extreme_odds(normalizer: OddsNormalizer) -> None:
 
     assert len(fair_near_certain) == 3
     prob_sum_nc = sum(1.0 / o for o in fair_near_certain)
-    assert abs(prob_sum_nc - 1.0) < 1e-9, (
-        f"Почти уверенный исход: сумма вероятностей = {prob_sum_nc}, ожидалось 1.0"
-    )
+    assert (
+        abs(prob_sum_nc - 1.0) < 1e-9
+    ), f"Почти уверенный исход: сумма вероятностей = {prob_sum_nc}, ожидалось 1.0"

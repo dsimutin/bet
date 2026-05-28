@@ -8,14 +8,29 @@ build/
 .env.*
 !.env.example
 *.pyc
+.venv/
+uv.lock
 
 # Data (raw data не коммитим, только структуру)
 data/raw/*
 data/staging/*
 data/core/*
+data/models/*
 !data/raw/.gitkeep
 !data/staging/.gitkeep
+!data/staging/free_sources/
+!data/staging/free_sources/.gitkeep
+!data/staging/free_sources/*.csv
+!data/staging/free_sources/*.json
+!data/staging/free_sources/*.jsonl
+!data/staging/free_sources/*.ndjson
+!data/staging/free_sources/*.txt
 !data/core/.gitkeep
+!data/core/paper_signal_ledger.json
+!data/models/.gitkeep
+!data/models/*.pkl
+!data/models/*.meta.json
+!data/models/calibration_*.pkl
 !data/reports/.gitkeep
 
 # Jupyter

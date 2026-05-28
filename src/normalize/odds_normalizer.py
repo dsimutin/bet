@@ -47,9 +47,7 @@ class NormalizedOdds(BaseModel):
     event_time_utc: datetime = Field(..., description="Время начала события (UTC)")
     is_live: bool = Field(False, description="Признак live-события")
     raw_source: str = Field(..., description="Источник данных: odds_api | football_data")
-    margin_pct: float | None = Field(
-        None, description="Маржа букмекера в процентах (overround)"
-    )
+    margin_pct: float | None = Field(None, description="Маржа букмекера в процентах (overround)")
     fair_odds_devigged: float | None = Field(
         None, description="Справедливый коэффициент после удаления маржи"
     )
@@ -88,6 +86,7 @@ class TeamNameNormalizer:
         else:
             # Импортируем маппинг из модуля team_names
             from src.normalize.team_names import TEAM_NAME_MAP
+
             self._map = {k.lower(): v for k, v in TEAM_NAME_MAP.items()}
 
     def normalize(self, name: str) -> str:
@@ -123,15 +122,15 @@ class OddsNormalizer:
     # Маппинг полей букмекеров football-data.co.uk на нормализованные названия
     _FDUK_BOOKMAKER_MAP: dict[str, str] = {
         "b365": "bet365",
-        "bf":   "betfair",
-        "wh":   "williamhill",
-        "ps":   "pinnacle",
-        "vc":   "vcbet",
-        "bw":   "bwin",
-        "gb":   "gamebookers",
-        "iw":   "interwetten",
-        "lb":   "ladbrokes",
-        "sb":   "sportingbet",
+        "bf": "betfair",
+        "wh": "williamhill",
+        "ps": "pinnacle",
+        "vc": "vcbet",
+        "bw": "bwin",
+        "gb": "gamebookers",
+        "iw": "interwetten",
+        "lb": "ladbrokes",
+        "sb": "sportingbet",
     }
 
     # Маппинг суффиксов исходов football-data.co.uk
@@ -181,7 +180,8 @@ class OddsNormalizer:
         fair_odds = [1.0 / p for p in fair_probs]
         logger.debug(
             "Мультипликативный девиггинг: overround=%.4f, исходов=%d",
-            overround, len(odds),
+            overround,
+            len(odds),
         )
         return fair_odds
 
@@ -213,14 +213,14 @@ class OddsNormalizer:
         lo, hi = 0.5, 5.0
         for _ in range(64):  # 64 итерации — достаточная точность
             mid = (lo + hi) / 2.0
-            adj_sum = sum(p ** mid for p in implied_probs)
+            adj_sum = sum(p**mid for p in implied_probs)
             if adj_sum > 1.0:
                 lo = mid
             else:
                 hi = mid
 
         k = (lo + hi) / 2.0
-        fair_probs = [p ** k for p in implied_probs]
+        fair_probs = [p**k for p in implied_probs]
 
         # Нормализуем для устранения численных погрешностей
         total = sum(fair_probs)
@@ -229,7 +229,8 @@ class OddsNormalizer:
         fair_odds = [1.0 / p for p in fair_probs]
         logger.debug(
             "Степенной девиггинг: k=%.4f, исходов=%d",
-            k, len(odds),
+            k,
+            len(odds),
         )
         return fair_odds
 
@@ -264,7 +265,9 @@ class OddsNormalizer:
             if len(odds) != n_outcomes:
                 logger.warning(
                     "Букмекер %s: ожидалось %d исходов, получено %d — пропускаем",
-                    bookmaker, n_outcomes, len(odds),
+                    bookmaker,
+                    n_outcomes,
+                    len(odds),
                 )
                 continue
             fair = self.devig_multiplicative(odds)
@@ -277,8 +280,7 @@ class OddsNormalizer:
 
         # Усредняем вероятности по букмекерам
         avg_probs = [
-            sum(row[i] for row in all_fair_probs) / len(all_fair_probs)
-            for i in range(n_outcomes)
+            sum(row[i] for row in all_fair_probs) / len(all_fair_probs) for i in range(n_outcomes)
         ]
 
         # Нормализуем и конвертируем в коэффициенты
@@ -287,7 +289,8 @@ class OddsNormalizer:
 
         logger.debug(
             "Усреднение по %d букмекерам, %d исходам",
-            len(all_fair_probs), n_outcomes,
+            len(all_fair_probs),
+            n_outcomes,
         )
         return avg_odds
 
@@ -329,18 +332,14 @@ class OddsNormalizer:
             try:
                 event_time_raw = event.get("commence_time", "")
                 if isinstance(event_time_raw, str):
-                    event_time_utc = datetime.fromisoformat(
-                        event_time_raw.replace("Z", "+00:00")
-                    )
+                    event_time_utc = datetime.fromisoformat(event_time_raw.replace("Z", "+00:00"))
                 else:
                     event_time_utc = event_time_raw
                 if event_time_utc.tzinfo is None:
                     event_time_utc = event_time_utc.replace(tzinfo=timezone.utc)
                 event_time_utc = event_time_utc.astimezone(timezone.utc)
             except (ValueError, AttributeError) as exc:
-                logger.warning(
-                    "Ошибка парсинга времени события %s: %s", event_id, exc
-                )
+                logger.warning("Ошибка парсинга времени события %s: %s", event_id, exc)
                 continue
 
             bookmakers: list[dict] = event.get("bookmakers", [])
@@ -354,11 +353,7 @@ class OddsNormalizer:
                     outcomes: list[dict] = market.get("outcomes", [])
 
                     # Собираем все коэффициенты рынка для расчёта маржи
-                    all_odds = [
-                        float(o["price"])
-                        for o in outcomes
-                        if "price" in o
-                    ]
+                    all_odds = [float(o["price"]) for o in outcomes if "price" in o]
                     margin_pct: float | None = None
                     fair_odds_map: dict[str, float] = {}
 
@@ -367,15 +362,11 @@ class OddsNormalizer:
                         margin_pct = round((overround - 1.0) * 100, 4)
                         devigged = self.devig_multiplicative(all_odds)
                         fair_odds_map = {
-                            o["name"]: dv
-                            for o, dv in zip(outcomes, devigged)
-                            if "name" in o
+                            o["name"]: dv for o, dv in zip(outcomes, devigged) if "name" in o
                         }
 
                     for outcome in outcomes:
-                        selection: str = self._team_normalizer.normalize(
-                            outcome.get("name", "")
-                        )
+                        selection: str = self._team_normalizer.normalize(outcome.get("name", ""))
                         try:
                             odds_decimal = float(outcome["price"])
                         except (KeyError, ValueError, TypeError):
@@ -386,9 +377,7 @@ class OddsNormalizer:
                             continue
 
                         # Формируем составной идентификатор события
-                        normalized_event_id = (
-                            f"{sport}__{home_team}__{away_team}__{event_id}"
-                        )
+                        normalized_event_id = f"{sport}__{home_team}__{away_team}__{event_id}"
 
                         record = NormalizedOdds(
                             normalized_event_id=normalized_event_id,
@@ -409,7 +398,8 @@ class OddsNormalizer:
 
         logger.info(
             "Нормализация Odds API: входящих событий=%d, исходящих записей=%d",
-            len(raw), len(results),
+            len(raw),
+            len(results),
         )
         return results
 
@@ -443,16 +433,17 @@ class OddsNormalizer:
         # Парсим дату матча и конвертируем в UTC datetime
         match_date = row.get("match_date")
         if pd.isna(match_date) or match_date is None:
-            logger.warning(
-                "Строка без даты матча: %s vs %s — пропускаем", home_team, away_team
-            )
+            logger.warning("Строка без даты матча: %s vs %s — пропускаем", home_team, away_team)
             return []
 
         if isinstance(match_date, pd.Timestamp):
             event_time_utc = match_date.to_pydatetime().replace(tzinfo=timezone.utc)
         elif isinstance(match_date, datetime):
-            event_time_utc = match_date.replace(tzinfo=timezone.utc) \
-                if match_date.tzinfo is None else match_date.astimezone(timezone.utc)
+            event_time_utc = (
+                match_date.replace(tzinfo=timezone.utc)
+                if match_date.tzinfo is None
+                else match_date.astimezone(timezone.utc)
+            )
         else:
             try:
                 event_time_utc = datetime.fromisoformat(str(match_date)).replace(

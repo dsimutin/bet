@@ -1,0 +1,20 @@
+# Free/public upcoming-odds sources for scheduled signal runs.
+#
+# Supported formats: csv, json, jsonl, ndjson, txt.
+# Supported source types:
+#   - type: url    # public URL; no paid API key needed
+#   - type: local  # checked-in export file, relative to configs/
+#
+# Keep private Telegram/Discord exports out of git. Commit only public files.
+sources:
+  - name: example_public_text_feed
+    enabled: false
+    type: url
+    url: "https://example.com/free-football-odds.txt"
+    format: txt
+
+  - name: example_local_telegram_export
+    enabled: false
+    type: local
+    path: "../data/staging/free_sources/example_telegram_export.json"
+    format: json

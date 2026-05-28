@@ -25,10 +25,10 @@ from typing import Literal
 import pandas as pd
 from pydantic import BaseModel, Field, field_validator
 
-
 # ---------------------------------------------------------------------------
 # Конфигурация бэктеста
 # ---------------------------------------------------------------------------
+
 
 class BacktestConfig(BaseModel):
     """Параметры запуска walk-forward бэктеста."""
@@ -82,6 +82,7 @@ class BacktestConfig(BaseModel):
 # Модель сделки бэктеста
 # ---------------------------------------------------------------------------
 
+
 class BacktestTrade(BaseModel):
     """Запись об одной смоделированной ставке в рамках бэктеста."""
 
@@ -122,6 +123,7 @@ class BacktestTrade(BaseModel):
 # Метрики бэктеста
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class BacktestMetrics:
     """Сводные метрики качества стратегии по итогам бэктеста."""
@@ -160,6 +162,7 @@ class BacktestMetrics:
 # ---------------------------------------------------------------------------
 # Walk-forward бэктестер
 # ---------------------------------------------------------------------------
+
 
 class WalkForwardBacktester:
     """
@@ -336,9 +339,7 @@ class WalkForwardBacktester:
                 fair_odds_map[sel] = float(grp["odds"].median())
 
         # Присоединяем результаты к тестовому фолду
-        test_with_results = test_df.merge(
-            self.results_df, on=["event_id", "selection"], how="left"
-        )
+        test_with_results = test_df.merge(self.results_df, on=["event_id", "selection"], how="left")
 
         for _, row in test_with_results.iterrows():
             # Получаем справочный курс для исхода

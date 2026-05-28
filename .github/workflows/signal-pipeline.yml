@@ -1,0 +1,233 @@
+name: Live Signal Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      leagues:
+        description: "football-data league codes for model history"
+        default: "E0,SP1,D1,I1,F1"
+        required: true
+      seasons:
+        description: "football-data seasons for model history"
+        default: "2122,2223,2324,2425,2526"
+        required: true
+      live_sport_keys:
+        description: "The Odds API sport keys"
+        default: "soccer_epl,soccer_spain_la_liga,soccer_germany_bundesliga"
+        required: true
+      send_telegram:
+        description: "Actually send Telegram messages instead of dry-run payloads"
+        default: false
+        required: true
+        type: boolean
+      production_dixon_coles:
+        description: "Use production Dixon-Coles model value signals"
+        default: true
+        required: true
+        type: boolean
+      production_train_openfootball:
+        description: "Train production Dixon-Coles from OpenFootball results"
+        default: true
+        required: true
+        type: boolean
+  schedule:
+    - cron: "15 8 * * *"
+
+concurrency:
+  group: live-signal-pipeline
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  signals:
+    name: Benchmark-gated live signals
+    runs-on: ubuntu-latest
+    env:
+      THE_ODDS_API_KEY: ${{ secrets.THE_ODDS_API_KEY }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Ingest configured free sources
+        run: |
+          uv run --extra dev python -m src.ingest.run_free_source_ingest \
+            --config configs/free_sources.yaml \
+            --output-dir data/staging/free_sources \
+            --report-path data/reports/free_source_ingest_report.json
+
+      - name: Audit daily bot readiness
+        env:
+          SCHEDULED_SEND_TELEGRAM: ${{ vars.SCHEDULED_SEND_TELEGRAM || 'false' }}
+        run: |
+          uv run --extra dev python -m src.models.run_daily_bot_readiness \
+            --free-source-dir data/staging/free_sources \
+            --free-source-config configs/free_sources.yaml \
+            --model-dir data/models \
+            --ledger-path data/core/paper_signal_ledger.json \
+            --report-path data/reports/daily_bot_readiness.json
+
+      - name: Run live signal pipeline
+        env:
+          LEAGUES: ${{ github.event.inputs.leagues || 'E0,SP1,D1,I1,F1' }}
+          SEASONS: ${{ github.event.inputs.seasons || '2122,2223,2324,2425,2526' }}
+          LIVE_SPORT_KEYS: ${{ github.event.inputs.live_sport_keys || 'soccer_epl,soccer_spain_la_liga,soccer_germany_bundesliga' }}
+          SEND_TELEGRAM: ${{ github.event.inputs.send_telegram || 'false' }}
+          SCHEDULED_SEND_TELEGRAM: ${{ vars.SCHEDULED_SEND_TELEGRAM || 'false' }}
+          PRODUCTION_DIXON_COLES: ${{ github.event.inputs.production_dixon_coles || 'true' }}
+          PRODUCTION_TRAIN_OPENFOOTBALL: ${{ github.event.inputs.production_train_openfootball || 'true' }}
+        run: |
+          live_args=()
+          if [ -n "$THE_ODDS_API_KEY" ]; then
+            live_args=(
+              --live-odds
+              --live-sport-keys "$LIVE_SPORT_KEYS"
+              --odds-regions eu,uk
+              --preferred-bookmakers bet365,pinnacle
+            )
+          fi
+
+          free_source_args=()
+          if [ -d data/staging/free_sources ] && find data/staging/free_sources -type f \( -name '*.csv' -o -name '*.json' -o -name '*.jsonl' -o -name '*.ndjson' -o -name '*.txt' \) | grep -q .; then
+            free_source_args=(--free-source-inbox data/staging/free_sources)
+          fi
+
+          if [ ${#live_args[@]} -eq 0 ] && [ ${#free_source_args[@]} -eq 0 ]; then
+            echo "No THE_ODDS_API_KEY and no data/staging/free_sources/*.csv|*.json|*.jsonl|*.ndjson|*.txt files; skipping signal pipeline."
+            exit 0
+          fi
+
+          effective_send_telegram="$SEND_TELEGRAM"
+          if [ "${GITHUB_EVENT_NAME:-}" = "schedule" ] && [ "$SCHEDULED_SEND_TELEGRAM" = "true" ]; then
+            effective_send_telegram="true"
+          fi
+
+          delivery_arg="--telegram-payload"
+          if [ "$effective_send_telegram" = "true" ]; then
+            if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
+              echo "Telegram secrets are required when Telegram sending is enabled."
+              exit 1
+            fi
+            delivery_arg="--send-telegram"
+          fi
+
+          production_args=()
+          if [ "$PRODUCTION_DIXON_COLES" = "true" ]; then
+            production_args=(
+              --production-dixon-coles
+              --production-model-dir data/models
+              --production-league EPL
+              --train-production-model
+            )
+            if [ "$PRODUCTION_TRAIN_OPENFOOTBALL" = "true" ]; then
+              production_args+=(
+                --production-train-openfootball
+                --openfootball-leagues EPL
+                --openfootball-seasons 2021-22,2022-23,2023-24,2024-25
+              )
+            fi
+          fi
+
+          uv run --extra dev python -m src.models.run_signal_pipeline \
+            --leagues "$LEAGUES" \
+            --seasons "$SEASONS" \
+            --output-dir data/reports \
+            --ledger-path data/core/paper_signal_ledger.json \
+            --min-ledger-settled 20 \
+            --min-ledger-win-rate 0.55 \
+            --min-ledger-roi-pct 0.0 \
+            "${live_args[@]}" \
+            "${free_source_args[@]}" \
+            "${production_args[@]}" \
+            "$delivery_arg"
+
+      - name: Upload signal artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-signal-pipeline-reports
+          if-no-files-found: ignore
+          path: |
+            data/reports/model_probability_benchmark.json
+            data/reports/model_probability_benchmark.md
+            data/reports/high_hit_profile_report.json
+            data/reports/production_model_quality_gate.json
+            data/reports/signal_ledger_settlement_report.json
+            data/reports/model_delivery_quality_gate.json
+            data/reports/ledger_delivery_quality_gate.json
+            data/reports/daily_bot_readiness.json
+            data/reports/live_odds_raw.json
+            data/reports/live_odds_upcoming.csv
+            data/reports/live_odds_conversion_report.json
+            data/reports/free_source_ingest_report.json
+            data/reports/free_source_inbox_report.json
+            data/reports/*signals*.json
+            data/reports/*telegram*.json
+            data/core/paper_signal_ledger.json
+            data/models/*.pkl
+            data/models/*.meta.json
+            data/models/calibration_*.pkl
+
+      - name: Persist bot state
+        if: success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          state_files=()
+          for path in data/core/paper_signal_ledger.json \
+                      data/reports/model_probability_benchmark.json \
+                      data/reports/model_probability_benchmark.md \
+                      data/reports/production_model_quality_gate.json \
+                      data/reports/model_delivery_quality_gate.json \
+                      data/reports/ledger_delivery_quality_gate.json \
+                      data/reports/daily_bot_readiness.json \
+                      data/reports/signal_ledger_settlement_report.json \
+                      data/reports/free_source_ingest_report.json \
+                      data/reports/free_source_inbox_report.json; do
+            if [ -f "$path" ]; then
+              state_files+=("$path")
+            fi
+          done
+
+          for pattern in "data/models/*.pkl" \
+                         "data/models/*.meta.json" \
+                         "data/models/calibration_*.pkl" \
+                         "data/reports/daily_training_*.json" \
+                         "data/reports/*signals*.json" \
+                         "data/reports/*telegram*.json"; do
+            while IFS= read -r path; do
+              state_files+=("$path")
+            done < <(compgen -G "$pattern" || true)
+          done
+
+          if [ ${#state_files[@]} -eq 0 ]; then
+            echo "No bot state files found to persist."
+            exit 0
+          fi
+
+          git add -f "${state_files[@]}"
+
+          if git diff --cached --quiet; then
+            echo "No bot state changes to persist."
+            exit 0
+          fi
+
+          git commit -m "chore: persist daily bot state"
+          git pull --rebase
+          git push

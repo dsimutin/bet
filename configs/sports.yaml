@@ -7,6 +7,13 @@ sports:
     name_ru: Футбол
     active: true
     priority: 1
+    api_sport_keys:
+      - soccer_epl
+      - soccer_spain_la_liga
+      - soccer_germany_bundesliga
+      - soccer_italy_serie_a
+      - soccer_france_ligue_one
+      - soccer_uefa_champs_league
     leagues:
       EPL:
         name_ru: Английская Премьер-лига
@@ -99,6 +106,9 @@ sports:
     name_ru: Теннис
     active: true
     priority: 3
+    api_sport_keys:
+      - tennis_atp
+      - tennis_wta
     tours:
       ATP:
         name_ru: АТП Тур (мужчины)
@@ -118,6 +128,8 @@ sports:
     name_ru: Хоккей
     active: true
     priority: 2
+    api_sport_keys:
+      - icehockey_nhl
     leagues:
       KHL:
         name_ru: Kontinental Hockey League (КХЛ)
@@ -139,3 +151,15 @@ sports:
       - 1x2
       - puck_line
       - over_under
+
+settings:
+  enabled:
+    - soccer
+    - tennis
+    - hockey
+  fallback_if_no_events: true
+  min_events_required: 1
+  max_sports_per_run: 5
+  exclude_sports:
+    - horse_racing
+    - virtual_sports

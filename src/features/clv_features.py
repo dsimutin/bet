@@ -21,10 +21,10 @@ from typing import Any
 import pandas as pd
 from pydantic import BaseModel, Field, field_validator
 
-
 # ---------------------------------------------------------------------------
 # Pydantic-модель записи CLV
 # ---------------------------------------------------------------------------
+
 
 class CLVRecord(BaseModel):
     """Запись CLV для одной ставки/сигнала."""
@@ -58,6 +58,7 @@ class CLVRecord(BaseModel):
 # ---------------------------------------------------------------------------
 # Анализатор CLV
 # ---------------------------------------------------------------------------
+
 
 class CLVAnalyzer:
     """
@@ -200,7 +201,7 @@ class CLVAnalyzer:
         # Стандартное отклонение
         if n > 1:
             variance = sum((v - mean_clv) ** 2 for v in clv_values) / (n - 1)
-            std_clv = variance ** 0.5
+            std_clv = variance**0.5
         else:
             std_clv = 0.0
 

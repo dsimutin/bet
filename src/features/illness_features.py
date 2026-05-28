@@ -19,24 +19,24 @@ from typing import Literal
 import pandas as pd
 from pydantic import BaseModel, Field, field_validator
 
-
 # ---------------------------------------------------------------------------
 # Константы качества источников
 # ---------------------------------------------------------------------------
 
 # Веса качества источника: чем официальнее источник, тем выше доверие
 SOURCE_QUALITY_SCORES: dict[str, float] = {
-    "official_report": 1.0,    # Официальный пресс-релиз клуба/федерации
-    "official_vendor": 0.8,    # Верифицированный официальный поставщик данных
-    "paid_vendor": 0.6,        # Платный агрегатор (надёжный, но не официальный)
-    "news_scrape": 0.4,        # Парсинг новостных источников
-    "social_signal": 0.2,      # Социальные сети (низкое доверие, высокий шум)
+    "official_report": 1.0,  # Официальный пресс-релиз клуба/федерации
+    "official_vendor": 0.8,  # Верифицированный официальный поставщик данных
+    "paid_vendor": 0.6,  # Платный агрегатор (надёжный, но не официальный)
+    "news_scrape": 0.4,  # Парсинг новостных источников
+    "social_signal": 0.2,  # Социальные сети (низкое доверие, высокий шум)
 }
 
 
 # ---------------------------------------------------------------------------
 # Pydantic-модель события о травме/дисквалификации
 # ---------------------------------------------------------------------------
+
 
 class IllnessEvent(BaseModel):
     """Событие о статусе готовности игрока (травма, болезнь, дисквалификация)."""
@@ -83,6 +83,7 @@ class IllnessEvent(BaseModel):
 # ---------------------------------------------------------------------------
 # Построитель признаков травм
 # ---------------------------------------------------------------------------
+
 
 class IllnessFeatureBuilder:
     """
@@ -192,8 +193,7 @@ class IllnessFeatureBuilder:
         """
         # Фильтруем по команде и статусам отсутствия
         team_absent = [
-            e for e in events
-            if e.team_id == team_id and e.status in self.ABSENT_STATUSES
+            e for e in events if e.team_id == team_id and e.status in self.ABSENT_STATUSES
         ]
 
         if not team_absent:
@@ -206,14 +206,11 @@ class IllnessFeatureBuilder:
 
         # Взвешенный балл отсутствия: минуты * качество источника
         weighted_score = sum(
-            e.expected_minutes_proxy * SOURCE_QUALITY_SCORES[e.source_quality]
-            for e in team_absent
+            e.expected_minutes_proxy * SOURCE_QUALITY_SCORES[e.source_quality] for e in team_absent
         )
 
         # Минимальное качество источника среди всех отсутствующих
-        min_source_quality = min(
-            SOURCE_QUALITY_SCORES[e.source_quality] for e in team_absent
-        )
+        min_source_quality = min(SOURCE_QUALITY_SCORES[e.source_quality] for e in team_absent)
 
         # Флаг позднего изменения статуса: определяем по ближайшему к cutoff_ts событию.
         # Используем разницу между максимальным и минимальным report_ts как приближение.
@@ -222,7 +219,9 @@ class IllnessFeatureBuilder:
         latest_ts = sorted_ts[-1]
         earliest_ts = sorted_ts[0]
         time_window_seconds = (latest_ts - earliest_ts).total_seconds()
-        late_status_change_flag = time_window_seconds <= self.LATE_CHANGE_THRESHOLD_SECONDS and len(team_absent) > 1
+        late_status_change_flag = (
+            time_window_seconds <= self.LATE_CHANGE_THRESHOLD_SECONDS and len(team_absent) > 1
+        )
 
         # Если только одно событие — нет возможности определить «позднее изменение»
         # без cutoff_ts, устанавливаем False
@@ -269,8 +268,7 @@ class IllnessFeatureBuilder:
             cutoff_ts = cutoff_ts.astimezone(timezone.utc)
 
         team_absent = [
-            e for e in events
-            if e.team_id == team_id and e.status in self.ABSENT_STATUSES
+            e for e in events if e.team_id == team_id and e.status in self.ABSENT_STATUSES
         ]
 
         if not team_absent:
@@ -283,16 +281,14 @@ class IllnessFeatureBuilder:
 
         # Взвешенный балл отсутствия
         weighted_score = sum(
-            e.expected_minutes_proxy * SOURCE_QUALITY_SCORES[e.source_quality]
-            for e in team_absent
+            e.expected_minutes_proxy * SOURCE_QUALITY_SCORES[e.source_quality] for e in team_absent
         )
 
-        min_source_quality = min(
-            SOURCE_QUALITY_SCORES[e.source_quality] for e in team_absent
-        )
+        min_source_quality = min(SOURCE_QUALITY_SCORES[e.source_quality] for e in team_absent)
 
         # Точный расчёт флага: событие в окне [cutoff_ts - 4h, cutoff_ts)
         from datetime import timedelta
+
         late_window_start = cutoff_ts - timedelta(seconds=self.LATE_CHANGE_THRESHOLD_SECONDS)
         late_status_change_flag = any(
             late_window_start <= e.report_ts < cutoff_ts for e in team_absent

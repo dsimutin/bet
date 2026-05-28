@@ -24,10 +24,12 @@ from typing import Any, Literal
 import pandas as pd
 from pydantic import BaseModel, Field, field_validator
 
+from src.ingest.active_sports_resolver import ActiveSportsResolver, ActiveSportsReport
 
 # ---------------------------------------------------------------------------
 # Вспомогательная функция генерации идентификатора сигнала
 # ---------------------------------------------------------------------------
+
 
 def _make_signal_id(counter: int) -> str:
     """
@@ -50,6 +52,7 @@ def _make_signal_id(counter: int) -> str:
 # ---------------------------------------------------------------------------
 # Pydantic-модель сигнала
 # ---------------------------------------------------------------------------
+
 
 class SignalRecord(BaseModel):
     """
@@ -127,6 +130,7 @@ class SignalRecord(BaseModel):
 # Фильтр рисков
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class RiskFilter:
     """
@@ -155,6 +159,7 @@ class RiskFilter:
 # ---------------------------------------------------------------------------
 # Основной сканер сигналов
 # ---------------------------------------------------------------------------
+
 
 class SignalScanner:
     """
@@ -233,8 +238,12 @@ class SignalScanner:
             # Возвращаем пустой DataFrame с корректной схемой
             return pd.DataFrame(
                 columns=[
-                    "event_id", "bookmaker", "market_key",
-                    "selection", "odds", "book_margin_pct",
+                    "event_id",
+                    "bookmaker",
+                    "market_key",
+                    "selection",
+                    "odds",
+                    "book_margin_pct",
                 ]
             )
 
@@ -290,7 +299,9 @@ class SignalScanner:
             Edge в процентах.
         """
         if reference_fair_odds <= 0:
-            raise ValueError(f"reference_fair_odds должен быть > 0, получено: {reference_fair_odds}")
+            raise ValueError(
+                f"reference_fair_odds должен быть > 0, получено: {reference_fair_odds}"
+            )
         return (target_odds / reference_fair_odds - 1) * 100
 
     def apply_risk_filters(
@@ -532,6 +543,24 @@ class SignalScanner:
 
         return signals
 
+    def scan_active_sports(
+        self,
+        resolver: ActiveSportsResolver,
+        output_dir: Path,
+    ) -> ActiveSportsReport:
+        """
+        Resolves sports with available events before the signal scan.
+
+        This method is intentionally separate from ``scan`` so the existing
+        local CSV/parquet workflow keeps working. Online jobs can call it first,
+        then fetch/normalize odds for the returned sport keys.
+        """
+        report = resolver.resolve()
+        resolver.write_report(output_dir, report)
+        if not report.active_sports:
+            resolver.write_no_data_report(output_dir, report)
+        return report
+
     def save_signals(self, signals: list[SignalRecord], output_dir: Path) -> Path:
         """
         Сохраняет список сигналов в JSON-файл.
@@ -573,6 +602,7 @@ class SignalScanner:
 # ---------------------------------------------------------------------------
 # Бумажный журнал ставок
 # ---------------------------------------------------------------------------
+
 
 class PaperLedger:
     """
@@ -617,9 +647,9 @@ class PaperLedger:
             "confidence": signal.confidence,
             "stake_pct": stake_pct,
             "timestamp_utc": signal.timestamp_utc.isoformat(),
-            "outcome": None,          # заполняется при update_result
-            "profit_loss": None,      # заполняется при update_result
-            "status": "open",         # open / settled / void
+            "outcome": None,  # заполняется при update_result
+            "profit_loss": None,  # заполняется при update_result
+            "status": "open",  # open / settled / void
         }
 
     def update_result(self, signal_id: str, outcome: float) -> None:
@@ -676,10 +706,7 @@ class PaperLedger:
         turnover = sum(e["stake_pct"] for e in settled)
         roi_pct = (total_pnl / turnover * 100) if turnover > 0 else 0.0
 
-        mean_edge = (
-            sum(e["edge_pct"] for e in entries) / len(entries)
-            if entries else 0.0
-        )
+        mean_edge = sum(e["edge_pct"] for e in entries) / len(entries) if entries else 0.0
 
         return {
             "total_bets": len(entries),
