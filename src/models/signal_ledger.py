@@ -37,6 +37,11 @@ class SignalLedger:
         signal_id = str(signal.get("signal_id", "")).strip()
         if not signal_id:
             raise ValueError("signal_id is required")
+        if not signal.get("dataset_hash"):
+            raise ValueError(
+                f"dataset_hash is required (signal_id={signal_id}); "
+                "signals without a hash are considered invalid per anti-leakage rules"
+            )
         if signal_id in self._entries:
             return False
 
@@ -219,7 +224,7 @@ class SignalLedger:
 
     def _is_delivered_status(self, entry: dict[str, Any]) -> bool:
         status = entry.get("delivery_status")
-        return status in {"dry_run", "sent"} or status is None
+        return status in {"dry_run", "sent"}
 
     def save(self, path: Path) -> Path:
         path.parent.mkdir(parents=True, exist_ok=True)

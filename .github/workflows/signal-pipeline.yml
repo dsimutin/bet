@@ -44,10 +44,6 @@ jobs:
   signals:
     name: Benchmark-gated live signals
     runs-on: ubuntu-latest
-    env:
-      THE_ODDS_API_KEY: ${{ secrets.THE_ODDS_API_KEY }}
-      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
 
     steps:
       - name: Check out repository
@@ -84,6 +80,9 @@ jobs:
 
       - name: Run live signal pipeline
         env:
+          THE_ODDS_API_KEY: ${{ secrets.THE_ODDS_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           LEAGUES: ${{ github.event.inputs.leagues || 'E0,SP1,D1,I1,F1' }}
           SEASONS: ${{ github.event.inputs.seasons || '2122,2223,2324,2425,2526' }}
           LIVE_SPORT_KEYS: ${{ github.event.inputs.live_sport_keys || 'soccer_epl,soccer_spain_la_liga,soccer_germany_bundesliga' }}

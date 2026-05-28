@@ -273,10 +273,19 @@ class FreeSourceMessageParser:
         values = [
             float(match.group("odds").replace(",", ".")) for match in self._ODDS_RE.finditer(text)
         ]
-        odds = [value for value in values if 1.01 <= value <= 100.0]
+        # Filter to plausible 1X2 individual odds (1.05–25.0).
+        # Values like "29" from dates or "2" from "1X2:" label notation are kept only if in range.
+        odds = [value for value in values if 1.05 <= value <= 25.0]
         if len(odds) < 3:
             return None
-        return odds[-3], odds[-2], odds[-1]
+        # Scan consecutive triplets for a realistic overround (90%–120%).
+        # First valid triplet handles both front-padded dates and tail-padded noise.
+        for i in range(len(odds) - 2):
+            h, d, a = odds[i], odds[i + 1], odds[i + 2]
+            implied_sum = 1.0 / h + 1.0 / d + 1.0 / a
+            if 0.90 < implied_sum < 1.20:
+                return h, d, a
+        return None
 
     def _find_date(self, text: str) -> str:
         match = self._DATE_RE.search(text)

@@ -14,6 +14,7 @@ boosting once the data layer is stable.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timedelta, timezone
@@ -293,6 +294,12 @@ class HistoricalValueModel:
         self.fit(history)
         signals: list[dict[str, Any]] = []
         generated_at = datetime.now(timezone.utc).isoformat()
+        history_hash = "sha256:" + hashlib.sha256(
+            history[["match_date", "home_team", "away_team"]]
+            .astype(str)
+            .to_csv(index=False)
+            .encode()
+        ).hexdigest()
 
         for _, row in candidates.iterrows():
             predictions = [
@@ -304,7 +311,9 @@ class HistoricalValueModel:
             ]
             predictions = sorted(predictions, key=lambda item: item.edge_pct, reverse=True)
             for prediction in predictions[: self.config.max_bets_per_match]:
-                signals.append(self._prediction_to_signal(prediction, generated_at))
+                sig = self._prediction_to_signal(prediction, generated_at)
+                sig["dataset_hash"] = history_hash
+                signals.append(sig)
 
         return sorted(signals, key=lambda item: item["edge_pct"], reverse=True)[:max_signals]
 

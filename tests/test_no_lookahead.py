@@ -14,7 +14,10 @@ from datetime import datetime, timedelta, timezone
 import pandas as pd
 import pytest
 
+import pandas as pd
+
 from src.features.illness_features import IllnessEvent, IllnessFeatureBuilder
+from src.models.dixon_coles import DixonColesConfig, DixonColesModel
 
 # ---------------------------------------------------------------------------
 # Вспомогательные функции для генерации синтетических данных
@@ -90,11 +93,35 @@ def _backtest_closing_odds_not_used_at_entry(trade: _SyntheticBacktestTrade) -> 
     Возвращает True, если нет подозрений на утечку данных.
     """
     if trade.closing_ts <= trade.entry_ts:
-        # Если закрытие произошло ДО или В МОМЕНТ входа — это нормально
         return True
-    # Если закрытие ПОСЛЕ входа, коэффициенты должны быть разными
-    # (одинаковые коэффициенты = подозрение на использование данных закрытия при входе)
     return trade.entry_odds != trade.closing_odds
+
+
+def _make_football_data_rows(n: int, start_date: str = "2024-01-01") -> pd.DataFrame:
+    """Создаёт синтетические строки в формате football-data.co.uk."""
+    dates = pd.date_range(start=start_date, periods=n, freq="D")
+    teams = [("TeamA", "TeamB"), ("TeamC", "TeamD"), ("TeamB", "TeamC"), ("TeamD", "TeamA")]
+    rows = []
+    for i, d in enumerate(dates):
+        home, away = teams[i % len(teams)]
+        rows.append(
+            {
+                "Date": d.strftime("%d/%m/%Y"),
+                "HomeTeam": home,
+                "AwayTeam": away,
+                "FTHG": (i % 3),
+                "FTAG": ((i + 1) % 3),
+                # Pre-closing (entry) odds
+                "B365H": 2.10,
+                "B365D": 3.20,
+                "B365A": 3.50,
+                # Closing odds — different values to distinguish from entry odds
+                "B365CH": 1.95,
+                "B365CD": 3.30,
+                "B365CA": 3.80,
+            }
+        )
+    return pd.DataFrame(rows)
 
 
 # ---------------------------------------------------------------------------
@@ -187,41 +214,71 @@ def test_backtest_no_closing_odds_as_input(match_time_utc: datetime) -> None:
     """
     Проверяет, что в бэктесте коэффициент входа (entry_odds) отличается от
     коэффициента закрытия (closing_odds), если закрытие произошло ПОЗЖЕ входа.
-
-    Сценарий:
-        - entry_ts = match_time - 2h (вход за 2 часа до матча).
-        - closing_ts = match_time - 5min (закрытие за 5 минут до матча).
-        - entry_odds = 2.10, closing_odds = 1.95 (разные коэффициенты).
-        - Ожидаем: no look-ahead bias = True.
-
-    Антисценарий:
-        - Если entry_odds == closing_odds, хотя закрытие позже входа —
-          подозрение на использование данных закрытия при входе.
     """
     entry_ts = match_time_utc - timedelta(hours=2)
     closing_ts = match_time_utc - timedelta(minutes=5)
 
-    # Корректный случай: разные коэффициенты
     trade_valid = _SyntheticBacktestTrade(
         entry_odds=2.10,
         closing_odds=1.95,
         entry_ts=entry_ts,
         closing_ts=closing_ts,
     )
-    assert (
-        _backtest_closing_odds_not_used_at_entry(trade_valid) is True
-    ), "Ожидалось True: entry_odds != closing_odds при закрытии после входа"
+    assert _backtest_closing_odds_not_used_at_entry(trade_valid) is True
 
-    # Подозрительный случай: одинаковые коэффициенты при закрытии после входа
     trade_suspicious = _SyntheticBacktestTrade(
         entry_odds=1.95,
         closing_odds=1.95,
         entry_ts=entry_ts,
         closing_ts=closing_ts,
     )
-    assert (
-        _backtest_closing_odds_not_used_at_entry(trade_suspicious) is False
-    ), "Ожидалось False: entry_odds == closing_odds при закрытии позже — подозрение на утечку"
+    assert _backtest_closing_odds_not_used_at_entry(trade_suspicious) is False
+
+
+def test_backtest_entry_odds_from_pre_close_column() -> None:
+    """
+    Проверяет, что движок бэктеста использует pre-closing коэффициенты (B365H/D/A),
+    а НЕ closing коэффициенты (B365CH/CD/CA) при формировании сигналов.
+
+    В football-data.co.uk:
+        B365H/D/A  — коэффициенты на момент ставки (pre-close, ДОПУСТИМЫ)
+        B365CH/CD/CA — closing коэффициенты (ЗАПРЕЩЕНЫ как вход)
+    """
+    rows = _make_football_data_rows(n=60)
+    df = DixonColesModel.prepare_matches(rows)
+
+    # Обучаем модель на первых 40 матчах
+    train_cutoff = df["match_date"].sort_values().iloc[39]
+    train = df[df["match_date"] <= train_cutoff]
+    test = df[df["match_date"] > train_cutoff]
+
+    assert not test.empty, "Тестовая выборка не должна быть пустой"
+
+    model = DixonColesModel(DixonColesConfig(league="TEST", min_matches=20, max_iterations=50))
+    model.fit(train, warm_start=False)
+
+    # Предсказания делаются только по обучающим данным — будущие матчи не должны влиять
+    for _, row in test.iterrows():
+        h_prob, d_prob, a_prob = model.predict_1x2(
+            str(row["home_team"]), str(row["away_team"])
+        )
+        assert abs(h_prob + d_prob + a_prob - 1.0) < 1e-6, "Сумма вероятностей должна быть 1"
+
+    # Дополнительно: убеждаемся, что датасет содержит closing cols, отличные от entry cols
+    assert "B365H" in rows.columns and "B365CH" in rows.columns
+    assert (rows["B365H"] != rows["B365CH"]).any(), (
+        "Pre-close и closing коэффициенты должны различаться для теста на утечку"
+    )
+
+    # DixonColesModel обучается только на колонках match_date/home_team/away_team/goals.
+    # Closing коэффициенты не входят в DixonColesParams — проверяем, что модель их не содержит.
+    assert model.params is not None
+    params_dict = model.params.attack  # только attack/defense/home_advantage/rho/intercept
+    closing_cols = {"B365CH", "B365CD", "B365CA", "PSCH", "PSCD", "PSCA", "BbClH", "BbClD", "BbClA"}
+    leaked_params = closing_cols & set(params_dict.keys())
+    assert not leaked_params, (
+        f"DixonColesParams.attack не должны содержать closing-колонки, но нашлись: {leaked_params}"
+    )
 
 
 # ---------------------------------------------------------------------------

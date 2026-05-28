@@ -179,6 +179,12 @@ class OpenFootballLoader:
                 matches = round_item.get("matches", [])
                 if isinstance(matches, list):
                     yield from matches
+            return
+
+        raise ValueError(
+            f"Unknown OpenFootball payload structure — expected 'matches' or 'rounds' key, "
+            f"got: {list(payload)}"
+        )
 
     def _full_time_score(self, score: Any) -> tuple[int, int] | None:
         if not isinstance(score, dict):

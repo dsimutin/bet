@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 import pandas as pd
+import pytest
 
 from src.models.dixon_coles import DixonColesConfig, DixonColesModel
 from src.models.feature_builder import FeatureBuilder, MatchInfo
@@ -104,6 +105,39 @@ def test_no_lookahead_in_partial_fit() -> None:
 
     assert model.params is not None
     assert model.params.dataset_hash == original_hash
+
+
+def test_partial_fit_accepts_future_rows() -> None:
+    """partial_fit must incorporate genuinely new matches and update hash/n_matches."""
+    model = _model()  # trained on rounds=12, last match date 2025-01-12
+    assert model.params is not None
+    original_hash = model.params.dataset_hash
+    original_n = model.params.n_matches
+
+    # Rows AFTER training period — the day after the last training match
+    last_date = model.params.trained_on_dates[1]
+    start = last_date + timedelta(days=1)
+    future_rows = pd.DataFrame(
+        [
+            {
+                "date": start + timedelta(days=i),
+                "home_team": "Strong",
+                "away_team": "Weak",
+                "home_goals": 2,
+                "away_goals": 0,
+            }
+            for i in range(20)
+        ]
+    )
+    model.partial_fit(future_rows)
+
+    assert model.params is not None
+    assert model.params.dataset_hash != original_hash, (
+        "dataset_hash must change when new future matches are incorporated"
+    )
+    assert model.params.n_matches > original_n, (
+        "n_matches must increase after partial_fit with future data"
+    )
 
 
 def test_dataset_hash_in_output() -> None:

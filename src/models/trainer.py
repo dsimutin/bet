@@ -145,8 +145,15 @@ class DailyTrainer:
         if previous is None:
             model.fit(train, warm_start=False)
         else:
-            previous_count = previous.params.n_matches if previous.params else 0
-            model.partial_fit(train.iloc[previous_count:])
+            last_trained_date = (
+                previous.params.trained_on_dates[1] if previous.params else None
+            )
+            new_matches = (
+                train[train["match_date"] > last_trained_date]
+                if last_trained_date is not None
+                else train
+            )
+            model.partial_fit(new_matches)
         return model
 
     def _validate_oos(
@@ -174,13 +181,26 @@ class DailyTrainer:
             home_goals = int(row["home_goals"])
             away_goals = int(row["away_goals"])
             outcomes.append(0 if home_goals > away_goals else 1 if home_goals == away_goals else 2)
-        calibrator = ProbabilityCalibrator()
+
         predicted = np.asarray(probs, dtype=float)
         actual = np.asarray(outcomes)
-        calibrator.fit(predicted, actual)
-        calibrated = calibrator.calibrate(predicted)
-        return (
-            calibrator.brier_score(calibrated, actual),
-            calibrator.log_loss(calibrated, actual),
-            calibrator,
-        )
+
+        # Three-way split: first half → fit calibrator, second half → evaluate
+        # This prevents the calibrator from reporting inflated metrics on its own training data.
+        mid = max(len(predicted) // 2, 1)
+        cal_predicted, test_predicted = predicted[:mid], predicted[mid:]
+        cal_actual, test_actual = actual[:mid], actual[mid:]
+
+        calibrator = ProbabilityCalibrator()
+        calibrator.fit(cal_predicted, cal_actual)
+
+        if len(test_predicted) > 0:
+            calibrated_test = calibrator.calibrate(test_predicted)
+            brier = calibrator.brier_score(calibrated_test, test_actual)
+            ll = calibrator.log_loss(calibrated_test, test_actual)
+        else:
+            calibrated_all = calibrator.calibrate(predicted)
+            brier = calibrator.brier_score(calibrated_all, actual)
+            ll = calibrator.log_loss(calibrated_all, actual)
+
+        return brier, ll, calibrator

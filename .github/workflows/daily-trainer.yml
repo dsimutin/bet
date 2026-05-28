@@ -34,6 +34,10 @@ on:
   schedule:
     - cron: "0 6 * * *"
 
+concurrency:
+  group: model-registry
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
@@ -103,6 +107,38 @@ jobs:
             data/models/*.meta.json
             data/models/calibration_*.pkl
             data/reports/daily_training_*.json
+
+      - name: Validate model quality gate
+        run: |
+          uv run --extra dev python - <<'EOF'
+          import json, sys, pathlib, glob
+
+          meta_files = sorted(glob.glob("data/models/dc_*.meta.json"))
+          if not meta_files:
+              print("No model metadata files found — skipping quality gate.")
+              sys.exit(0)
+
+          latest = meta_files[-1]
+          meta = json.loads(pathlib.Path(latest).read_text())
+
+          converged = meta.get("converged", True)
+          brier = meta.get("brier_score")
+          status = meta.get("status", "candidate")
+
+          print(f"Model: {meta.get('model_id')}  status={status}  brier={brier}  converged={converged}")
+
+          errors = []
+          if brier is not None and float(brier) > 0.70:
+              errors.append(f"brier_score {brier:.4f} exceeds hard ceiling 0.70")
+          if converged is False:
+              errors.append("optimizer did not converge (params.converged=False)")
+
+          if errors:
+              print("Quality gate FAILED:", "; ".join(errors), file=sys.stderr)
+              sys.exit(1)
+
+          print("Quality gate passed.")
+          EOF
 
       - name: Persist model state
         if: success()

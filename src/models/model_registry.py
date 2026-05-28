@@ -82,7 +82,7 @@ class ModelRegistry:
             versions = [item for item in versions if item.status == "production"]
         if not versions:
             raise FileNotFoundError(f"No model versions found for league={league}")
-        latest = max(versions, key=lambda item: item.created_at_utc)
+        latest = max(versions, key=lambda item: datetime.fromisoformat(item.created_at_utc))
         with latest.model_path.open("rb") as fh:
             model = pickle.load(fh)
         if not isinstance(model, DixonColesModel):

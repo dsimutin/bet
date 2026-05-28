@@ -163,6 +163,7 @@ def _previous_open_signal(bookmaker_prefix: str) -> dict[str, Any]:
         "timestamp_utc": "2025-12-31T12:00:00+00:00",
         "explain_formatted": "Smoke previous signal for settlement.",
         "status": "paper",
+        "dataset_hash": "sha256:smoke_synthetic_data",
     }
 
 

@@ -17,6 +17,7 @@ def _signal(signal_id: str = "sig_1") -> dict:
         "edge_pct": 5.88,
         "timestamp_utc": "2026-05-27T12:00:00+00:00",
         "status": "paper",
+        "dataset_hash": "sha256:abc123test",
     }
 
 

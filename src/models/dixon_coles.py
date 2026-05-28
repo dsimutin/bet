@@ -8,7 +8,9 @@ for training, registry storage, calibration, and signal attribution.
 from __future__ import annotations
 
 import hashlib
+import logging
 import math
+import warnings
 from dataclasses import asdict, dataclass
 from datetime import date, datetime
 from typing import Any
@@ -16,6 +18,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 from scipy.optimize import minimize
+
+_log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -29,6 +33,7 @@ class DixonColesParams:
     trained_on_dates: tuple[date, date]
     n_matches: int
     dataset_hash: str
+    converged: bool = True
 
 
 @dataclass(frozen=True)
@@ -69,7 +74,19 @@ class DixonColesModel:
             method="L-BFGS-B",
             options={"maxiter": self.config.max_iterations, "ftol": 1e-8},
         )
-        vector = result.x if result.success else initial
+        if not result.success:
+            warnings.warn(
+                f"DixonColes optimization did not converge for league={self.config.league}: "
+                f"{result.message}",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            _log.warning(
+                "DixonColes optimization did not converge (league=%s): %s",
+                self.config.league,
+                result.message,
+            )
+        vector = result.x  # always use best-found point, not the silent-zero initial
         attack, defense, home_advantage, rho, intercept = self._unpack(vector, teams)
 
         self.params = DixonColesParams(
@@ -82,6 +99,7 @@ class DixonColesModel:
             trained_on_dates=(prepared["match_date"].min(), prepared["match_date"].max()),
             n_matches=int(len(prepared)),
             dataset_hash=dataset_hash(prepared),
+            converged=bool(result.success),
         )
         self._training_matches = prepared
 
@@ -267,9 +285,9 @@ def _tau(
     if home_goals == 0 and away_goals == 0:
         return 1.0 - home_lambda * away_lambda * rho
     if home_goals == 0 and away_goals == 1:
-        return 1.0 + home_lambda * rho
+        return 1.0 - home_lambda * rho
     if home_goals == 1 and away_goals == 0:
-        return 1.0 + away_lambda * rho
+        return 1.0 - away_lambda * rho
     if home_goals == 1 and away_goals == 1:
         return 1.0 - rho
     return 1.0

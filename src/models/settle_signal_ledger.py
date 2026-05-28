@@ -36,13 +36,42 @@ def main() -> None:
     print("Settled " f"{report['settled']} signal(s), unmatched={report['unmatched_open_signals']}")
 
 
+_CLOSING_ODDS_COLS: dict[str, tuple[str, str, str]] = {
+    "BbCl": ("BbClH", "BbClD", "BbClA"),
+    "B365C": ("B365CH", "B365CD", "B365CA"),
+    "PSC": ("PSCH", "PSCD", "PSCA"),
+}
+
+_SELECTION_IDX = {"home": 0, "draw": 1, "away": 2}
+
+
+def _pick_closing_odds(
+    row: "pd.Series[Any]",
+    selection: str,
+) -> float | None:
+    idx = _SELECTION_IDX.get(str(selection).lower())
+    if idx is None:
+        return None
+    for _, (col_h, col_d, col_a) in _CLOSING_ODDS_COLS.items():
+        cols = (col_h, col_d, col_a)
+        if all(c in row.index for c in cols):
+            val = row[cols[idx]]
+            try:
+                fval = float(val)
+                if fval > 1.0:
+                    return fval
+            except (TypeError, ValueError):
+                pass
+    return None
+
+
 def settle_ledger_from_results(
     ledger: SignalLedger,
     results: pd.DataFrame,
 ) -> dict[str, Any]:
     prepared_results = _prepare_results(results)
     result_by_match = {
-        _match_key(row["match_date"], row["home_team"], row["away_team"]): row["actual_selection"]
+        _match_key(row["match_date"], row["home_team"], row["away_team"]): row
         for _, row in prepared_results.iterrows()
     }
 
@@ -57,13 +86,15 @@ def settle_ledger_from_results(
             entry.get("home_team"),
             entry.get("away_team"),
         )
-        actual = result_by_match.get(match_key)
-        if actual is None:
+        result_row = result_by_match.get(match_key)
+        if result_row is None:
             unmatched.append(signal_id)
             continue
 
+        actual = result_row["actual_selection"]
         result: Literal["win", "loss"] = "win" if entry.get("selection") == actual else "loss"
-        ledger.update_result(signal_id, result=result)
+        closing_odds = _pick_closing_odds(result_row, entry.get("selection", ""))
+        ledger.update_result(signal_id, result=result, closing_odds=closing_odds)
         settled += 1
 
     return {
