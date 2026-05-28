@@ -1,0 +1,9 @@
+{
+  "model_id": "dc_EPL_20260528_9200b4f6_3",
+  "n_new_matches": 380,
+  "brier_score": 0.6135137349745989,
+  "log_loss": 1.02554290407278,
+  "promoted": false,
+  "dataset_hash": "sha256:9200b4f6ad108382d96451e8a5ce71c8260468001e570f5f9a035ee81b396d20",
+  "promotion_reason": "brier_score 0.613514 > max_brier_score 0.600000"
+}
