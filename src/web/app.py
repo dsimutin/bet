@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import os
 import pickle
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -17,8 +20,43 @@ from fastapi.templating import Jinja2Templates
 _ROOT = Path(__file__).parent.parent.parent
 _DATA = _ROOT / "data"
 _TEMPLATES = Path(__file__).parent / "templates"
+_log = logging.getLogger(__name__)
 
-app = FastAPI(title="Betting Analytics Dashboard", version="0.1.0")
+_tg_stop: asyncio.Event | None = None
+_tg_task: asyncio.Task | None = None
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):  # type: ignore[type-arg]
+    global _tg_stop, _tg_task
+    _tg_stop = asyncio.Event()
+    _tg_task = asyncio.create_task(_start_telegram_collector(_tg_stop))
+    yield
+    if _tg_stop:
+        _tg_stop.set()
+    if _tg_task:
+        try:
+            await asyncio.wait_for(_tg_task, timeout=5.0)
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            pass
+
+
+async def _start_telegram_collector(stop_event: asyncio.Event) -> None:
+    from src.ingest.telegram_collector import is_configured, run_collector
+    if not is_configured():
+        _log.info(
+            "Telegram collector not configured — set TELEGRAM_API_ID, "
+            "TELEGRAM_API_HASH, TELEGRAM_SESSION_STR to enable."
+        )
+        return
+    output = _DATA / "staging" / "free_sources" / "telegram_live.jsonl"
+    try:
+        await run_collector(output_path=output, stop_event=stop_event)
+    except Exception as exc:
+        _log.error("Telegram collector crashed: %s", exc, exc_info=True)
+
+
+app = FastAPI(title="Betting Analytics Dashboard", version="0.1.0", lifespan=lifespan)
 templates = Jinja2Templates(directory=str(_TEMPLATES))
 
 
@@ -104,6 +142,34 @@ def health() -> dict[str, str]:
     return {"status": "ok", "ts": datetime.now(timezone.utc).isoformat()}
 
 
+@app.get("/api/collector/status")
+def api_collector_status() -> dict[str, Any]:
+    from src.ingest.telegram_collector import is_configured
+    live_path = _DATA / "staging" / "free_sources" / "telegram_live.jsonl"
+    line_count = 0
+    last_message: str | None = None
+    if live_path.exists():
+        lines = live_path.read_text(encoding="utf-8").splitlines()
+        line_count = len(lines)
+        if lines:
+            try:
+                last = json.loads(lines[-1])
+                last_message = f"{last.get('channel','')} @ {last.get('date','')[:19]}"
+            except Exception:
+                pass
+    return {
+        "configured": is_configured(),
+        "running": _tg_task is not None and not _tg_task.done(),
+        "channels": [
+            c.strip()
+            for c in os.environ.get("TELEGRAM_CHANNELS", "").split(",")
+            if c.strip()
+        ],
+        "messages_collected": line_count,
+        "last_message": last_message,
+    }
+
+
 @app.get("/api/ledger/summary")
 def api_ledger_summary() -> dict[str, Any]:
     return _ledger_summary()
@@ -128,12 +194,22 @@ def api_readiness() -> dict[str, Any]:
 
 @app.get("/", response_class=HTMLResponse)
 def dashboard(request: Request) -> HTMLResponse:
+    from src.ingest.telegram_collector import is_configured as tg_configured
     summary = _ledger_summary()
     signals = _recent_signals(30)
     models = _model_status()
     readiness = _daily_readiness()
 
-    # derive simple stats for template
+    live_path = _DATA / "staging" / "free_sources" / "telegram_live.jsonl"
+    tg_status = {
+        "configured": tg_configured(),
+        "running": _tg_task is not None and not _tg_task.done(),
+        "messages_collected": sum(1 for _ in live_path.open(encoding="utf-8")) if live_path.exists() else 0,
+        "channels": [
+            c.strip() for c in os.environ.get("TELEGRAM_CHANNELS", "").split(",") if c.strip()
+        ],
+    }
+
     open_sigs = [s for s in signals if s.get("ledger_status") == "open"]
     settled_sigs = [s for s in signals if s.get("ledger_status") == "settled"]
     prod_model = next((m for m in models if m["status"] == "production"), None)
@@ -149,6 +225,7 @@ def dashboard(request: Request) -> HTMLResponse:
             "models": models,
             "prod_model": prod_model,
             "readiness": readiness,
+            "tg_status": tg_status,
             "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
         },
     )

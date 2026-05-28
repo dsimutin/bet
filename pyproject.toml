@@ -44,6 +44,7 @@ dependencies = [
     "fastapi>=0.111.0",
     "uvicorn[standard]>=0.29.0",
     "jinja2>=3.1.4",
+    "telethon>=1.36",
 ]
 
 [project.optional-dependencies]
