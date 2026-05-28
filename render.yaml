@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: betting-analytics
+    runtime: python
+    region: frankfurt
+    plan: free
+    buildCommand: pip install -e ".[dev]" && python scripts/bootstrap_data.py
+    startCommand: uvicorn src.web.app:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHONPATH
+        value: /opt/render/project/src
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: THE_ODDS_API_KEY
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+    disk:
+      name: data
+      mountPath: /opt/render/project/src/data
+      sizeGB: 1

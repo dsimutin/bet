@@ -18,6 +18,7 @@ data/core/*
 data/models/*
 !data/raw/.gitkeep
 !data/staging/.gitkeep
+!data/staging/*.csv
 !data/staging/free_sources/
 !data/staging/free_sources/.gitkeep
 !data/staging/free_sources/*.csv

@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Betting Analytics Dashboard</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Segoe UI',system-ui,sans-serif;background:#0f1117;color:#e2e8f0;min-height:100vh}
+  header{background:linear-gradient(135deg,#1a1f2e,#252d3d);border-bottom:1px solid #2d3748;padding:16px 24px;display:flex;align-items:center;gap:12px}
+  header h1{font-size:1.25rem;font-weight:700;color:#f7fafc}
+  header .badge{background:#2d6a4f;color:#b7e4c7;font-size:.7rem;padding:3px 8px;border-radius:999px;text-transform:uppercase;letter-spacing:.05em}
+  header .ts{margin-left:auto;font-size:.75rem;color:#718096}
+  main{padding:24px;max-width:1400px;margin:0 auto}
+  .grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px}
+  .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px}
+  @media(max-width:900px){.grid-4{grid-template-columns:1fr 1fr}.grid-2{grid-template-columns:1fr}}
+  @media(max-width:500px){.grid-4{grid-template-columns:1fr}}
+  .card{background:#1a1f2e;border:1px solid #2d3748;border-radius:10px;padding:20px}
+  .card h2{font-size:.8rem;text-transform:uppercase;letter-spacing:.08em;color:#718096;margin-bottom:12px}
+  .kpi{font-size:2rem;font-weight:700;line-height:1}
+  .kpi-sub{font-size:.78rem;color:#718096;margin-top:4px}
+  .positive{color:#48bb78}
+  .negative{color:#fc8181}
+  .neutral{color:#63b3ed}
+  .warn{color:#f6ad55}
+  table{width:100%;border-collapse:collapse;font-size:.83rem}
+  thead th{text-align:left;padding:8px 10px;border-bottom:1px solid #2d3748;color:#718096;font-weight:600;font-size:.75rem;text-transform:uppercase;letter-spacing:.06em}
+  tbody tr{border-bottom:1px solid #1e2535}
+  tbody tr:hover{background:#1e2535}
+  tbody td{padding:8px 10px;vertical-align:middle}
+  .pill{display:inline-block;font-size:.68rem;padding:2px 8px;border-radius:999px;font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+  .pill-open{background:#2a4365;color:#63b3ed}
+  .pill-settled{background:#22543d;color:#68d391}
+  .pill-win{background:#1c4532;color:#68d391}
+  .pill-loss{background:#63171b;color:#fc8181}
+  .pill-prod{background:#2c5282;color:#90cdf4}
+  .pill-cand{background:#322659;color:#b794f4}
+  .pill-arch{background:#1a202c;color:#718096}
+  .pill-conv{background:#1c4532;color:#68d391}
+  .pill-nconv{background:#63171b;color:#fc8181}
+  .model-card{padding:16px;border:1px solid #2d3748;border-radius:8px;margin-bottom:12px;background:#151923}
+  .model-id{font-size:.8rem;font-family:monospace;color:#90cdf4;margin-bottom:6px}
+  .model-metrics{display:flex;gap:16px;flex-wrap:wrap;margin-top:8px}
+  .model-metric{font-size:.78rem;color:#a0aec0}
+  .model-metric span{color:#e2e8f0;font-weight:600}
+  .section-title{font-size:.9rem;font-weight:700;color:#a0aec0;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+  .dot{width:8px;height:8px;border-radius:50%;background:#48bb78;display:inline-block}
+  .dot-red{background:#fc8181}
+  .empty{color:#718096;font-size:.85rem;padding:16px 0}
+  .readiness-ok{color:#48bb78}
+  .readiness-fail{color:#fc8181}
+  .brier-bar{display:inline-block;height:6px;background:#2d3748;border-radius:3px;width:80px;vertical-align:middle;margin-left:6px;overflow:hidden}
+  .brier-fill{height:100%;background:#63b3ed;border-radius:3px}
+</style>
+</head>
+<body>
+<header>
+  <h1>⚽ Betting Analytics</h1>
+  <span class="badge">Paper Trading</span>
+  <span class="ts">{{ generated_at }}</span>
+</header>
+<main>
+
+  <!-- KPI row -->
+  <div class="grid-4">
+    <div class="card">
+      <h2>Всего сигналов</h2>
+      <div class="kpi neutral">{{ summary.total_signals or 0 }}</div>
+      <div class="kpi-sub">{{ summary.open_signals or 0 }} открытых · {{ summary.settled_signals or 0 }} закрытых</div>
+    </div>
+    <div class="card">
+      <h2>Win Rate</h2>
+      {% set wr = (summary.win_rate or 0) * 100 %}
+      <div class="kpi {% if wr >= 50 %}positive{% elif wr > 0 %}warn{% else %}neutral{% endif %}">
+        {{ "%.1f"|format(wr) }}%
+      </div>
+      <div class="kpi-sub">по закрытым ставкам</div>
+    </div>
+    <div class="card">
+      <h2>ROI</h2>
+      {% set roi = summary.roi_pct or 0 %}
+      <div class="kpi {% if roi > 0 %}positive{% elif roi < 0 %}negative{% else %}neutral{% endif %}">
+        {% if roi > 0 %}+{% endif %}{{ "%.2f"|format(roi) }}%
+      </div>
+      <div class="kpi-sub">оборот {{ "%.2f"|format(summary.turnover_units or 0) }} ед.</div>
+    </div>
+    <div class="card">
+      <h2>P&amp;L (ед.)</h2>
+      {% set pnl = summary.pnl_units or 0 %}
+      <div class="kpi {% if pnl > 0 %}positive{% elif pnl < 0 %}negative{% else %}neutral{% endif %}">
+        {% if pnl > 0 %}+{% endif %}{{ "%.3f"|format(pnl) }}
+      </div>
+      <div class="kpi-sub">средний edge {{ "%.2f"|format((summary.mean_edge_pct or 0)) }}%</div>
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <!-- Model status -->
+    <div class="card">
+      <div class="section-title">
+        <span class="dot {% if prod_model and prod_model.converged %}{% else %}dot-red{% endif %}"></span>
+        Модели Dixon-Coles
+      </div>
+      {% if models %}
+        {% for m in models %}
+        <div class="model-card">
+          <div class="model-id">{{ m.model_id }}</div>
+          <div>
+            <span class="pill {% if m.status == 'production' %}pill-prod{% elif m.status == 'candidate' %}pill-cand{% else %}pill-arch{% endif %}">
+              {{ m.status }}
+            </span>
+            <span class="pill {% if m.converged %}pill-conv{% else %}pill-nconv{% endif %}" style="margin-left:4px">
+              {% if m.converged %}converged{% else %}not converged{% endif %}
+            </span>
+          </div>
+          <div class="model-metrics">
+            <div class="model-metric">Лига: <span>{{ m.league }}</span></div>
+            <div class="model-metric">Матчей: <span>{{ m.n_matches }}</span></div>
+            {% if m.brier_score is not none %}
+            <div class="model-metric">
+              Brier: <span>{{ "%.4f"|format(m.brier_score) }}</span>
+              <span class="brier-bar"><span class="brier-fill" style="width:{{ [m.brier_score / 0.7 * 100, 100]|min|int }}%"></span></span>
+            </div>
+            {% endif %}
+            {% if m.log_loss is not none %}
+            <div class="model-metric">Log-loss: <span>{{ "%.4f"|format(m.log_loss) }}</span></div>
+            {% endif %}
+            <div class="model-metric">
+              Обучен:
+              <span>{{ m.trained_on.start if m.trained_on else '—' }} → {{ m.trained_on.end if m.trained_on else '—' }}</span>
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      {% else %}
+        <div class="empty">Моделей пока нет. Запустите daily-trainer workflow.</div>
+      {% endif %}
+    </div>
+
+    <!-- Daily readiness -->
+    <div class="card">
+      <div class="section-title">
+        <span class="dot {% if readiness and readiness.get('overall_ready') %}{% else %}dot-red{% endif %}"></span>
+        Готовность бота
+      </div>
+      {% if readiness %}
+        {% set ready = readiness.get('overall_ready', False) %}
+        <div style="font-size:1.1rem;font-weight:700;margin-bottom:12px" class="{% if ready %}readiness-ok{% else %}readiness-fail{% endif %}">
+          {% if ready %}✓ Готов к работе{% else %}✗ Не готов{% endif %}
+        </div>
+        {% for key, val in readiness.items() %}
+          {% if key not in ('overall_ready', 'generated_at_utc', 'checks') %}
+          <div style="font-size:.8rem;margin-bottom:4px;color:#a0aec0">
+            {{ key }}: <span style="color:#e2e8f0">{{ val }}</span>
+          </div>
+          {% endif %}
+        {% endfor %}
+        {% if readiness.get('checks') %}
+        <div style="margin-top:12px">
+          {% for check_name, check in readiness.checks.items() %}
+          <div style="font-size:.78rem;padding:4px 0;border-top:1px solid #2d3748">
+            <span class="{% if check.passed %}readiness-ok{% else %}readiness-fail{% endif %}">
+              {% if check.passed %}✓{% else %}✗{% endif %}
+            </span>
+            {{ check_name }}: {{ check.reason or '' }}
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+      {% else %}
+        <div class="empty">Запустите signal-pipeline workflow для получения отчёта готовности.</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Signals table -->
+  <div class="card">
+    <div class="section-title" style="margin-bottom:16px">
+      <span class="dot"></span>
+      Последние сигналы ({{ signals|length }})
+    </div>
+    {% if signals %}
+    <div style="overflow-x:auto">
+    <table>
+      <thead>
+        <tr>
+          <th>Дата</th>
+          <th>Матч</th>
+          <th>Выбор</th>
+          <th>Котировка</th>
+          <th>Edge %</th>
+          <th>Статус</th>
+          <th>Результат</th>
+          <th>CLV %</th>
+          <th>P&L</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for sig in signals %}
+        <tr>
+          <td style="color:#718096;white-space:nowrap">{{ sig.get('event_date', sig.get('timestamp_utc','')[:10]) }}</td>
+          <td>
+            <span style="color:#e2e8f0">{{ sig.get('home_team','?') }}</span>
+            <span style="color:#718096"> vs </span>
+            <span style="color:#e2e8f0">{{ sig.get('away_team','?') }}</span>
+          </td>
+          <td>
+            {% set sel = sig.get('selection','') %}
+            <span style="color:{% if sel=='home' %}#90cdf4{% elif sel=='away' %}#b794f4{% else %}#f6ad55{% endif %}">
+              {{ {'home':'П1','draw':'X','away':'П2'}.get(sel, sel) }}
+            </span>
+          </td>
+          <td style="font-weight:600">{{ "%.2f"|format(sig.get('entry_odds', 0)) }}</td>
+          <td>
+            {% set edge = sig.get('edge_pct', 0) %}
+            <span class="{% if edge >= 5 %}positive{% elif edge >= 2 %}warn{% else %}neutral{% endif %}">
+              +{{ "%.1f"|format(edge) }}%
+            </span>
+          </td>
+          <td>
+            <span class="pill {% if sig.get('ledger_status')=='open' %}pill-open{% else %}pill-settled{% endif %}">
+              {{ sig.get('ledger_status','—') }}
+            </span>
+          </td>
+          <td>
+            {% set res = sig.get('result') %}
+            {% if res %}
+              <span class="pill {% if res=='win' %}pill-win{% else %}pill-loss{% endif %}">{{ res }}</span>
+            {% else %}
+              <span style="color:#4a5568">—</span>
+            {% endif %}
+          </td>
+          <td>
+            {% set clv = sig.get('clv_pct') %}
+            {% if clv is not none %}
+              <span class="{% if clv > 0 %}positive{% else %}negative{% endif %}">
+                {% if clv > 0 %}+{% endif %}{{ "%.2f"|format(clv) }}%
+              </span>
+            {% else %}
+              <span style="color:#4a5568">—</span>
+            {% endif %}
+          </td>
+          <td>
+            {% set pnl = sig.get('pnl_units') %}
+            {% if pnl is not none %}
+              <span class="{% if pnl > 0 %}positive{% elif pnl < 0 %}negative{% else %}neutral{% endif %}">
+                {% if pnl > 0 %}+{% endif %}{{ "%.3f"|format(pnl) }}
+              </span>
+            {% else %}
+              <span style="color:#4a5568">—</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+      <div class="empty">Сигналов пока нет. Запустите /scan-signals или signal-pipeline workflow.</div>
+    {% endif %}
+  </div>
+
+</main>
+</body>
+</html>
