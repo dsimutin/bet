@@ -32,6 +32,16 @@ on:
         type: boolean
   schedule:
     - cron: "15 8 * * *"
+  push:
+    branches:
+      - main
+      - master
+      - "integration/**"
+      - "claude/**"
+    paths:
+      - "src/**"
+      - "scripts/**"
+      - "configs/**"
 
 concurrency:
   group: live-signal-pipeline
@@ -208,8 +218,7 @@ jobs:
                          "data/models/*.meta.json" \
                          "data/models/calibration_*.pkl" \
                          "data/reports/daily_training_*.json" \
-                         "data/reports/*signals*.json" \
-                         "data/reports/*telegram*.json"; do
+                         "data/reports/*signals*.json"; do
             while IFS= read -r path; do
               state_files+=("$path")
             done < <(compgen -G "$pattern" || true)

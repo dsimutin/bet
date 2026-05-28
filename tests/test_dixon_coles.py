@@ -156,10 +156,16 @@ def test_predict_ou_and_btts_are_valid_probabilities() -> None:
 
 
 def test_feature_builder_uses_only_matches_before_cutoff() -> None:
-    model = _model()
-    features = FeatureBuilder(model, _matches()).build(
+    # Model must be trained on data that ends strictly before the cutoff.
+    cutoff = pd.Timestamp("2025-01-05T12:00:00").to_pydatetime()
+    matches_before_cutoff = _matches(rounds=4)  # 2025-01-01 through 2025-01-04
+    model_pre_cutoff = DixonColesModel(
+        DixonColesConfig(league="EPL", min_matches=12, max_iterations=80, max_goals=7)
+    )
+    model_pre_cutoff.fit(matches_before_cutoff, warm_start=False)
+    features = FeatureBuilder(model_pre_cutoff, _matches()).build(
         MatchInfo("Strong", "Weak", date(2025, 1, 10)),
-        cutoff_ts=pd.Timestamp("2025-01-05T12:00:00").to_pydatetime(),
+        cutoff_ts=cutoff,
     )
 
     assert features.home_attack > features.away_attack

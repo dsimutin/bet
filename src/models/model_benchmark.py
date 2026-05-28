@@ -11,7 +11,7 @@ from typing import Any, Mapping
 
 import pandas as pd
 
-from src.models.dixon_coles_model import DixonColesConfig, DixonColesModel
+from src.models.dixon_coles import DixonColesConfig, DixonColesModel
 from src.models.historical_value_model import HistoricalValueModel, HistoricalValueModelConfig
 from src.models.poisson_team_model import PoissonTeamModel, PoissonTeamModelConfig
 
@@ -97,8 +97,7 @@ class ProbabilityBenchmark:
         )
         dixon_coles = DixonColesModel(
             DixonColesConfig(
-                bookmaker_prefix=self.config.bookmaker_prefix,
-                min_train_matches=self.config.min_train_matches,
+                min_matches=self.config.min_train_matches,
                 max_iterations=self.config.dixon_coles_max_iterations,
             )
         )
@@ -216,7 +215,6 @@ class ProbabilityBenchmark:
 
             hist_predictions = historical.predict_match(row)
             poisson_predictions = poisson.predict_match(row)
-            dixon_coles_predictions = dixon_coles.predict_match(row)
             if len(hist_predictions) == 3:
                 market_probs = {
                     item.selection: item.market_probability for item in hist_predictions
@@ -233,13 +231,15 @@ class ProbabilityBenchmark:
                 rows_by_model["poisson_team_strength"].append(
                     self._prediction_row(poisson_probs, actual)
                 )
-            if len(dixon_coles_predictions) == 3:
-                dixon_coles_probs = {
-                    item.selection: item.probability for item in dixon_coles_predictions
-                }
-                rows_by_model["dixon_coles_time_decay"].append(
-                    self._prediction_row(dixon_coles_probs, actual)
+            try:
+                dc_h, dc_d, dc_a = dixon_coles.predict_1x2(
+                    str(row["home_team"]), str(row["away_team"])
                 )
+                rows_by_model["dixon_coles_time_decay"].append(
+                    self._prediction_row({"home": dc_h, "draw": dc_d, "away": dc_a}, actual)
+                )
+            except Exception:
+                pass
 
         return rows_by_model
 

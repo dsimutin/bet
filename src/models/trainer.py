@@ -49,6 +49,18 @@ class DailyTrainer:
     def run_on_dataframe(
         self, league: str, cutoff_date: date, matches: pd.DataFrame
     ) -> TrainingResult:
+        # Filter by league column before normalising — prevents cross-league contamination
+        # when a combined dataset (E0+SP1+D1+...) is passed for an EPL-only model.
+        for col in ("Div", "source_league", "league"):
+            if col in matches.columns:
+                filtered = matches[matches[col] == league]
+                if filtered.empty:
+                    raise ValueError(
+                        f"No matches for league={league!r} in column {col!r}. "
+                        f"Found values: {sorted(matches[col].dropna().unique())[:10]}"
+                    )
+                matches = filtered
+                break
         matches = DixonColesModel.prepare_matches(matches)
         train = matches[matches["match_date"] <= cutoff_date]
         if train.empty:

@@ -30,6 +30,10 @@ SELECTIONS: tuple[Selection, Selection, Selection] = ("home", "draw", "away")
 @dataclass(frozen=True)
 class HistoricalValueModelConfig:
     bookmaker_prefix: str = "B365"
+    # Separate closing-odds prefix (e.g. "B365C") to avoid using closing lines as entry odds.
+    # When set, closing odds are extracted and stored as clv_reference_odds in signals.
+    # Entry odds always come from bookmaker_prefix columns (typically pre-match opening lines).
+    closing_odds_prefix: str | None = None
     min_edge_pct: float = 2.0
     min_signal_probability: float = 0.45
     max_signal_odds: float | None = None
@@ -68,6 +72,8 @@ class ValuePrediction:
     edge_pct: float
     bookmaker_key: str | None = None
     bookmaker_title: str | None = None
+    # Closing odds for CLV calculation only — must NOT be used as entry odds.
+    closing_odds: float | None = None
 
 
 @dataclass(frozen=True)
@@ -162,6 +168,9 @@ class HistoricalValueModel:
         if odds is None:
             return []
 
+        # Extract closing odds for CLV reference when a closing_odds_prefix is configured.
+        closing_odds_tuple = self._extract_closing_odds(row)
+
         market_probs = self._devig_probs(odds)
         match_date = self._date_to_iso(row["match_date"])
         event_id = self._event_id(row)
@@ -185,6 +194,7 @@ class HistoricalValueModel:
                     edge_pct=round(edge_pct, 4),
                     bookmaker_key=self._optional_row_str(row, "source_bookmaker_key"),
                     bookmaker_title=self._optional_row_str(row, "source_bookmaker_title"),
+                    closing_odds=round(closing_odds_tuple[idx], 4) if closing_odds_tuple else None,
                 )
             )
         return predictions
@@ -494,6 +504,11 @@ class HistoricalValueModel:
             "selection": prediction.selection,
             "selection_ru": self.SELECTION_RU[prediction.selection],
             "entry_odds": prediction.odds,
+            # entry_odds come from the opening line (bookmaker_prefix columns).
+            # They are pre-match estimates without a snapshot timestamp.
+            # Do NOT use closing_odds_prefix columns as entry odds — those are CLV reference only.
+            "entry_odds_source": f"football_data_{self.config.bookmaker_prefix}_opening",
+            "clv_reference_odds": prediction.closing_odds,
             "reference_fair_odds": round(fair_odds, 4),
             "edge_pct": prediction.edge_pct,
             "model_probability": prediction.calibrated_probability,
@@ -586,6 +601,19 @@ class HistoricalValueModel:
 
     def _extract_odds(self, row: pd.Series) -> tuple[float, float, float] | None:
         cols = self._odds_columns()
+        try:
+            odds = (float(row[cols[0]]), float(row[cols[1]]), float(row[cols[2]]))
+        except (KeyError, TypeError, ValueError):
+            return None
+        if any(value <= 1.0 for value in odds):
+            return None
+        return odds
+
+    def _extract_closing_odds(self, row: pd.Series) -> tuple[float, float, float] | None:
+        if self.config.closing_odds_prefix is None:
+            return None
+        prefix = self.config.closing_odds_prefix
+        cols = (f"{prefix}H", f"{prefix}D", f"{prefix}A")
         try:
             odds = (float(row[cols[0]]), float(row[cols[1]]), float(row[cols[2]]))
         except (KeyError, TypeError, ValueError):

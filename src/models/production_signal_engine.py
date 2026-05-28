@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+_log = logging.getLogger(__name__)
 
 import pandas as pd
 
@@ -108,7 +111,21 @@ def _prepare_candidates(matches: pd.DataFrame, bookmaker_prefix: str) -> pd.Data
         df[col] = pd.to_numeric(df[col], errors="coerce")
     df = df.dropna(subset=["match_date", "home_team", "away_team", *odds_cols])
     df = df[(df[odds_cols] > 1.0).all(axis=1)]
-    return df.sort_values(["match_date", "home_team", "away_team"]).reset_index(drop=True)
+    df = df.sort_values(["match_date", "home_team", "away_team"]).reset_index(drop=True)
+
+    # Warn when snapshot_ts_utc / event_time_utc are missing — production signals should
+    # always carry these to verify snapshot_ts_utc < event_time_utc (no post-KO odds).
+    if "event_time_utc" not in df.columns:
+        _log.warning(
+            "candidate matches missing event_time_utc — cannot verify odds were captured "
+            "before kick-off; signals marked as entry_odds_source=pre_match_unverified"
+        )
+    if "snapshot_ts_utc" not in df.columns:
+        _log.warning(
+            "candidate matches missing snapshot_ts_utc — odds timestamp unknown"
+        )
+
+    return df
 
 
 def _to_signal(
@@ -121,7 +138,7 @@ def _to_signal(
     event_id = _event_id(row)
     edge_vs_fair_pct = round(value.edge_vs_fair * 100.0, 4)
     return {
-        "signal_id": f"production_dc_{value.model_id or 'unversioned'}_{event_id}_{value.selection}",
+        "signal_id": f"dc_{event_id}_{value.selection}",
         "strategy_id": "production_dixon_coles_value_v1",
         "model_id": value.model_id,
         "event_id": event_id,
@@ -134,6 +151,12 @@ def _to_signal(
         "selection": value.selection,
         "selection_ru": ProductionDixonColesSignalEngine.SELECTION_RU[value.selection],
         "entry_odds": value.odds,
+        "entry_odds_source": (
+            "snapshot" if "snapshot_ts_utc" in row.index and pd.notna(row.get("snapshot_ts_utc"))
+            else "pre_match_unverified"
+        ),
+        "snapshot_ts_utc": str(row.get("snapshot_ts_utc") or ""),
+        "event_time_utc": str(row.get("event_time_utc") or ""),
         "reference_fair_odds": round(1.0 / value.model_prob, 4),
         "edge_pct": edge_vs_fair_pct,
         "edge_vs_market_pct": round(value.edge_vs_market * 100.0, 4),

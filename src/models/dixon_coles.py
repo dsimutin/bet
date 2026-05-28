@@ -108,8 +108,14 @@ class DixonColesModel:
         if new_prepared.empty:
             return
         if not self._training_matches.empty:
-            last_date = self._training_matches["match_date"].max()
-            new_prepared = new_prepared[new_prepared["match_date"] > last_date]
+            # Identify truly new matches by key, not by date — avoids skipping same-day additions.
+            existing = self._training_matches[["match_date", "home_team", "away_team"]]
+            merged = new_prepared.merge(
+                existing.assign(_exists=True),
+                on=["match_date", "home_team", "away_team"],
+                how="left",
+            )
+            new_prepared = merged[merged["_exists"].isna()].drop(columns=["_exists"])
         if new_prepared.empty:
             return
         combined = pd.concat([self._training_matches, new_prepared], ignore_index=True)

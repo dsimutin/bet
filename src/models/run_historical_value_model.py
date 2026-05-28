@@ -220,9 +220,13 @@ def main() -> None:
                     "message": sender.format_signal_message(signal),
                     "send_result": send_result,
                 }
+                if args.send_telegram:
+                    delivery_status = "sent" if send_result.get("ok") else "failed"
+                else:
+                    delivery_status = "dry_run"
                 ledger.mark_delivery(
                     str(signal["signal_id"]),
-                    status="sent" if args.send_telegram else "dry_run",
+                    status=delivery_status,
                     delivery_result=send_result,
                 )
                 payload_path = sender.save_payload(payload, args.output_dir)

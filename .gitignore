@@ -9,7 +9,6 @@ build/
 !.env.example
 *.pyc
 .venv/
-uv.lock
 
 # Data (raw data не коммитим, только структуру)
 data/raw/*

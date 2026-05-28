@@ -43,6 +43,19 @@ class FeatureBuilder:
         params = self.model.params
         if params is None:
             raise ValueError("Dixon-Coles model must be fitted before feature building")
+        # Guard: model must have been trained on data that ends before cutoff_date
+        # to prevent leaking future-trained attack/defense parameters.
+        if params.trained_on_dates is not None:
+            train_end = params.trained_on_dates[1]
+            if hasattr(train_end, "date"):
+                train_end = train_end.date()
+            elif isinstance(train_end, str):
+                train_end = date.fromisoformat(str(train_end))
+            if train_end >= cutoff_date:
+                raise ValueError(
+                    f"Model trained through {train_end} cannot be used for features at "
+                    f"cutoff {cutoff_date}: would leak future-trained parameters."
+                )
         return MatchFeatures(
             home_attack=params.attack.get(match.home_team, 0.0),
             away_attack=params.attack.get(match.away_team, 0.0),
