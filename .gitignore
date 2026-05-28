@@ -46,6 +46,10 @@ notebooks/*.ipynb
 .DS_Store
 Thumbs.db
 
+# Local databases (generated at runtime, stored in Supabase in production)
+data/*.sqlite
+data/*.db
+
 # Secrets
 configs/secrets.yaml
 configs/secrets.local.yaml
