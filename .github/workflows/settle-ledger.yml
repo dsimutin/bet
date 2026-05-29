@@ -2,6 +2,8 @@ name: Settle Signal Ledger
 
 # Runs after European matches finish (23:00 UTC) and on demand.
 # Downloads latest OpenFootball results, settles open signals, commits updated ledger.
+# After settlement, triggers model retrain to close the feedback loop:
+#   match finished → ledger settled → model retrains → next signal is smarter.
 
 on:
   workflow_dispatch:
@@ -14,6 +16,10 @@ on:
         description: "OpenFootball seasons"
         default: "2023-24,2024-25"
         required: true
+      skip_retrain:
+        description: "Skip post-settlement model retrain"
+        default: "false"
+        required: false
   schedule:
     - cron: "0 23 * * *"
 
@@ -91,7 +97,35 @@ jobs:
           if-no-files-found: ignore
           path: data/reports/signal_ledger_settlement_report.json
 
-      - name: Persist updated ledger
+      - name: Run drift detector after settlement
+        run: |
+          uv run --extra dev python - <<'PYEOF'
+          import json, sys
+          from pathlib import Path
+
+          sys.path.insert(0, str(Path(".").resolve()))
+          from src.monitoring.drift_detector import CUSUMDriftDetector
+
+          detector = CUSUMDriftDetector(threshold=0.15, drift_window=14, min_window=10)
+          ledger_path = Path("data/core/paper_signal_ledger.json")
+          report = detector.evaluate_ledger_path(ledger_path)
+
+          output_path = Path("data/reports/drift_report.json")
+          output_path.parent.mkdir(parents=True, exist_ok=True)
+          output_path.write_text(
+              json.dumps(report.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8"
+          )
+
+          status = "DRIFT DETECTED" if report.drift_detected else "no drift"
+          print(f"[drift-detector] {status} | recent={report.recent_accuracy} "
+                f"baseline={report.baseline_accuracy} kelly_mult={report.kelly_multiplier}")
+          print(f"[drift-detector] reason: {report.reason}")
+
+          if report.drift_detected:
+              print("::warning::Concept drift detected — model retrain triggered automatically.")
+          PYEOF
+
+      - name: Persist updated ledger and drift report
         if: success()
         run: |
           git config user.name "github-actions[bot]"
@@ -99,7 +133,8 @@ jobs:
 
           state_files=()
           for path in data/core/paper_signal_ledger.json \
-                      data/reports/signal_ledger_settlement_report.json; do
+                      data/reports/signal_ledger_settlement_report.json \
+                      data/reports/drift_report.json; do
             [ -f "$path" ] && state_files+=("$path")
           done
 
@@ -117,3 +152,23 @@ jobs:
           git pull --rebase
           git commit -m "chore: settle open signals [$(date -u +%Y-%m-%d)]"
           git push
+
+  # ---------------------------------------------------------------
+  # Feedback loop: retrain the model right after settlement so that
+  # the next day's signals already incorporate today's results.
+  # Skipped if no new signals were settled or skip_retrain=true.
+  # ---------------------------------------------------------------
+  retrain-after-settlement:
+    name: Retrain model (post-settlement feedback loop)
+    needs: settle
+    if: >
+      success() &&
+      github.event.inputs.skip_retrain != 'true'
+    uses: ./.github/workflows/daily-trainer.yml
+    with:
+      leagues: ${{ github.event.inputs.leagues || 'EPL,BUNDESLIGA,LALIGA,SERIEA' }}
+      cutoff_date: ""
+      openfootball_seasons: "2021-22,2022-23,2023-24,2024-25"
+      triggered_by: "settle-ledger"
+    permissions:
+      contents: write

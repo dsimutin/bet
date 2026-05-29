@@ -1,6 +1,25 @@
 name: Daily Model Trainer
 
 on:
+  # Called by settle-ledger.yml after open signals are settled (feedback loop).
+  workflow_call:
+    inputs:
+      leagues:
+        type: string
+        default: "EPL,BUNDESLIGA,LALIGA,SERIEA"
+        description: "Comma-separated league codes"
+      cutoff_date:
+        type: string
+        default: ""
+        description: "YYYY-MM-DD cutoff date (empty = today)"
+      openfootball_seasons:
+        type: string
+        default: "2021-22,2022-23,2023-24,2024-25"
+      triggered_by:
+        type: string
+        default: "manual"
+        description: "Who triggered this retrain (settle-ledger / manual / schedule)"
+
   workflow_dispatch:
     inputs:
       leagues:
@@ -15,8 +34,10 @@ on:
         description: "OpenFootball seasons"
         default: "2021-22,2022-23,2023-24,2024-25"
         required: true
+
   schedule:
     - cron: "0 6 * * *"
+
   push:
     branches:
       - main
@@ -63,7 +84,8 @@ jobs:
       - name: Skip if league not in inputs
         id: check_league
         run: |
-          REQUESTED="${{ github.event.inputs.leagues || 'EPL,BUNDESLIGA,LALIGA,SERIEA' }}"
+          # Accept leagues from workflow_call inputs OR workflow_dispatch inputs
+          REQUESTED="${{ inputs.leagues || github.event.inputs.leagues || 'EPL,BUNDESLIGA,LALIGA,SERIEA' }}"
           if echo "$REQUESTED" | grep -qw "${{ matrix.league }}"; then
             echo "skip=false" >> "$GITHUB_OUTPUT"
           else
@@ -75,8 +97,9 @@ jobs:
         if: steps.check_league.outputs.skip == 'false'
         env:
           LEAGUE: ${{ matrix.league }}
-          CUTOFF_DATE: ${{ github.event.inputs.cutoff_date || '' }}
-          OPENFOOTBALL_SEASONS: ${{ github.event.inputs.openfootball_seasons || '2021-22,2022-23,2023-24,2024-25' }}
+          CUTOFF_DATE: ${{ inputs.cutoff_date || github.event.inputs.cutoff_date || '' }}
+          OPENFOOTBALL_SEASONS: ${{ inputs.openfootball_seasons || github.event.inputs.openfootball_seasons || '2021-22,2022-23,2023-24,2024-25' }}
+          TRIGGERED_BY: ${{ inputs.triggered_by || 'manual' }}
         run: |
           cutoff_args=()
           if [ -n "$CUTOFF_DATE" ]; then
