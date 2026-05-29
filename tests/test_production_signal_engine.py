@@ -113,3 +113,38 @@ def test_production_signal_engine_uses_calibrator() -> None:
     ).generate_signals(upcoming)[0]
 
     assert calibrated_signal["model_probability"] != raw_signal["model_probability"]
+
+
+def test_production_signal_id_is_stable_across_model_versions() -> None:
+    model = DixonColesModel(
+        DixonColesConfig(league="EPL", min_matches=12, max_iterations=60, max_goals=7)
+    )
+    model.fit(_history(), warm_start=False)
+    upcoming = pd.DataFrame(
+        [
+            {
+                "Date": "20/02/2025",
+                "HomeTeam": "Strong",
+                "AwayTeam": "Weak",
+                "B365H": 2.20,
+                "B365D": 3.40,
+                "B365A": 3.80,
+            }
+        ]
+    )
+
+    model.model_id = "dc_EPL_v1"
+    first = ProductionDixonColesSignalEngine(
+        model,
+        min_edge_pct=1.0,
+        min_model_probability=0.4,
+    ).generate_signals(upcoming)[0]
+    model.model_id = "dc_EPL_v2"
+    second = ProductionDixonColesSignalEngine(
+        model,
+        min_edge_pct=1.0,
+        min_model_probability=0.4,
+    ).generate_signals(upcoming)[0]
+
+    assert first["signal_id"] == second["signal_id"]
+    assert first["model_id"] != second["model_id"]

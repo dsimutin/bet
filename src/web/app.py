@@ -10,7 +10,7 @@ import pickle
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, AsyncIterator
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -27,7 +27,7 @@ _tg_task: asyncio.Task | None = None
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):  # type: ignore[type-arg]
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     global _tg_stop, _tg_task
     _tg_stop = asyncio.Event()
     _tg_task = asyncio.create_task(_start_telegram_collector(_tg_stop))
@@ -43,6 +43,7 @@ async def lifespan(app: FastAPI):  # type: ignore[type-arg]
 
 async def _start_telegram_collector(stop_event: asyncio.Event) -> None:
     from src.ingest.telegram_collector import is_configured, run_collector
+
     if not is_configured():
         _log.info(
             "Telegram collector not configured — set TELEGRAM_API_ID, "
@@ -62,6 +63,7 @@ templates = Jinja2Templates(directory=str(_TEMPLATES))
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
+
 def _load_json(path: Path) -> Any:
     if not path.exists():
         return None
@@ -75,8 +77,14 @@ def _ledger_summary() -> dict[str, Any]:
     ledger_path = _DATA / "core" / "paper_signal_ledger.json"
     data = _load_json(ledger_path)
     if data is None:
-        return {"total_signals": 0, "open_signals": 0, "settled_signals": 0,
-                "win_rate": 0, "roi_pct": 0, "pnl_units": 0}
+        return {
+            "total_signals": 0,
+            "open_signals": 0,
+            "settled_signals": 0,
+            "win_rate": 0,
+            "roi_pct": 0,
+            "pnl_units": 0,
+        }
     return data.get("summary", {})
 
 
@@ -102,18 +110,20 @@ def _model_status() -> list[dict[str, Any]]:
     for meta_path in sorted(models_dir.glob("dc_*.meta.json"), reverse=True):
         try:
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
-            result.append({
-                "model_id": meta.get("model_id", ""),
-                "league": meta.get("league", ""),
-                "status": meta.get("status", ""),
-                "n_matches": meta.get("n_matches", 0),
-                "brier_score": meta.get("brier_score"),
-                "log_loss": meta.get("log_loss"),
-                "converged": meta.get("converged", True),
-                "created_at_utc": meta.get("created_at_utc", ""),
-                "trained_on": meta.get("trained_on", {}),
-                "promotion_reason": meta.get("promotion_reason", ""),
-            })
+            result.append(
+                {
+                    "model_id": meta.get("model_id", ""),
+                    "league": meta.get("league", ""),
+                    "status": meta.get("status", ""),
+                    "n_matches": meta.get("n_matches", 0),
+                    "brier_score": meta.get("brier_score"),
+                    "log_loss": meta.get("log_loss"),
+                    "converged": meta.get("converged", True),
+                    "created_at_utc": meta.get("created_at_utc", ""),
+                    "trained_on": meta.get("trained_on", {}),
+                    "promotion_reason": meta.get("promotion_reason", ""),
+                }
+            )
         except Exception:
             pass
     return result
@@ -137,6 +147,7 @@ def _latest_signals_report() -> dict[str, Any] | None:
 
 # ── API routes ─────────────────────────────────────────────────────────────────
 
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok", "ts": datetime.now(timezone.utc).isoformat()}
@@ -145,6 +156,7 @@ def health() -> dict[str, str]:
 @app.get("/api/collector/status")
 def api_collector_status() -> dict[str, Any]:
     from src.ingest.telegram_collector import is_configured
+
     live_path = _DATA / "staging" / "free_sources" / "telegram_live.jsonl"
     line_count = 0
     last_message: str | None = None
@@ -161,9 +173,7 @@ def api_collector_status() -> dict[str, Any]:
         "configured": is_configured(),
         "running": _tg_task is not None and not _tg_task.done(),
         "channels": [
-            c.strip()
-            for c in os.environ.get("TELEGRAM_CHANNELS", "").split(",")
-            if c.strip()
+            c.strip() for c in os.environ.get("TELEGRAM_CHANNELS", "").split(",") if c.strip()
         ],
         "messages_collected": line_count,
         "last_message": last_message,
@@ -192,9 +202,11 @@ def api_readiness() -> dict[str, Any]:
 
 # ── HTML dashboard ─────────────────────────────────────────────────────────────
 
+
 @app.get("/", response_class=HTMLResponse)
 def dashboard(request: Request) -> HTMLResponse:
     from src.ingest.telegram_collector import is_configured as tg_configured
+
     summary = _ledger_summary()
     signals = _recent_signals(30)
     models = _model_status()
@@ -204,7 +216,9 @@ def dashboard(request: Request) -> HTMLResponse:
     tg_status = {
         "configured": tg_configured(),
         "running": _tg_task is not None and not _tg_task.done(),
-        "messages_collected": sum(1 for _ in live_path.open(encoding="utf-8")) if live_path.exists() else 0,
+        "messages_collected": (
+            sum(1 for _ in live_path.open(encoding="utf-8")) if live_path.exists() else 0
+        ),
         "channels": [
             c.strip() for c in os.environ.get("TELEGRAM_CHANNELS", "").split(",") if c.strip()
         ],
@@ -215,6 +229,7 @@ def dashboard(request: Request) -> HTMLResponse:
     prod_model = next((m for m in models if m["status"] == "production"), None)
 
     return templates.TemplateResponse(
+        request,
         "dashboard.html",
         {
             "request": request,

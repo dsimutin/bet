@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 SignalResult = Literal["win", "loss", "void"]
-DeliveryStatus = Literal["registered", "dry_run", "sent", "blocked"]
+DeliveryStatus = Literal["registered", "dry_run", "sent", "failed", "blocked"]
 
 
 @dataclass(frozen=True)
@@ -87,8 +87,8 @@ class SignalLedger:
     ) -> None:
         if signal_id not in self._entries:
             raise KeyError(f"Signal {signal_id} not found in ledger")
-        if status not in {"registered", "dry_run", "sent", "blocked"}:
-            raise ValueError("status must be one of: registered, dry_run, sent, blocked")
+        if status not in {"registered", "dry_run", "sent", "failed", "blocked"}:
+            raise ValueError("status must be one of: registered, dry_run, sent, failed, blocked")
         self._entries[signal_id].update(
             {
                 "delivery_status": status,

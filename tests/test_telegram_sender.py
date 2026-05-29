@@ -27,3 +27,31 @@ def test_telegram_message_includes_paper_stake() -> None:
     )
 
     assert "Paper stake: 1.25u" in message
+
+
+def test_telegram_message_escapes_html_fields() -> None:
+    sender = TelegramSender(
+        TelegramConfig(bot_token="dry-run-token", chat_id="dry-run", dry_run=True)
+    )
+
+    message = sender.format_signal_message(
+        {
+            "signal_id": "sig_1",
+            "strategy_id": "strategy<&>",
+            "home_team": "A < B",
+            "away_team": "C & D",
+            "bookmaker": "book",
+            "market_key": "h2h",
+            "selection_ru": "П1",
+            "entry_odds": 1.8,
+            "reference_fair_odds": 1.7,
+            "edge_pct": 4.2,
+            "paper_stake_units": 1.25,
+            "timestamp_utc": "2026-05-28T06:00:00+00:00",
+            "explain_formatted": "edge <strong>",
+        }
+    )
+
+    assert "strategy&lt;&amp;&gt;" in message
+    assert "A &lt; B vs C &amp; D" in message
+    assert "edge &lt;strong&gt;" in message

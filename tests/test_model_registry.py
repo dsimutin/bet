@@ -109,7 +109,7 @@ def test_daily_trainer_saves_and_promotes(tmp_path) -> None:
     trainer = DailyTrainer(
         registry=registry,
         staging_dir=staging,
-        config=DixonColesConfig(league="EPL", min_matches=12, max_iterations=40, max_goals=6),
+        config=DixonColesConfig(league="EPL", min_matches=12, max_iterations=100, max_goals=6),
     )
 
     result = trainer.run("EPL", cutoff_date=date(2025, 12, 31))
@@ -121,11 +121,31 @@ def test_daily_trainer_saves_and_promotes(tmp_path) -> None:
     assert registry.load_latest("EPL").model_id == result.model_id
 
 
+def test_daily_trainer_filters_combined_history_by_league(tmp_path) -> None:
+    epl = _matches(rounds=20).assign(Div="E0", source_league="E0")
+    other = _matches(rounds=20).assign(Div="D1", source_league="D1")
+    other["home_team"] = other["home_team"].map(lambda value: f"DE_{value}")
+    other["away_team"] = other["away_team"].map(lambda value: f"DE_{value}")
+    combined = pd.concat([epl, other], ignore_index=True)
+    registry = ModelRegistry(tmp_path / "models")
+    trainer = DailyTrainer(
+        registry=registry,
+        config=DixonColesConfig(league="EPL", min_matches=12, max_iterations=100, max_goals=6),
+    )
+
+    result = trainer.run_on_dataframe("EPL", cutoff_date=date(2025, 12, 31), matches=combined)
+    model = registry.load_latest("EPL")
+
+    assert model.params is not None
+    assert result.n_new_matches == len(epl)
+    assert not any(team.startswith("DE_") for team in model.params.attack)
+
+
 def test_daily_trainer_does_not_promote_when_absolute_brier_gate_fails(tmp_path) -> None:
     registry = ModelRegistry(tmp_path / "models")
     trainer = DailyTrainer(
         registry=registry,
-        config=DixonColesConfig(league="EPL", min_matches=12, max_iterations=20, max_goals=6),
+        config=DixonColesConfig(league="EPL", min_matches=12, max_iterations=100, max_goals=6),
         max_brier_score=0.0,
     )
 
@@ -141,7 +161,7 @@ def test_daily_trainer_does_not_promote_when_log_loss_gate_fails(tmp_path) -> No
     registry = ModelRegistry(tmp_path / "models")
     trainer = DailyTrainer(
         registry=registry,
-        config=DixonColesConfig(league="EPL", min_matches=12, max_iterations=20, max_goals=6),
+        config=DixonColesConfig(league="EPL", min_matches=12, max_iterations=100, max_goals=6),
         max_brier_score=2.0,
         max_log_loss=0.0,
     )
@@ -152,10 +172,26 @@ def test_daily_trainer_does_not_promote_when_log_loss_gate_fails(tmp_path) -> No
     assert "max_log_loss" in result.promotion_reason
 
 
+def test_daily_trainer_does_not_promote_when_optimizer_does_not_converge(tmp_path) -> None:
+    registry = ModelRegistry(tmp_path / "models")
+    trainer = DailyTrainer(
+        registry=registry,
+        config=DixonColesConfig(league="EPL", min_matches=12, max_iterations=1, max_goals=6),
+        max_brier_score=2.0,
+        max_log_loss=2.0,
+    )
+
+    result = trainer.run_on_dataframe("EPL", cutoff_date=date(2025, 12, 31), matches=_matches(20))
+
+    assert result.promoted is False
+    assert result.promotion_reason == "optimizer_did_not_converge"
+    assert registry.list_versions("EPL")[0].converged is False
+
+
 def test_daily_trainer_oos_validation_requires_pre_holdout_training_data(tmp_path) -> None:
     trainer = DailyTrainer(
         registry=ModelRegistry(tmp_path / "models"),
-        config=DixonColesConfig(league="EPL", min_matches=12, max_iterations=20, max_goals=6),
+        config=DixonColesConfig(league="EPL", min_matches=12, max_iterations=100, max_goals=6),
     )
     matches = DixonColesModel.prepare_matches(_matches(rounds=20))
 

@@ -259,16 +259,14 @@ def test_backtest_entry_odds_from_pre_close_column() -> None:
 
     # Предсказания делаются только по обучающим данным — будущие матчи не должны влиять
     for _, row in test.iterrows():
-        h_prob, d_prob, a_prob = model.predict_1x2(
-            str(row["home_team"]), str(row["away_team"])
-        )
+        h_prob, d_prob, a_prob = model.predict_1x2(str(row["home_team"]), str(row["away_team"]))
         assert abs(h_prob + d_prob + a_prob - 1.0) < 1e-6, "Сумма вероятностей должна быть 1"
 
     # Дополнительно: убеждаемся, что датасет содержит closing cols, отличные от entry cols
     assert "B365H" in rows.columns and "B365CH" in rows.columns
-    assert (rows["B365H"] != rows["B365CH"]).any(), (
-        "Pre-close и closing коэффициенты должны различаться для теста на утечку"
-    )
+    assert (
+        rows["B365H"] != rows["B365CH"]
+    ).any(), "Pre-close и closing коэффициенты должны различаться для теста на утечку"
 
     # DixonColesModel обучается только на колонках match_date/home_team/away_team/goals.
     # Closing коэффициенты не входят в DixonColesParams — проверяем, что модель их не содержит.
@@ -276,9 +274,9 @@ def test_backtest_entry_odds_from_pre_close_column() -> None:
     params_dict = model.params.attack  # только attack/defense/home_advantage/rho/intercept
     closing_cols = {"B365CH", "B365CD", "B365CA", "PSCH", "PSCD", "PSCA", "BbClH", "BbClD", "BbClA"}
     leaked_params = closing_cols & set(params_dict.keys())
-    assert not leaked_params, (
-        f"DixonColesParams.attack не должны содержать closing-колонки, но нашлись: {leaked_params}"
-    )
+    assert (
+        not leaked_params
+    ), f"DixonColesParams.attack не должны содержать closing-колонки, но нашлись: {leaked_params}"
 
 
 # ---------------------------------------------------------------------------

@@ -94,6 +94,16 @@ def test_signal_ledger_marks_delivery_and_reports_quality() -> None:
     assert report["summary"]["win_rate"] == 0.5
 
 
+def test_signal_ledger_marks_failed_delivery_as_not_delivered() -> None:
+    ledger = SignalLedger()
+    ledger.add_signal(_signal())
+
+    ledger.mark_delivery("sig_1", status="failed", delivery_result={"ok": False})
+
+    assert ledger.summary()["delivered_signals"] == 0
+    assert ledger.get("sig_1")["delivery_status"] == "failed"
+
+
 def test_signal_ledger_quality_report_allows_warmup() -> None:
     ledger = SignalLedger()
 

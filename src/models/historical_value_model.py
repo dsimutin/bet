@@ -304,12 +304,15 @@ class HistoricalValueModel:
         self.fit(history)
         signals: list[dict[str, Any]] = []
         generated_at = datetime.now(timezone.utc).isoformat()
-        history_hash = "sha256:" + hashlib.sha256(
-            history[["match_date", "home_team", "away_team"]]
-            .astype(str)
-            .to_csv(index=False)
-            .encode()
-        ).hexdigest()
+        history_hash = (
+            "sha256:"
+            + hashlib.sha256(
+                history[["match_date", "home_team", "away_team"]]
+                .astype(str)
+                .to_csv(index=False)
+                .encode()
+            ).hexdigest()
+        )
 
         for _, row in candidates.iterrows():
             predictions = [

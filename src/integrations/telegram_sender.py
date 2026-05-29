@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+from html import escape
 import urllib.request
 import urllib.error
 from datetime import datetime, timezone
@@ -232,18 +233,18 @@ class TelegramSender:
         edge_pct_val = float(edge_pct) if not isinstance(edge_pct, float) else edge_pct
 
         text = self._SIGNAL_TEMPLATE.format(
-            strategy_id=strategy_id,
-            home_team=home_team,
-            away_team=away_team,
-            bookmaker=bookmaker,
-            market_key=market_key,
-            selection_ru=selection_ru,
+            strategy_id=_html_text(strategy_id),
+            home_team=_html_text(home_team),
+            away_team=_html_text(away_team),
+            bookmaker=_html_text(bookmaker),
+            market_key=_html_text(market_key),
+            selection_ru=_html_text(selection_ru),
             entry_odds=entry_odds_str,
             reference_fair_odds=ref_odds_str,
             edge_pct=edge_pct_val,
             paper_stake_units=paper_stake_units,
-            explain_formatted=explain_formatted,
-            timestamp_utc=timestamp_utc,
+            explain_formatted=_html_text(explain_formatted),
+            timestamp_utc=_html_text(timestamp_utc),
         )
 
         # Обрезаем до максимальной длины сообщения
@@ -520,3 +521,7 @@ class TelegramSender:
             return False
 
         return True
+
+
+def _html_text(value: Any) -> str:
+    return escape(str(value), quote=False)

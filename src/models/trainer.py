@@ -49,19 +49,7 @@ class DailyTrainer:
     def run_on_dataframe(
         self, league: str, cutoff_date: date, matches: pd.DataFrame
     ) -> TrainingResult:
-        # Filter by league column before normalising — prevents cross-league contamination
-        # when a combined dataset (E0+SP1+D1+...) is passed for an EPL-only model.
-        for col in ("Div", "source_league", "league"):
-            if col in matches.columns:
-                filtered = matches[matches[col] == league]
-                if filtered.empty:
-                    raise ValueError(
-                        f"No matches for league={league!r} in column {col!r}. "
-                        f"Found values: {sorted(matches[col].dropna().unique())[:10]}"
-                    )
-                matches = filtered
-                break
-        matches = DixonColesModel.prepare_matches(matches)
+        matches = DixonColesModel.prepare_matches(_filter_league(matches, league))
         train = matches[matches["match_date"] <= cutoff_date]
         if train.empty:
             raise ValueError(f"No training matches for {league} before {cutoff_date}")
@@ -71,13 +59,20 @@ class DailyTrainer:
         previous_count = previous.params.n_matches if previous and previous.params else 0
         model = self._fit_production_model(league, train, previous)
         current_best = self._current_best_brier(league)
-        promoted, promotion_reason = self._promotion_decision(brier, log_loss, current_best)
+        converged = bool(model.params.converged) if model.params else False
+        promoted, promotion_reason = self._promotion_decision(
+            brier,
+            log_loss,
+            current_best,
+            converged=converged,
+        )
         model_id = self.registry.save(
             model,
             league=league,
             metrics={
                 "brier_score": brier,
                 "log_loss": log_loss,
+                "converged": converged,
                 "max_brier_score": self.max_brier_score,
                 "max_log_loss": self.max_log_loss,
                 "promotion_reason": promotion_reason,
@@ -124,8 +119,14 @@ class DailyTrainer:
         return min(scores) if scores else None
 
     def _promotion_decision(
-        self, brier_score: float, log_loss: float, current_best: float | None
+        self,
+        brier_score: float,
+        log_loss: float,
+        current_best: float | None,
+        converged: bool = True,
     ) -> tuple[bool, str]:
+        if not converged:
+            return False, "optimizer_did_not_converge"
         if self.max_brier_score is not None and brier_score > self.max_brier_score:
             return (
                 False,
@@ -157,15 +158,7 @@ class DailyTrainer:
         if previous is None:
             model.fit(train, warm_start=False)
         else:
-            last_trained_date = (
-                previous.params.trained_on_dates[1] if previous.params else None
-            )
-            new_matches = (
-                train[train["match_date"] > last_trained_date]
-                if last_trained_date is not None
-                else train
-            )
-            model.partial_fit(new_matches)
+            model.partial_fit(train)
         return model
 
     def _validate_oos(
@@ -197,22 +190,59 @@ class DailyTrainer:
         predicted = np.asarray(probs, dtype=float)
         actual = np.asarray(outcomes)
 
-        # Three-way split: first half → fit calibrator, second half → evaluate
-        # This prevents the calibrator from reporting inflated metrics on its own training data.
-        mid = max(len(predicted) // 2, 1)
-        cal_predicted, test_predicted = predicted[:mid], predicted[mid:]
-        cal_actual, test_actual = actual[:mid], actual[mid:]
+        cal_predicted, test_predicted, cal_actual, test_actual = _split_calibration_and_final(
+            predicted,
+            actual,
+        )
 
         calibrator = ProbabilityCalibrator()
         calibrator.fit(cal_predicted, cal_actual)
 
-        if len(test_predicted) > 0:
-            calibrated_test = calibrator.calibrate(test_predicted)
-            brier = calibrator.brier_score(calibrated_test, test_actual)
-            ll = calibrator.log_loss(calibrated_test, test_actual)
-        else:
-            calibrated_all = calibrator.calibrate(predicted)
-            brier = calibrator.brier_score(calibrated_all, actual)
-            ll = calibrator.log_loss(calibrated_all, actual)
+        calibrated_test = calibrator.calibrate(test_predicted)
+        brier = calibrator.brier_score(calibrated_test, test_actual)
+        ll = calibrator.log_loss(calibrated_test, test_actual)
 
         return brier, ll, calibrator
+
+
+LEAGUE_ALIASES: dict[str, set[str]] = {
+    "EPL": {"EPL", "E0", "EN1"},
+    "E0": {"EPL", "E0", "EN1"},
+    "BUNDESLIGA": {"BUNDESLIGA", "D1", "DE1"},
+    "D1": {"BUNDESLIGA", "D1", "DE1"},
+    "LALIGA": {"LALIGA", "SP1", "ES1"},
+    "SP1": {"LALIGA", "SP1", "ES1"},
+    "SERIEA": {"SERIEA", "I1", "IT1"},
+    "I1": {"SERIEA", "I1", "IT1"},
+    "LIGUE1": {"LIGUE1", "F1", "FR1"},
+    "F1": {"LIGUE1", "F1", "FR1"},
+}
+
+
+def _filter_league(matches: pd.DataFrame, league: str) -> pd.DataFrame:
+    league_cols = [col for col in ("source_league", "Div", "league") if col in matches.columns]
+    if not league_cols:
+        return matches
+    allowed = LEAGUE_ALIASES.get(_league_key(league), {_league_key(league)})
+    mask = pd.Series(False, index=matches.index)
+    for col in league_cols:
+        mask = mask | matches[col].map(lambda value: _league_key(value) in allowed)
+    return matches[mask].copy()
+
+
+def _league_key(value: object) -> str:
+    return str(value).strip().replace(" ", "").replace("-", "").replace(".", "").upper()
+
+
+def _split_calibration_and_final(
+    predicted: np.ndarray,
+    actual: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    if len(predicted) < 2:
+        raise ValueError("Need at least two validation rows for calibration/final split")
+    mid = max(len(predicted) // 2, 1)
+    test_predicted = predicted[mid:]
+    test_actual = actual[mid:]
+    if len(test_predicted) == 0:
+        raise ValueError("Final validation split is empty")
+    return predicted[:mid], test_predicted, actual[:mid], test_actual

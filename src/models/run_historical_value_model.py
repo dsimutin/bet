@@ -7,7 +7,7 @@ import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import pandas as pd
 from dotenv import load_dotenv
@@ -215,23 +215,30 @@ def main() -> None:
             )
             for signal in signals_for_delivery:
                 send_result = sender.send_signal(signal)
+                send_ok = bool(send_result.get("ok"))
                 payload = {
                     "signal": signal,
                     "message": sender.format_signal_message(signal),
                     "send_result": send_result,
                 }
-                if args.send_telegram:
-                    delivery_status = "sent" if send_result.get("ok") else "failed"
-                else:
-                    delivery_status = "dry_run"
                 ledger.mark_delivery(
                     str(signal["signal_id"]),
-                    status=delivery_status,
+                    status=_delivery_status(args.send_telegram, send_ok),
                     delivery_result=send_result,
+                    block_reason=(
+                        None if send_ok else str(send_result.get("error", "telegram_send_failed"))
+                    ),
                 )
                 payload_path = sender.save_payload(payload, args.output_dir)
                 print(f"Wrote {payload_path}")
             ledger.save(ledger_path)
+            if args.send_telegram and any(
+                not bool(item.get("delivery_result", {}).get("ok"))
+                for item in ledger.entries().values()
+                if item.get("signal_id")
+                in {str(signal["signal_id"]) for signal in signals_for_delivery}
+            ):
+                raise SystemExit("Telegram delivery failed for one or more signals")
 
 
 def _build_model_config(args: argparse.Namespace) -> HistoricalValueModelConfig:
@@ -466,6 +473,12 @@ def _fetch_live_odds_dataframe(args: argparse.Namespace) -> pd.DataFrame:
 
 def _split_csv_arg(value: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _delivery_status(send_telegram: bool, send_ok: bool) -> Literal["dry_run", "sent", "failed"]:
+    if not send_ok:
+        return "failed"
+    return "sent" if send_telegram else "dry_run"
 
 
 def _apply_high_hit_mode(args: argparse.Namespace) -> None:

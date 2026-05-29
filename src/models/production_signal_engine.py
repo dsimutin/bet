@@ -121,9 +121,7 @@ def _prepare_candidates(matches: pd.DataFrame, bookmaker_prefix: str) -> pd.Data
             "before kick-off; signals marked as entry_odds_source=pre_match_unverified"
         )
     if "snapshot_ts_utc" not in df.columns:
-        _log.warning(
-            "candidate matches missing snapshot_ts_utc — odds timestamp unknown"
-        )
+        _log.warning("candidate matches missing snapshot_ts_utc — odds timestamp unknown")
 
     return df
 
@@ -138,21 +136,22 @@ def _to_signal(
     event_id = _event_id(row)
     edge_vs_fair_pct = round(value.edge_vs_fair * 100.0, 4)
     return {
-        "signal_id": f"dc_{event_id}_{value.selection}",
+        "signal_id": f"production_dc_{event_id}_{value.selection}_{_bookmaker_key(row, bookmaker_prefix)}",
         "strategy_id": "production_dixon_coles_value_v1",
         "model_id": value.model_id,
         "event_id": event_id,
         "home_team": str(row["home_team"]),
         "away_team": str(row["away_team"]),
         "event_date": str(row["match_date"]),
-        "bookmaker": _optional_row_str(row, "source_bookmaker_key") or bookmaker_prefix,
+        "bookmaker": _bookmaker_key(row, bookmaker_prefix),
         "bookmaker_title": _optional_row_str(row, "source_bookmaker_title") or bookmaker_prefix,
         "market_key": "h2h",
         "selection": value.selection,
         "selection_ru": ProductionDixonColesSignalEngine.SELECTION_RU[value.selection],
         "entry_odds": value.odds,
         "entry_odds_source": (
-            "snapshot" if "snapshot_ts_utc" in row.index and pd.notna(row.get("snapshot_ts_utc"))
+            "snapshot"
+            if "snapshot_ts_utc" in row.index and pd.notna(row.get("snapshot_ts_utc"))
             else "pre_match_unverified"
         ),
         "snapshot_ts_utc": str(row.get("snapshot_ts_utc") or ""),
@@ -198,6 +197,10 @@ def _event_id(row: pd.Series) -> str:
     home = str(row["home_team"]).strip().lower().replace(" ", "_")
     away = str(row["away_team"]).strip().lower().replace(" ", "_")
     return f"soccer__{home}__{away}__{row['match_date']}"
+
+
+def _bookmaker_key(row: pd.Series, bookmaker_prefix: str) -> str:
+    return _optional_row_str(row, "source_bookmaker_key") or bookmaker_prefix
 
 
 def _optional_row_str(row: pd.Series, key: str) -> str | None:

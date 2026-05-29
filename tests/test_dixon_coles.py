@@ -132,12 +132,36 @@ def test_partial_fit_accepts_future_rows() -> None:
     model.partial_fit(future_rows)
 
     assert model.params is not None
-    assert model.params.dataset_hash != original_hash, (
-        "dataset_hash must change when new future matches are incorporated"
+    assert (
+        model.params.dataset_hash != original_hash
+    ), "dataset_hash must change when new future matches are incorporated"
+    assert (
+        model.params.n_matches > original_n
+    ), "n_matches must increase after partial_fit with future data"
+
+
+def test_partial_fit_accepts_unseen_same_day_rows() -> None:
+    model = _model()
+    assert model.params is not None
+    original_n = model.params.n_matches
+    same_day = model.params.trained_on_dates[1]
+    new_rows = pd.DataFrame(
+        [
+            {
+                "date": same_day,
+                "home_team": "Strong",
+                "away_team": "Average",
+                "home_goals": 2,
+                "away_goals": 1,
+            }
+        ]
+        * 12
     )
-    assert model.params.n_matches > original_n, (
-        "n_matches must increase after partial_fit with future data"
-    )
+
+    model.partial_fit(new_rows)
+
+    assert model.params is not None
+    assert model.params.n_matches > original_n
 
 
 def test_dataset_hash_in_output() -> None:
@@ -170,6 +194,14 @@ def test_feature_builder_uses_only_matches_before_cutoff() -> None:
 
     assert features.home_attack > features.away_attack
     assert features.days_since_last_match_home == 1
+
+
+def test_feature_builder_rejects_future_trained_model() -> None:
+    with pytest.raises(ValueError, match="leak future-trained parameters"):
+        FeatureBuilder(_model(), _matches()).build(
+            MatchInfo("Strong", "Weak", date(2025, 1, 10)),
+            cutoff_ts=pd.Timestamp("2025-01-05T12:00:00").to_pydatetime(),
+        )
 
 
 def test_model_value_predictor_uses_model_edge_not_arbitrage() -> None:

@@ -25,6 +25,7 @@ class ModelVersion:
     dataset_hash: str
     brier_score: float | None = None
     log_loss: float | None = None
+    converged: bool | None = None
 
 
 class ModelRegistry:
@@ -68,6 +69,7 @@ class ModelRegistry:
             "n_matches": params.n_matches,
             "dataset_hash": params.dataset_hash,
             "status": status,
+            "converged": params.converged,
             "created_at_utc": created.isoformat(),
             "model_path": str(model_path),
             "calibration_path": str(calibration_path) if calibration_path else None,
@@ -132,6 +134,7 @@ class ModelRegistry:
                     dataset_hash=str(raw["dataset_hash"]),
                     brier_score=_optional_float(raw.get("brier_score")),
                     log_loss=_optional_float(raw.get("log_loss")),
+                    converged=_optional_bool(raw.get("converged")),
                 )
             )
         return versions
@@ -168,3 +171,11 @@ def _optional_float(value: Any) -> float | None:
     if value is None:
         return None
     return float(value)
+
+
+def _optional_bool(value: Any) -> bool | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return bool(value)
