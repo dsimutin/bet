@@ -1,0 +1,15 @@
+name: Block non-all-the-best pushes
+
+on:
+  push:
+    branches-ignore:
+      - all-the-best
+
+jobs:
+  block:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Block push to other branches
+        run: |
+          echo "::error::Only pushes to 'all-the-best' are allowed. Got push to '${{ github.ref_name }}'."
+          exit 1
