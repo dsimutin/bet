@@ -166,7 +166,8 @@ class EloRatingSystem:
             created_at_utc=datetime.now(timezone.utc).isoformat(),
         )
 
-    def save(self, path: Path) -> Path:
+    def save(self, path: Path | str) -> Path:
+        path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
             json.dumps(asdict(self.to_snapshot()), indent=2, ensure_ascii=False),
@@ -175,8 +176,8 @@ class EloRatingSystem:
         return path
 
     @classmethod
-    def load(cls, path: Path) -> EloRatingSystem:
-        raw: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+    def load(cls, path: Path | str) -> EloRatingSystem:
+        raw: dict[str, Any] = json.loads(Path(path).read_text(encoding="utf-8"))
         obj = cls(
             k_factor=float(raw.get("k_factor", 32.0)),
             initial_rating=float(raw.get("initial_rating", 1500.0)),
