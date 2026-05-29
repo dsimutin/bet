@@ -291,9 +291,9 @@ def _tau(
     if home_goals == 0 and away_goals == 0:
         return 1.0 - home_lambda * away_lambda * rho
     if home_goals == 0 and away_goals == 1:
-        return 1.0 - home_lambda * rho
+        return 1.0 + home_lambda * rho
     if home_goals == 1 and away_goals == 0:
-        return 1.0 - away_lambda * rho
+        return 1.0 + away_lambda * rho
     if home_goals == 1 and away_goals == 1:
         return 1.0 - rho
     return 1.0

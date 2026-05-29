@@ -7,7 +7,7 @@ def test_daily_trainer_workflow_persists_model_state() -> None:
     workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
 
     assert "contents: write" in workflow
-    assert "Persist model state" in workflow
+    assert "Persist" in workflow and "model state" in workflow
     # Multi-league matrix: patterns are league-scoped (dc_${league}_*.pkl etc.)
     assert ".pkl" in workflow
     assert ".meta.json" in workflow

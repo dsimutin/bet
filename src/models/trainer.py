@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace as dc_replace
 from datetime import date
 from pathlib import Path
 
@@ -50,7 +50,7 @@ class DailyTrainer:
         self, league: str, cutoff_date: date, matches: pd.DataFrame
     ) -> TrainingResult:
         matches = DixonColesModel.prepare_matches(_filter_league(matches, league))
-        train = matches[matches["match_date"] <= cutoff_date]
+        train = matches[matches["match_date"] < cutoff_date]
         if train.empty:
             raise ValueError(f"No training matches for {league} before {cutoff_date}")
 
@@ -153,7 +153,7 @@ class DailyTrainer:
         previous: DixonColesModel | None,
     ) -> DixonColesModel:
         model = previous or DixonColesModel(
-            DixonColesConfig(**{**self.config.__dict__, "league": league})
+            dc_replace(self.config, league=league)
         )
         if previous is None:
             model.fit(train, warm_start=False)
@@ -175,7 +175,7 @@ class DailyTrainer:
             raise ValueError("Not enough pre-holdout matches for leakage-free OOS validation")
 
         validation_model = DixonColesModel(
-            DixonColesConfig(**{**self.config.__dict__, "league": league})
+            dc_replace(self.config, league=league)
         )
         validation_model.fit(validation_train, warm_start=False)
 

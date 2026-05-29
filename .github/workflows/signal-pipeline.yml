@@ -236,6 +236,6 @@ jobs:
             exit 0
           fi
 
-          git commit -m "chore: persist daily bot state"
           git pull --rebase
+          git commit -m "chore: persist daily bot state"
           git push

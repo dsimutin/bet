@@ -137,17 +137,34 @@ jobs:
           print(f"[{league}] Quality gate passed.")
           EOF
 
-      - name: Persist model state
-        if: success() && steps.check_league.outputs.skip == 'false'
+  # Fan-in: runs once after ALL parallel train jobs finish.
+  # This serialises the single git commit so there is no push race.
+  persist-all:
+    name: Persist all model state
+    runs-on: ubuntu-latest
+    needs: [train]
+    if: always()
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download all training artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: daily-model-training-*
+          merge-multiple: true
+          path: .
+
+      - name: Commit and push model state
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           state_files=()
-          league="${{ matrix.league }}"
-          for pattern in "data/models/dc_${league}_*.pkl" \
-                         "data/models/dc_${league}_*.meta.json" \
-                         "data/models/calibration_dc_${league}_*.pkl" \
+          for pattern in "data/models/dc_*.pkl" \
+                         "data/models/dc_*.meta.json" \
+                         "data/models/calibration_dc_*.pkl" \
                          "data/reports/daily_training_*.json"; do
             while IFS= read -r path; do
               state_files+=("$path")
@@ -155,16 +172,16 @@ jobs:
           done
 
           if [ ${#state_files[@]} -eq 0 ]; then
-            echo "No model state files found for $league."
+            echo "No model state files found."
             exit 0
           fi
 
           git add -f "${state_files[@]}"
           if git diff --cached --quiet; then
-            echo "No model state changes for $league."
+            echo "No model state changes to persist."
             exit 0
           fi
 
           git pull --rebase
-          git commit -m "chore: persist daily model state [$league]"
+          git commit -m "chore: persist daily model state [all leagues]"
           git push
