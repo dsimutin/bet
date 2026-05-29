@@ -23,7 +23,7 @@ services:
     runtime: python
     region: frankfurt       # ближайший к РФ регион Render
     plan: starter           # 512 MB RAM, 0.5 CPU ($7/month)
-    buildCommand: pip install -e ".[dev]"
+    buildCommand: pip install -r requirements-render.txt && pip install -e . --no-deps
     startCommand: uvicorn src.web.health_app:app --host 0.0.0.0 --port $PORT --workers 1
     healthCheckPath: /health
     autoDeploy: true
@@ -90,7 +90,7 @@ services:
     region: frankfurt
     plan: starter
     schedule: "0 23 * * *"
-    buildCommand: pip install -e ".[dev]"
+    buildCommand: pip install -r requirements-render.txt && pip install -e . --no-deps
     startCommand: python -m src.cron.run_settle
     branch: all-the-best
 
@@ -137,7 +137,7 @@ services:
     region: frankfurt
     plan: starter
     schedule: "0 6 * * *"
-    buildCommand: pip install -e ".[dev]"
+    buildCommand: pip install -r requirements-render.txt && pip install -e . --no-deps
     startCommand: python -m src.cron.run_trainer
     branch: all-the-best
 
@@ -182,7 +182,7 @@ services:
     region: frankfurt
     plan: starter
     schedule: "15 8 * * *"
-    buildCommand: pip install -e ".[dev]"
+    buildCommand: pip install -r requirements-render.txt && pip install -e . --no-deps
     startCommand: python -m src.cron.run_signals
     branch: all-the-best
 

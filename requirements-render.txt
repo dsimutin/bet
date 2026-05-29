@@ -1,0 +1,18 @@
+# requirements-render.txt — продакшн зависимости для Render.com
+# Без dev-инструментов (pytest, black, mypy, jupyter, matplotlib, polars)
+# Установка: pip install -r requirements-render.txt
+
+requests>=2.31.0
+httpx>=0.27.0
+pandas>=2.0.0
+pyarrow>=14.0.0
+pydantic>=2.5.0
+pyyaml>=6.0.1
+python-dotenv>=1.0.0
+scipy>=1.11.0
+numpy>=1.26.0
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+jinja2>=3.1.4
+telethon>=1.36
+psycopg2-binary>=2.9.0
