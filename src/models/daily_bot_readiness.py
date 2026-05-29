@@ -120,10 +120,13 @@ def _path_check(name: str, path: Path, expect_file: bool) -> ReadinessCheck:
 
 
 def _workflow_check(path: Path) -> ReadinessCheck:
+    # Daily scheduling is owned by Render Cron Jobs (render.yaml).
+    # signal-pipeline.yml only needs workflow_dispatch + the pipeline steps.
+    # We no longer require "schedule:" here — Render owns the trigger.
     if not path.exists():
         return ReadinessCheck("scheduled_workflow", False, f"{path} missing")
     text = path.read_text(encoding="utf-8")
-    required = ["schedule:", "src.ingest.run_free_source_ingest", "src.models.run_signal_pipeline"]
+    required = ["src.ingest.run_free_source_ingest", "src.models.run_signal_pipeline"]
     missing = [item for item in required if item not in text]
     if missing:
         return ReadinessCheck("scheduled_workflow", False, f"missing {missing}")

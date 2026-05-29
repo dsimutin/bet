@@ -35,8 +35,9 @@ on:
         default: "2021-22,2022-23,2023-24,2024-25"
         required: true
 
-  schedule:
-    - cron: "0 6 * * *"
+  # schedule disabled — Render Cron Job 'daily-trainer' (06:00 UTC) owns the daily run.
+  # Re-enable ONLY if Render cron is turned off, to avoid double-running and
+  # model-registry race conditions (two concurrent trainers writing the same .pkl).
 
   push:
     branches:

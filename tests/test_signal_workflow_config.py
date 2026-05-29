@@ -6,7 +6,9 @@ WORKFLOW_PATH = Path(".github/workflows/signal-pipeline.yml")
 def test_signal_workflow_allows_opt_in_scheduled_telegram_delivery() -> None:
     workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
 
-    assert "schedule:" in workflow
+    # schedule: is intentionally absent — Render Cron Job owns the daily trigger.
+    # The SCHEDULED_SEND_TELEGRAM guard is still present for when this workflow
+    # fires on push/dispatch with the var set.
     assert "SCHEDULED_SEND_TELEGRAM" in workflow
     assert 'GITHUB_EVENT_NAME:-}" = "schedule"' in workflow
     assert 'delivery_arg="--send-telegram"' in workflow

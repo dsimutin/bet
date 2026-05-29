@@ -89,7 +89,6 @@ class OpenFootballProvider(BaseDataProvider):
         from src.ingest.openfootball import OpenFootballLoader
 
         use_cache = kwargs.get("use_cache", True)
-        staging_dir = Path(kwargs.get("staging_dir", os.environ.get("STAGING_DIR", "data/staging")))
 
         loader = OpenFootballLoader()
         result = loader.build(leagues=leagues, seasons=seasons, use_cache=use_cache)

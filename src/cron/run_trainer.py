@@ -21,7 +21,6 @@ def main() -> None:
     seasons = os.environ.get("OPENFOOTBALL_SEASONS", "2021-22,2022-23,2023-24,2024-25").split(",")
     model_dir = Path(os.environ.get("MODEL_DIR", "data/models"))
     staging_dir = Path(os.environ.get("STAGING_DIR", "data/staging"))
-    reports_dir = Path(os.environ.get("REPORTS_DIR", "data/reports"))
     cutoff = date.today()
 
     print(f"[trainer] Starting at {datetime.now(timezone.utc).isoformat()}")

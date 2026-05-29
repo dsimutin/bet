@@ -20,8 +20,9 @@ on:
         description: "Skip post-settlement model retrain"
         default: "false"
         required: false
-  schedule:
-    - cron: "0 23 * * *"
+  # schedule disabled — Render Cron Job 'settle-ledger' (23:00 UTC) owns the daily run.
+  # Re-enable ONLY if Render cron is turned off, to avoid double-settling open signals
+  # and duplicate ledger writes.
 
 concurrency:
   group: settle-ledger
