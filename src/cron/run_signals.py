@@ -21,6 +21,7 @@ def main() -> None:
     leagues = os.environ.get("LEAGUES", "EPL,BUNDESLIGA,LALIGA,SERIEA").split(",")
     model_dir = Path(os.environ.get("MODEL_DIR", "data/models"))
     ledger_path = Path(os.environ.get("LEDGER_PATH", "data/core/paper_signal_ledger.json"))
+    staging_dir = Path(os.environ.get("STAGING_DIR", "data/staging"))
     reports_dir = Path(os.environ.get("REPORTS_DIR", "data/reports"))
     today = date.today()
 
@@ -30,7 +31,7 @@ def main() -> None:
     all_signals: list[dict] = []
     for league in leagues:
         try:
-            signals = _run_league(league, model_dir, today)
+            signals = _run_league(league, model_dir, staging_dir, today)
             all_signals.extend(signals)
             print(f"[signals] {league}: {len(signals)} signals")
         except Exception as e:
@@ -75,23 +76,27 @@ def main() -> None:
              {"n_signals": len(all_signals), "leagues": leagues})
 
 
-def _run_league(league: str, model_dir: Path, today: date) -> list[dict]:
+def _run_league(league: str, model_dir: Path, staging_dir: Path, today: date) -> list[dict]:
     from src.models.model_registry import ModelRegistry
+    from src.signals.run_signal_scan import generate_signals_for_league
+
     registry = ModelRegistry(model_dir)
     try:
         model = registry.load_latest(league, production_only=True)
-    except Exception:
-        print(f"[signals] {league}: no production model — skipping")
+    except FileNotFoundError:
+        print(f"[signals] {league}: no production model — skipping (train first)")
+        return []
+    except Exception as e:
+        print(f"[signals] {league}: model load failed — {e}", file=sys.stderr)
         return []
 
-    # Signal generation logic (delegates to existing signal engine)
-    try:
-        from src.signals.run_signal_scan import generate_signals_for_league
-        return generate_signals_for_league(model=model, league=league, scan_date=today)
-    except ImportError:
-        # Minimal fallback if run_signal_scan doesn't expose the function yet
-        print(f"[signals] {league}: run_signal_scan.generate_signals_for_league not found — stub")
-        return []
+    return generate_signals_for_league(
+        model=model,
+        league=league,
+        scan_date=today,
+        staging_dir=staging_dir,
+        odds_api_key=os.environ.get("THE_ODDS_API_KEY", ""),
+    )
 
 
 def _notify_telegram(signals: list[dict], today: date) -> None:

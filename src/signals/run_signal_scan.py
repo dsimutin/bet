@@ -10,14 +10,21 @@
     Модуль работает исключительно в режиме бумажной торговли (status='paper').
     Реальные финансовые транзакции не выполняются ни при каких условиях.
     Все сигналы предназначены только для исследовательских целей.
+
+Public API for cron integration:
+    generate_signals_for_league(model, league, scan_date, staging_dir, odds_api_key)
+        Returns list[dict] of value-bet signals for use in run_signals.py cron.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
+import logging
+import os
 import uuid
 from dataclasses import dataclass, field, asdict
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
@@ -25,6 +32,22 @@ import pandas as pd
 from pydantic import BaseModel, Field, field_validator
 
 from src.ingest.active_sports_resolver import ActiveSportsResolver, ActiveSportsReport
+
+_log = logging.getLogger(__name__)
+
+# Mapping of internal league codes → The Odds API sport keys
+_LEAGUE_TO_SPORT_KEY: dict[str, str] = {
+    "EPL": "soccer_epl",
+    "E0": "soccer_epl",
+    "BUNDESLIGA": "soccer_germany_bundesliga",
+    "D1": "soccer_germany_bundesliga",
+    "LALIGA": "soccer_spain_la_liga",
+    "SP1": "soccer_spain_la_liga",
+    "SERIEA": "soccer_italy_serie_a",
+    "I1": "soccer_italy_serie_a",
+    "LIGUE1": "soccer_france_ligue_one",
+    "F1": "soccer_france_ligue_one",
+}
 
 # ---------------------------------------------------------------------------
 # Вспомогательная функция генерации идентификатора сигнала
@@ -767,3 +790,175 @@ class PaperLedger:
         ledger = cls()
         ledger._entries = raw.get("entries", {})
         return ledger
+
+
+# ---------------------------------------------------------------------------
+# Public cron API: generate_signals_for_league
+# ---------------------------------------------------------------------------
+
+
+def generate_signals_for_league(
+    model: Any,
+    league: str,
+    scan_date: date,
+    staging_dir: Path | None = None,
+    odds_api_key: str | None = None,
+    min_edge_pct: float = 2.0,
+    bookmaker_prefix: str = "B365",
+) -> list[dict[str, Any]]:
+    """Generate value-bet signals for one league using a production Dixon-Coles model.
+
+    Data source priority:
+    1. The Odds API (if odds_api_key provided or THE_ODDS_API_KEY env var set).
+    2. Staged upcoming fixtures CSV (if staging_dir provided and file exists).
+    3. Graceful empty return with a warning log.
+
+    Each returned signal dict contains a ``dataset_hash`` field required by
+    ``SignalLedger.add_signal()``.
+
+    Args:
+        model: Fitted DixonColesModel instance.
+        league: Internal league code (EPL, BUNDESLIGA, …).
+        scan_date: Date for which to generate signals (UTC).
+        staging_dir: Directory with staged CSVs (used as fallback data source).
+        odds_api_key: The Odds API key. Falls back to ``THE_ODDS_API_KEY`` env var.
+        min_edge_pct: Minimum edge percentage to include a signal.
+        bookmaker_prefix: Column prefix used in candidate DataFrame (default B365).
+
+    Returns:
+        List of signal dicts ready for ``SignalLedger.add_signal()``.
+    """
+    from src.models.production_signal_engine import ProductionDixonColesSignalEngine
+
+    api_key = odds_api_key or os.environ.get("THE_ODDS_API_KEY", "")
+    candidates: pd.DataFrame | None = None
+
+    # -- Source 1: The Odds API ------------------------------------------
+    if api_key:
+        candidates = _fetch_odds_api_candidates(league, api_key, bookmaker_prefix)
+        if candidates is not None and candidates.empty:
+            candidates = None
+
+    # -- Source 2: Staged upcoming fixtures CSV --------------------------
+    if candidates is None and staging_dir is not None:
+        candidates = _load_staged_upcoming(league, staging_dir, scan_date, bookmaker_prefix)
+
+    if candidates is None or candidates.empty:
+        _log.info(
+            "[signals] %s: no candidate matches for %s — skipping (no odds source available)",
+            league,
+            scan_date,
+        )
+        return []
+
+    _log.info("[signals] %s: %d candidate rows for %s", league, len(candidates), scan_date)
+
+    engine = ProductionDixonColesSignalEngine(
+        model=model,
+        min_edge_pct=min_edge_pct,
+        bookmaker_prefix=bookmaker_prefix,
+    )
+
+    try:
+        signals = engine.generate_signals(candidates)
+    except Exception as exc:
+        _log.error("[signals] %s: signal engine failed: %s", league, exc, exc_info=True)
+        return []
+
+    # Attach dataset_hash (required by SignalLedger) computed from candidates
+    dhash = _dataframe_hash(candidates)
+    for sig in signals:
+        sig.setdefault("dataset_hash", dhash)
+
+    _log.info("[signals] %s: %d signals generated", league, len(signals))
+    return signals
+
+
+def _fetch_odds_api_candidates(
+    league: str,
+    api_key: str,
+    bookmaker_prefix: str,
+) -> pd.DataFrame | None:
+    """Fetch upcoming match odds from The Odds API and convert to model row format."""
+    sport_key = _LEAGUE_TO_SPORT_KEY.get(league.upper())
+    if not sport_key:
+        _log.warning("[signals] %s: no Odds API sport_key mapping — skipping live odds", league)
+        return None
+
+    try:
+        from src.ingest.odds_api import OddsAPIClient
+        from src.ingest.live_odds_adapter import LiveOddsFootballDataAdapter
+
+        client = OddsAPIClient(api_key=api_key, request_delay_sec=0.5)
+        raw_events = client.get_odds(
+            sport=sport_key,
+            regions=["eu", "uk"],
+            markets=["h2h"],
+        )
+        if not raw_events:
+            _log.info("[signals] %s: Odds API returned 0 events", league)
+            return pd.DataFrame()
+
+        adapter = LiveOddsFootballDataAdapter(
+            bookmaker_prefix=bookmaker_prefix,
+            preferred_bookmakers=["bet365", "pinnacle"],
+            allow_bookmaker_fallback=True,
+        )
+        conversion = adapter.convert(raw_events)
+        if conversion.skipped_events:
+            _log.debug(
+                "[signals] %s: Odds API skipped %d events: %s",
+                league, len(conversion.skipped_events), conversion.skipped_events[:3],
+            )
+        return conversion.dataframe
+
+    except Exception as exc:
+        _log.warning("[signals] %s: Odds API fetch failed: %s", league, exc)
+        return None
+
+
+def _load_staged_upcoming(
+    league: str,
+    staging_dir: Path,
+    scan_date: date,
+    bookmaker_prefix: str,
+) -> pd.DataFrame | None:
+    """Load staged CSV and filter to rows where Date >= scan_date (upcoming fixtures)."""
+    candidates = [
+        staging_dir / f"{league}_latest.csv",
+        staging_dir / f"{league}.csv",
+        staging_dir / f"{league}_matches.csv",
+    ]
+    for path in candidates:
+        if path.exists():
+            try:
+                df = pd.read_csv(path, encoding="latin-1")
+                odds_cols = [f"{bookmaker_prefix}H", f"{bookmaker_prefix}D", f"{bookmaker_prefix}A"]
+                if not all(c in df.columns for c in odds_cols):
+                    _log.debug("[signals] %s: staged CSV lacks odds columns %s", league, odds_cols)
+                    return None
+                if "Date" in df.columns:
+                    df["_parsed_date"] = pd.to_datetime(
+                        df["Date"], dayfirst=True, errors="coerce"
+                    ).dt.date
+                    upcoming = df[df["_parsed_date"] >= scan_date].drop(columns=["_parsed_date"])
+                    if not upcoming.empty:
+                        _log.info(
+                            "[signals] %s: %d upcoming rows from %s", league, len(upcoming), path
+                        )
+                        return upcoming.reset_index(drop=True)
+                    _log.info(
+                        "[signals] %s: staged CSV has no rows with Date >= %s", league, scan_date
+                    )
+                    return pd.DataFrame()
+            except Exception as exc:
+                _log.warning("[signals] %s: failed to load staged CSV %s: %s", league, path, exc)
+
+    _log.info("[signals] %s: no staged CSV found in %s", league, staging_dir)
+    return None
+
+
+def _dataframe_hash(df: pd.DataFrame) -> str:
+    """Stable SHA-256 hash of a DataFrame for anti-leakage reproducibility."""
+    payload = df.to_csv(index=False).encode("utf-8")
+    return "sha256:" + hashlib.sha256(payload).hexdigest()

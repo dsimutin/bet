@@ -555,3 +555,113 @@ Pinnacle, Betfair Exchange и аналогичные площадки испол
 
 ### Ответственная игра
 Если ставки на спорт причиняют вред — обратитесь на горячую линию помощи зависимым: **8-800-700-44-51** (бесплатно по России).
+
+---
+
+## Render Deployment
+
+### Архитектура на Render
+
+```
+Render Web Service  — src/web/health_app.py
+  GET /health              → liveness probe (Render healthCheckPath)
+  GET /health/readiness    → deep readiness: model, ledger, staging
+  GET /health/model        → last model Brier score + age
+  GET /health/ledger       → settlement stats
+  GET /health/drift        → CUSUM drift status
+  GET /health/disk         → persistent disk usage
+  GET /health/all          → all checks combined
+
+Render Cron: daily-trainer  06:00 UTC → src/cron/run_trainer.py
+Render Cron: signal-pipeline 08:15 UTC → src/cron/run_signals.py
+Render Cron: settle-ledger  23:00 UTC → src/cron/run_settle.py
+
+Render PostgreSQL — metadata, model versions, cron run log (audit)
+Render Persistent Disk /data — models (.pkl), ledger (.json), staging CSVs
+```
+
+### Обязательные env vars на Render
+
+| Переменная | Обязательна | Назначение |
+|---|---|---|
+| `DATA_DIR` | Да | `/data` (Persistent Disk) |
+| `MODEL_DIR` | Да | `/data/models` |
+| `LEDGER_PATH` | Да | `/data/core/paper_signal_ledger.json` |
+| `STAGING_DIR` | Да | `/data/staging` |
+| `REPORTS_DIR` | Да | `/data/reports` |
+| `DATABASE_URL` | Авто (Render) | PostgreSQL connection string |
+| `TELEGRAM_BOT_TOKEN` | Нет | Уведомления (без — dry-run stdout) |
+| `TELEGRAM_CHAT_ID` | Нет | Chat/channel для уведомлений |
+| `THE_ODDS_API_KEY` | Нет | Live odds (без — staged data only) |
+| `LEAGUES` | Нет | `EPL,BUNDESLIGA,LALIGA,SERIEA` |
+| `PAPER_TRADING_ONLY` | Нет | `true` (всегда) |
+
+### Ручной запуск cron jobs
+
+```bash
+# Обучение модели
+python -m src.cron.run_trainer
+
+# Генерация сигналов
+python -m src.cron.run_signals
+
+# Settlement + drift check
+python -m src.cron.run_settle
+```
+
+### Проверка готовности к релизу
+
+```bash
+# 1. Syntax check
+python -m compileall src/ -q
+
+# 2. Import check
+python -c "from src.web.health_app import app; print('OK')"
+
+# 3. Unit tests
+pytest tests/test_release_readiness.py -v
+
+# 4. Full test suite
+pytest tests/ -v -m unit
+
+# 5. Health endpoint (после деплоя)
+curl https://your-app.onrender.com/health
+curl https://your-app.onrender.com/health/readiness
+curl https://your-app.onrender.com/health/all
+```
+
+### Telegram уведомления — проверка
+
+```bash
+# Dry-run (без токена, выводит в stdout)
+python -m src.cron.run_signals
+
+# Реальная отправка (с токеном)
+TELEGRAM_BOT_TOKEN=xxx TELEGRAM_CHAT_ID=yyy python -m src.cron.run_signals
+```
+
+---
+
+## Data Sources
+
+| Источник | Тип | Данные | Статус |
+|---|---|---|---|
+| OpenFootball | Open-source GitHub | Исторические результаты | ✅ Включён |
+| football-data.co.uk | Публичный CSV | Результаты + коэффициенты | ✅ Включён |
+| The Odds API | Commercial API | Live + historical odds | ✅ Включён (ключ нужен) |
+| Telegram channels | MTProto (Telethon) | Live odds/tips | ✅ Включён (session нужна) |
+| Manual CSV | ManualCsvProvider | Ручной импорт | ✅ Включён |
+| **Flashscore** | **Scraping** | **—** | **🚫 DISABLED** |
+
+### Flashscore — почему отключён
+
+Прямой scraping `flashscorekz.com` и любых Flashscore-сайтов **запрещён** их ToS и `robots.txt`.
+Провайдер `FlashscoreProvider` реализован как disabled-заглушка — вызов `.fetch()` бросает `ProviderDisabledError` с чётким сообщением и перечнем легальных альтернатив.
+
+Если потребуется данные Flashscore — единственный легальный путь: лицензионный API (если появится) или ручной CSV-экспорт через `ManualCsvProvider`.
+
+```bash
+# Убедиться, что provider disabled:
+python -c "from src.ingest.providers import FlashscoreProvider; print(FlashscoreProvider().enabled)"
+# → False
+```

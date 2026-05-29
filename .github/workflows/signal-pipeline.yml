@@ -30,14 +30,13 @@ on:
         default: true
         required: true
         type: boolean
-  schedule:
-    - cron: "15 8 * * *"
+  # schedule disabled — Render Cron Job 'signal-pipeline' (08:15 UTC) owns
+  # the daily run. Keep workflow_dispatch for manual/emergency triggers only.
+  # Re-enable schedule here ONLY if Render cron is turned off, to avoid
+  # double-running and ledger race conditions.
   push:
     branches:
-      - main
-      - master
       - "integration/**"
-      - "claude/**"
     paths:
       - "src/**"
       - "scripts/**"

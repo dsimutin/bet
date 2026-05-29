@@ -84,7 +84,9 @@ def _train_league(
 
     import pandas as pd
     df = pd.read_csv(csv_path, encoding="latin-1")
-    train_result = trainer.run(df, league=league, cutoff_date=cutoff)
+    # DailyTrainer.run(league, cutoff_date) — pass df via run_on_dataframe
+    # to avoid the trainer re-scanning staging for a file it might not find.
+    train_result = trainer.run_on_dataframe(league, cutoff, df)
 
     promoted = getattr(train_result, "promoted", False)
     brier = getattr(train_result, "brier_score", None)
