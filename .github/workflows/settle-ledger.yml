@@ -125,6 +125,42 @@ jobs:
               print("::warning::Concept drift detected — model retrain triggered automatically.")
           PYEOF
 
+      - name: Settlement summary notification
+        if: always()
+        run: |
+          LEDGER="data/core/paper_signal_ledger.json"
+          REPORT="data/reports/signal_ledger_settlement_report.json"
+          DRIFT="data/reports/drift_report.json"
+
+          SETTLED=0
+          TOTAL=0
+          if [ -f "$REPORT" ]; then
+            SETTLED=$(python3 -c "import json; d=json.load(open('$REPORT')); print(d.get('settled_count', 0))" 2>/dev/null || echo 0)
+            TOTAL=$(python3 -c "import json; d=json.load(open('$REPORT')); print(d.get('total_processed', 0))" 2>/dev/null || echo 0)
+          elif [ -f "$LEDGER" ]; then
+            TOTAL=$(python3 -c "import json; d=json.load(open('$LEDGER')); print(len(d.get('entries', [])))" 2>/dev/null || echo 0)
+          fi
+
+          DRIFT_STATUS="unknown"
+          KELLY_MULT="1.0"
+          if [ -f "$DRIFT" ]; then
+            DRIFT_STATUS=$(python3 -c "import json; d=json.load(open('$DRIFT')); print('DRIFT' if d.get('drift_detected') else 'OK')" 2>/dev/null || echo "unknown")
+            KELLY_MULT=$(python3 -c "import json; d=json.load(open('$DRIFT')); print(d.get('kelly_multiplier', 1.0))" 2>/dev/null || echo "1.0")
+          fi
+
+          echo "======================================"
+          echo " SETTLEMENT SUMMARY $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "======================================"
+          echo " Settled bets  : $SETTLED"
+          echo " Total in ledger: $TOTAL"
+          echo " Drift status  : $DRIFT_STATUS"
+          echo " Kelly mult    : $KELLY_MULT"
+          echo "======================================"
+
+          if [ "$DRIFT_STATUS" = "DRIFT" ]; then
+            echo "::warning::Model drift detected — Kelly reduced to ${KELLY_MULT}x. Retrain triggered."
+          fi
+
       - name: Persist updated ledger and drift report
         if: success()
         run: |

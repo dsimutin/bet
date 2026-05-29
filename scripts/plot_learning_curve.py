@@ -19,6 +19,10 @@ def main() -> None:
     parser.add_argument("--league", default="EPL")
     parser.add_argument("--model-dir", default="data/models", type=Path)
     parser.add_argument("--output", default="learning_curve.png")
+    parser.add_argument("--baseline-brier", type=float, default=0.25,
+                        help="Brier score of naive random baseline (default: 0.25)")
+    parser.add_argument("--baseline-logloss", type=float, default=0.693,
+                        help="Log-loss of naive random baseline ln(2) (default: 0.693)")
     args = parser.parse_args()
 
     meta_files = sorted(glob(str(args.model_dir / f"dc_{args.league}_*.meta.json")))
@@ -87,7 +91,8 @@ def main() -> None:
         if not promoted.empty:
             ax1.scatter(promoted["timestamp"], promoted["brier"],
                         color="gold", s=100, zorder=5, label="promoted")
-        ax1.axhline(y=0.25, color="red", linestyle="--", alpha=0.5, label="random baseline")
+        ax1.axhline(y=args.baseline_brier, color="red", linestyle="--", alpha=0.5,
+                    label=f"baseline ({args.baseline_brier:.3f})")
         ax1.set_title("Brier Score (lower = better)")
         ax1.set_ylabel("Brier Score")
         ax1.legend()
@@ -95,8 +100,11 @@ def main() -> None:
 
         ax2 = axes[1]
         ax2.plot(df["timestamp"], df["log_loss"], "o-", color="coral", linewidth=2)
+        ax2.axhline(y=args.baseline_logloss, color="red", linestyle="--", alpha=0.5,
+                    label=f"baseline ({args.baseline_logloss:.3f})")
         ax2.set_title("Log Loss (lower = better)")
         ax2.set_ylabel("Log Loss")
+        ax2.legend()
         ax2.tick_params(axis="x", rotation=30)
 
         ax3 = axes[2]
