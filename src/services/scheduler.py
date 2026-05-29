@@ -96,10 +96,19 @@ def start(loop: asyncio.AbstractEventLoop | None = None) -> None:
         misfire_grace_time=300,
     )
 
+    # Keep-alive: ping /health every 14 min so Render starter plan never sleeps.
+    sched.add_job(
+        _job_keep_alive,
+        "interval",
+        minutes=14,
+        id="keep_alive",
+        replace_existing=True,
+    )
+
     sched.start()
     _log.info(
         "[scheduler] Started. Jobs: signal_scan@:00, settlement@:20, "
-        "training_check@:40, active_report@:50 every %dh UTC",
+        "training_check@:40, active_report@:50 every %dh UTC | keep_alive every 14min",
         interval_h,
     )
 
@@ -158,3 +167,15 @@ async def _job_active_report() -> None:
     from src.cron import run_active_report
     await _run_in_executor(run_active_report.main, "active_report")
     _log.info("[scheduler] ← active_report done")
+
+
+async def _job_keep_alive() -> None:
+    """Self-ping /health to prevent Render starter plan from sleeping."""
+    port = os.environ.get("PORT", "10000")
+    url = f"http://localhost:{port}/health"
+    try:
+        import urllib.request
+        with urllib.request.urlopen(url, timeout=5) as resp:
+            _log.debug("[scheduler] keep_alive ping %s → %s", url, resp.status)
+    except Exception as exc:
+        _log.debug("[scheduler] keep_alive ping failed (non-critical): %s", exc)
