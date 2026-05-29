@@ -161,14 +161,18 @@ def api_collector_status() -> dict[str, Any]:
     line_count = 0
     last_message: str | None = None
     if live_path.exists():
-        lines = live_path.read_text(encoding="utf-8").splitlines()
-        line_count = len(lines)
-        if lines:
-            try:
-                last = json.loads(lines[-1])
-                last_message = f"{last.get('channel','')} @ {last.get('date','')[:19]}"
-            except Exception:
+        # Count lines and read only the last one to avoid loading the full file
+        with live_path.open(encoding="utf-8") as fh:
+            last_line = ""
+            for line_count, last_line in enumerate(fh, start=1):  # type: ignore[assignment]
                 pass
+            else:
+                if last_line:
+                    try:
+                        last = json.loads(last_line)
+                        last_message = f"{last.get('channel','')} @ {last.get('date','')[:19]}"
+                    except Exception:
+                        pass
     return {
         "configured": is_configured(),
         "running": _tg_task is not None and not _tg_task.done(),
