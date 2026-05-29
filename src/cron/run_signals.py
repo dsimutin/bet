@@ -100,37 +100,44 @@ def _run_league(league: str, model_dir: Path, staging_dir: Path, today: date) ->
 
 
 def _notify_telegram(signals: list[dict], today: date) -> None:
+    """Send signals via TelegramSender.
+
+    Uses dry_run=False when TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID are set.
+    Falls back to stdout dry-run when either is missing.
+    Each signal is sent individually using the standard TelegramSender template
+    so field names always match ProductionDixonColesSignalEngine output.
+    """
+    from src.integrations.telegram_sender import TelegramConfig, TelegramSender
+
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
-    if not token or not chat_id:
+    dry_run = not (token and chat_id)
+
+    if dry_run:
         print("[signals] Telegram not configured — dry-run stdout only")
         for sig in signals[:5]:
-            print(f"  📊 {sig.get('market')} | edge={sig.get('edge_pct')}% | "
-                  f"odds={sig.get('book_odds')} | {sig.get('match_id','')}")
+            home = sig.get("home_team", "?")
+            away = sig.get("away_team", "?")
+            edge = sig.get("edge_pct", sig.get("edge_vs_fair_pct", "?"))
+            odds = sig.get("entry_odds", "?")
+            sel = sig.get("selection_ru", sig.get("selection", "?"))
+            print(f"  [DRY-RUN] {home} vs {away} | {sel} @ {odds} | edge={edge}%")
         return
 
-    try:
-        import urllib.request
-        lines = [f"📊 *{len(signals)} signals — {today}*\n"]
-        for sig in signals[:10]:
-            lines.append(
-                f"• {sig.get('market','?')} | edge={sig.get('edge_pct','?')}% | "
-                f"odds={sig.get('book_odds','?')} | Kelly={sig.get('recommended_stake_kelly_fraction','?')}"
-            )
-        if len(signals) > 10:
-            lines.append(f"_...and {len(signals)-10} more_")
+    config = TelegramConfig(bot_token=token, chat_id=chat_id, dry_run=False)
+    sender = TelegramSender(config)
 
-        text = "\n".join(lines)
-        payload = json.dumps({"chat_id": chat_id, "text": text, "parse_mode": "Markdown"})
-        req = urllib.request.Request(
-            f"https://api.telegram.org/bot{token}/sendMessage",
-            data=payload.encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-        )
-        with urllib.request.urlopen(req, timeout=10):
-            print(f"[signals] Telegram sent: {len(signals)} signals")
-    except Exception as e:
-        print(f"[signals] Telegram failed (non-critical): {e}", file=sys.stderr)
+    sent = 0
+    for sig in signals:
+        try:
+            result = sender.send_signal(sig)
+            if result.get("ok"):
+                sent += 1
+        except Exception as e:
+            print(f"[signals] Telegram send failed for {sig.get('signal_id')}: {e}",
+                  file=sys.stderr)
+
+    print(f"[signals] Telegram: {sent}/{len(signals)} signals sent")
 
 
 def _log_run(job: str, status: str, duration_s: float, message: str, meta: dict | None = None):
