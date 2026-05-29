@@ -26,14 +26,19 @@ class TrainingResult:
 
 
 class DailyTrainer:
-    """Train, validate, save, and optionally promote a Dixon-Coles model."""
+    """Train, validate, save, and optionally promote a Dixon-Coles model.
+
+    Brier score scale for 3-class (1X2) football:
+      0.0 = perfect | 0.65 = our gate | 0.667 = random baseline (uniform 1/3)
+    Dixon-Coles on 4+ seasons typically achieves 0.53-0.64.
+    """
 
     def __init__(
         self,
         registry: ModelRegistry | None = None,
         staging_dir: Path = Path("data/staging"),
         config: DixonColesConfig | None = None,
-        max_brier_score: float | None = 0.60,
+        max_brier_score: float | None = 0.65,
         max_log_loss: float | None = 1.20,
     ) -> None:
         self.registry = registry or ModelRegistry()

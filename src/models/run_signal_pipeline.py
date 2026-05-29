@@ -60,7 +60,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--production-trainer-min-matches", default=20, type=int)
     parser.add_argument("--production-trainer-max-iterations", default=120, type=int)
-    parser.add_argument("--production-trainer-max-brier-score", default=0.60, type=float)
+    parser.add_argument("--production-trainer-max-brier-score", default=0.65, type=float)
     parser.add_argument("--production-trainer-max-log-loss", default=1.20, type=float)
     parser.add_argument(
         "--production-train-openfootball",

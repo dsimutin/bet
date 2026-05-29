@@ -42,7 +42,7 @@ def _args() -> argparse.Namespace:
         train_production_model=True,
         production_trainer_min_matches=20,
         production_trainer_max_iterations=120,
-        production_trainer_max_brier_score=0.60,
+        production_trainer_max_brier_score=0.65,
         production_trainer_max_log_loss=1.20,
         production_train_openfootball=False,
         openfootball_leagues="EPL",
@@ -154,7 +154,7 @@ def test_pipeline_builds_train_command_for_production_dixon_coles() -> None:
     assert cmd[cmd.index("--league") + 1] == "EPL"
     assert cmd[cmd.index("--input") + 1] == "data/reports/football_data_combined.csv"
     assert cmd[cmd.index("--model-dir") + 1] == "data/models"
-    assert cmd[cmd.index("--max-brier-score") + 1] == "0.6"
+    assert cmd[cmd.index("--max-brier-score") + 1] == "0.65"
     assert cmd[cmd.index("--max-log-loss") + 1] == "1.2"
 
 
