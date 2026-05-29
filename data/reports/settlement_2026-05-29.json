@@ -1,0 +1,18 @@
+{
+  "settled": 0,
+  "unmatched_open_signals": 0,
+  "unmatched_signal_ids": [],
+  "summary": {
+    "total_signals": 30,
+    "open_signals": 0,
+    "settled_signals": 30,
+    "void_signals": 0,
+    "delivered_signals": 30,
+    "blocked_delivery_signals": 0,
+    "win_rate": 0.7,
+    "roi_pct": -11.1111,
+    "pnl_units": -0.191,
+    "turnover_units": 1.719,
+    "mean_edge_pct": 2.8657
+  }
+}
