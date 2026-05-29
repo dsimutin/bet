@@ -3,30 +3,14 @@ name: Daily Model Trainer
 on:
   workflow_dispatch:
     inputs:
-      league:
-        description: "League code"
-        default: "EPL"
+      leagues:
+        description: "Comma-separated league codes (EPL,BUNDESLIGA,LALIGA,SERIEA)"
+        default: "EPL,BUNDESLIGA,LALIGA,SERIEA"
         required: true
       cutoff_date:
-        description: "YYYY-MM-DD cutoff date"
+        description: "YYYY-MM-DD cutoff date (leave empty for today)"
         default: ""
         required: false
-      football_data_leagues:
-        description: "football-data league codes used for training"
-        default: "E0"
-        required: true
-      seasons:
-        description: "football-data seasons"
-        default: "2122,2223,2324,2425,2526"
-        required: true
-      history_source:
-        description: "Training history source: football-data or openfootball"
-        default: "openfootball"
-        required: true
-      openfootball_leagues:
-        description: "OpenFootball league codes used for training"
-        default: "EPL"
-        required: true
       openfootball_seasons:
         description: "OpenFootball seasons"
         default: "2021-22,2022-23,2023-24,2024-25"
@@ -53,8 +37,13 @@ permissions:
 
 jobs:
   train:
-    name: Train and promote Dixon-Coles model
+    name: Train Dixon-Coles — ${{ matrix.league }}
     runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        league: [EPL, BUNDESLIGA, LALIGA, SERIEA]
+      fail-fast: false   # train remaining leagues even if one fails
 
     steps:
       - name: Check out repository
@@ -71,61 +60,59 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra dev
 
+      - name: Skip if league not in inputs
+        id: check_league
+        run: |
+          REQUESTED="${{ github.event.inputs.leagues || 'EPL,BUNDESLIGA,LALIGA,SERIEA' }}"
+          if echo "$REQUESTED" | grep -qw "${{ matrix.league }}"; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "League ${{ matrix.league }} not requested — skipping."
+          fi
+
       - name: Run trainer
+        if: steps.check_league.outputs.skip == 'false'
         env:
-          LEAGUE: ${{ github.event.inputs.league || 'EPL' }}
-          CUTOFF_DATE: ${{ github.event.inputs.cutoff_date }}
-          FOOTBALL_DATA_LEAGUES: ${{ github.event.inputs.football_data_leagues || 'E0' }}
-          SEASONS: ${{ github.event.inputs.seasons || '2122,2223,2324,2425,2526' }}
-          HISTORY_SOURCE: ${{ github.event.inputs.history_source || 'openfootball' }}
-          OPENFOOTBALL_LEAGUES: ${{ github.event.inputs.openfootball_leagues || 'EPL' }}
+          LEAGUE: ${{ matrix.league }}
+          CUTOFF_DATE: ${{ github.event.inputs.cutoff_date || '' }}
           OPENFOOTBALL_SEASONS: ${{ github.event.inputs.openfootball_seasons || '2021-22,2022-23,2023-24,2024-25' }}
         run: |
           cutoff_args=()
           if [ -n "$CUTOFF_DATE" ]; then
             cutoff_args=(--cutoff-date "$CUTOFF_DATE")
           fi
-          source_args=()
-          if [ "$HISTORY_SOURCE" = "openfootball" ]; then
-            source_args=(
-              --download-openfootball
-              --openfootball-leagues "$OPENFOOTBALL_LEAGUES"
-              --openfootball-seasons "$OPENFOOTBALL_SEASONS"
-            )
-          else
-            source_args=(
-              --download-football-data
-              --football-data-leagues "$FOOTBALL_DATA_LEAGUES"
-              --seasons "$SEASONS"
-            )
-          fi
           uv run --extra dev python -m src.models.run_daily_trainer \
             --league "$LEAGUE" \
             "${cutoff_args[@]}" \
-            "${source_args[@]}" \
+            --download-openfootball \
+            --openfootball-leagues "$LEAGUE" \
+            --openfootball-seasons "$OPENFOOTBALL_SEASONS" \
             --model-dir data/models \
             --output-dir data/reports
 
       - name: Upload training artifacts
-        if: always()
+        if: always() && steps.check_league.outputs.skip == 'false'
         uses: actions/upload-artifact@v4
         with:
-          name: daily-model-training
+          name: daily-model-training-${{ matrix.league }}
           if-no-files-found: ignore
           path: |
-            data/models/*.pkl
-            data/models/*.meta.json
-            data/models/calibration_*.pkl
+            data/models/dc_${{ matrix.league }}_*.pkl
+            data/models/dc_${{ matrix.league }}_*.meta.json
+            data/models/calibration_dc_${{ matrix.league }}_*.pkl
             data/reports/daily_training_*.json
 
       - name: Validate model quality gate
+        if: steps.check_league.outputs.skip == 'false'
         run: |
           uv run --extra dev python - <<'EOF'
           import json, sys, pathlib, glob
 
-          meta_files = sorted(glob.glob("data/models/dc_*.meta.json"))
+          league = "${{ matrix.league }}"
+          meta_files = sorted(glob.glob(f"data/models/dc_{league}_*.meta.json"))
           if not meta_files:
-              print("No model metadata files found — skipping quality gate.")
+              print(f"No model metadata for {league} — skipping quality gate.")
               sys.exit(0)
 
           latest = meta_files[-1]
@@ -135,31 +122,32 @@ jobs:
           brier = meta.get("brier_score")
           status = meta.get("status", "candidate")
 
-          print(f"Model: {meta.get('model_id')}  status={status}  brier={brier}  converged={converged}")
+          print(f"[{league}] {meta.get('model_id')}  status={status}  brier={brier}  converged={converged}")
 
           errors = []
           if brier is not None and float(brier) > 0.70:
               errors.append(f"brier_score {brier:.4f} exceeds hard ceiling 0.70")
           if converged is False:
-              errors.append("optimizer did not converge (params.converged=False)")
+              errors.append("optimizer did not converge")
 
           if errors:
-              print("Quality gate FAILED:", "; ".join(errors), file=sys.stderr)
+              print(f"[{league}] Quality gate FAILED:", "; ".join(errors), file=sys.stderr)
               sys.exit(1)
 
-          print("Quality gate passed.")
+          print(f"[{league}] Quality gate passed.")
           EOF
 
       - name: Persist model state
-        if: success()
+        if: success() && steps.check_league.outputs.skip == 'false'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           state_files=()
-          for pattern in "data/models/*.pkl" \
-                         "data/models/*.meta.json" \
-                         "data/models/calibration_*.pkl" \
+          league="${{ matrix.league }}"
+          for pattern in "data/models/dc_${league}_*.pkl" \
+                         "data/models/dc_${league}_*.meta.json" \
+                         "data/models/calibration_dc_${league}_*.pkl" \
                          "data/reports/daily_training_*.json"; do
             while IFS= read -r path; do
               state_files+=("$path")
@@ -167,16 +155,16 @@ jobs:
           done
 
           if [ ${#state_files[@]} -eq 0 ]; then
-            echo "No model state files found to persist."
+            echo "No model state files found for $league."
             exit 0
           fi
 
           git add -f "${state_files[@]}"
           if git diff --cached --quiet; then
-            echo "No model state changes to persist."
+            echo "No model state changes for $league."
             exit 0
           fi
 
-          git commit -m "chore: persist daily model state"
           git pull --rebase
+          git commit -m "chore: persist daily model state [$league]"
           git push

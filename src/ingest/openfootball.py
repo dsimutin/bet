@@ -33,6 +33,18 @@ LEAGUE_CODES: dict[str, str] = {
     "F1": "fr.1",
     "PORTUGAL": "pt.1",
     "NETHERLANDS": "nl.1",
+    # RPL (Russian Premier League) is not available in OpenFootball.
+    # Placeholder kept so downstream code can detect unsupported league gracefully.
+    # "RPL": None,
+}
+
+# Human-readable league names for display in reports and dashboard.
+LEAGUE_DISPLAY: dict[str, str] = {
+    "EPL": "English Premier League",
+    "BUNDESLIGA": "Bundesliga",
+    "LALIGA": "La Liga",
+    "SERIEA": "Serie A",
+    "LIGUE1": "Ligue 1",
 }
 
 

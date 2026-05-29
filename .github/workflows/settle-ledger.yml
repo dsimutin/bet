@@ -1,0 +1,119 @@
+name: Settle Signal Ledger
+
+# Runs after European matches finish (23:00 UTC) and on demand.
+# Downloads latest OpenFootball results, settles open signals, commits updated ledger.
+
+on:
+  workflow_dispatch:
+    inputs:
+      leagues:
+        description: "League codes to fetch results for"
+        default: "EPL,BUNDESLIGA,LALIGA,SERIEA"
+        required: true
+      seasons:
+        description: "OpenFootball seasons"
+        default: "2023-24,2024-25"
+        required: true
+  schedule:
+    - cron: "0 23 * * *"
+
+concurrency:
+  group: settle-ledger
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  settle:
+    name: Settle open signals
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Download latest results and settle ledger
+        env:
+          LEAGUES: ${{ github.event.inputs.leagues || 'EPL,BUNDESLIGA,LALIGA,SERIEA' }}
+          SEASONS: ${{ github.event.inputs.seasons || '2023-24,2024-25' }}
+        run: |
+          # Download latest results from OpenFootball (no API key needed)
+          uv run --extra dev python - <<'PYEOF'
+          import sys, os
+          from pathlib import Path
+          sys.path.insert(0, str(Path(".").resolve()))
+
+          from src.ingest.openfootball import OpenFootballLoader
+
+          leagues = os.environ["LEAGUES"].split(",")
+          seasons = os.environ["SEASONS"].split(",")
+          staging = Path("data/staging")
+          staging.mkdir(parents=True, exist_ok=True)
+
+          loader = OpenFootballLoader()
+          result = loader.build(leagues=leagues, seasons=seasons, use_cache=False)
+          if result.dataframe.empty:
+              print("No results downloaded — nothing to settle.", flush=True)
+              sys.exit(0)
+
+          csv_path = loader.save_combined(result.dataframe, staging, "latest_results.csv")
+          print(f"Downloaded {len(result.dataframe)} matches → {csv_path}", flush=True)
+          PYEOF
+
+      - name: Settle open signals in ledger
+        run: |
+          if [ ! -f data/staging/latest_results.csv ]; then
+            echo "No results file — skipping settlement."
+            exit 0
+          fi
+          uv run --extra dev python -m src.models.settle_signal_ledger \
+            --ledger-path data/core/paper_signal_ledger.json \
+            --results-input data/staging/latest_results.csv \
+            --report-path data/reports/signal_ledger_settlement_report.json
+
+      - name: Upload settlement report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: settlement-report
+          if-no-files-found: ignore
+          path: data/reports/signal_ledger_settlement_report.json
+
+      - name: Persist updated ledger
+        if: success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          state_files=()
+          for path in data/core/paper_signal_ledger.json \
+                      data/reports/signal_ledger_settlement_report.json; do
+            [ -f "$path" ] && state_files+=("$path")
+          done
+
+          if [ ${#state_files[@]} -eq 0 ]; then
+            echo "No ledger files to persist."
+            exit 0
+          fi
+
+          git add -f "${state_files[@]}"
+          if git diff --cached --quiet; then
+            echo "No ledger changes — all signals already settled."
+            exit 0
+          fi
+
+          git pull --rebase
+          git commit -m "chore: settle open signals [$(date -u +%Y-%m-%d)]"
+          git push

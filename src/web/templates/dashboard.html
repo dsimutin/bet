@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="refresh" content="300">
 <title>Betting Analytics Dashboard</title>
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
@@ -58,8 +59,26 @@
 <header>
   <h1>⚽ Betting Analytics</h1>
   <span class="badge">Paper Trading</span>
-  <span class="ts">{{ generated_at }}</span>
+  <span class="ts" id="ts">{{ generated_at }}</span>
+  <span class="ts" id="refresh-countdown" style="margin-left:8px;color:#4a5568">↻ 5:00</span>
 </header>
+<script>
+(function(){
+  var total=300, remaining=total;
+  function fmt(s){return Math.floor(s/60)+':'+(s%60<10?'0':'')+s%60}
+  var el=document.getElementById('refresh-countdown');
+  setInterval(function(){remaining--;el.textContent='↻ '+fmt(remaining);if(remaining<=0)remaining=total;},1000);
+  // Live-poll collector status every 15s
+  setInterval(function(){
+    fetch('/api/collector/status').then(function(r){return r.json();}).then(function(d){
+      var mc=document.getElementById('msg-count');
+      if(mc)mc.textContent=d.messages_collected;
+      var dot=document.getElementById('tg-dot');
+      if(dot){dot.className='dot'+(d.running?'':' dot-red');}
+    }).catch(function(){});
+  },15000);
+})();
+</script>
 <main>
 
   <!-- KPI row -->
@@ -177,7 +196,7 @@
   <!-- Telegram collector status -->
   <div class="card" style="margin-bottom:24px">
     <div class="section-title">
-      <span class="dot {% if tg_status and tg_status.running %}{% else %}dot-red{% endif %}"></span>
+      <span class="dot {% if tg_status and tg_status.running %}{% else %}dot-red{% endif %}" id="tg-dot"></span>
       Telegram Collector
     </div>
     <div style="display:flex;flex-wrap:wrap;gap:24px;align-items:flex-start">
@@ -195,7 +214,7 @@
       </div>
       <div>
         <div style="font-size:.78rem;color:#718096;margin-bottom:4px">Сообщений собрано</div>
-        <span style="font-size:1.3rem;font-weight:700;color:#63b3ed">{{ tg_status.messages_collected if tg_status else 0 }}</span>
+        <span id="msg-count" style="font-size:1.3rem;font-weight:700;color:#63b3ed">{{ tg_status.messages_collected if tg_status else 0 }}</span>
       </div>
       <div>
         <div style="font-size:.78rem;color:#718096;margin-bottom:4px">Каналы</div>

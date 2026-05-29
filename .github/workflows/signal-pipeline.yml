@@ -146,7 +146,7 @@ jobs:
             if [ "$PRODUCTION_TRAIN_OPENFOOTBALL" = "true" ]; then
               production_args+=(
                 --production-train-openfootball
-                --openfootball-leagues EPL
+                --openfootball-leagues EPL,BUNDESLIGA,LALIGA,SERIEA
                 --openfootball-seasons 2021-22,2022-23,2023-24,2024-25
               )
             fi
