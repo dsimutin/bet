@@ -62,7 +62,26 @@ async def run_collector(
 
     client = TelegramClient(StringSession(session_str), api_id, api_hash)
 
-    @client.on(events.NewMessage(chats=channels))
+    await client.start()
+    _log.info("Telegram collector connected as %s", await client.get_me())
+
+    # Resolve each channel up-front; skip ones that don't exist so Telethon
+    # never tries to resolve them again on every incoming update.
+    valid_channels: list[Any] = []
+    for ch in channels:
+        try:
+            entity = await client.get_entity(ch)
+            valid_channels.append(entity)
+            _log.info("Resolved Telegram channel: %s → %s", ch, entity)
+        except Exception as exc:
+            _log.warning("Skipping unresolvable Telegram channel %r: %s", ch, exc)
+
+    if not valid_channels:
+        _log.warning("No valid Telegram channels — collector idle.")
+        await client.disconnect()
+        return
+
+    @client.on(events.NewMessage(chats=valid_channels))
     async def handler(event: Any) -> None:
         text = event.raw_text or ""
         if not text.strip():
@@ -103,9 +122,11 @@ async def run_collector(
         with output_path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(record, ensure_ascii=False) + "\n")
 
-    _log.info("Telegram collector starting — watching %d channel(s): %s", len(channels), channels)
-    await client.start()
-    _log.info("Telegram collector connected as %s", await client.get_me())
+    _log.info(
+        "Telegram collector watching %d valid channel(s): %s",
+        len(valid_channels),
+        [getattr(e, "username", None) or getattr(e, "id", e) for e in valid_channels],
+    )
 
     if stop_event:
         await stop_event.wait()
