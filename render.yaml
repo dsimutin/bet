@@ -1,28 +1,37 @@
 # render.yaml — Render Blueprint для Sports Betting Analytics MVP
 # Документация: https://render.com/docs/blueprint-spec
 #
-# АРХИТЕКТУРА (Вариант А — независимые Cron Jobs):
-#   - settle-ledger   23:00 UTC → закрывает открытые ставки по результатам дня
-#   - daily-trainer   06:00 UTC → переобучает Dixon-Coles на settled данных
-#   - signal-pipeline 08:15 UTC → генерирует сигналы value bet
+# АРХИТЕКТУРА (Active Mode — единый Web Service):
+#   Все задачи запускаются внутри Web Service через APScheduler (ACTIVE_MODE=true).
+#   Отдельные Cron Job сервисы не нужны — это упрощает конфигурацию и экономит ресурсы.
 #
-# Межсервисная зависимость settle → retrain решена через временной буфер:
-# daily-trainer стартует в 06:00, к этому времени settlement (23:00) завершён ~7 часов назад.
-# Это надёжнее GitHub workflow_call и не требует очередей (Redis/Worker).
+# Schedule (APScheduler, UTC):
+#   0  */3 * * *  signal_scan     — проверка матчей, генерация сигналов, Telegram-алерты
+#   20 */3 * * *  settlement      — закрытие завершившихся ставок, CUSUM drift check
+#   40 */3 * * *  training_check  — умное переобучение (только если MIN_NEW_SETTLED достигнут)
+#   50 */3 * * *  active_report   — 3-часовой Telegram-отчёт о состоянии бота
+#
+# Для ручного запуска или аварийного переключения отдельные entrypoints доступны как:
+#   python -m src.cron.run_signals
+#   python -m src.cron.run_settle
+#   python -m src.cron.run_trainer
+#   python -m src.cron.run_active_report
 
 version: "1"
 
 services:
 
   # ──────────────────────────────────────────────────────────────────
-  # WEB SERVICE — FastAPI: health checks + Telegram webhook (optional)
-  # Бесплатный план: 750 часов/месяц, усыпает при простое
+  # WEB SERVICE — FastAPI + APScheduler (active monitoring mode)
+  # Одиночный сервис: health API + встроенный планировщик задач.
+  # plan: standard рекомендуется для production (512 MB RAM, не спит).
+  # plan: starter — для разработки/тестирования (усыпает при простое).
   # ──────────────────────────────────────────────────────────────────
   - type: web
     name: bet-api
     runtime: python
-    region: frankfurt       # ближайший к РФ регион Render
-    plan: starter           # 512 MB RAM, 0.5 CPU ($7/month)
+    region: frankfurt
+    plan: starter
     buildCommand: pip install -r requirements-render.txt && pip install -e . --no-deps
     startCommand: uvicorn src.web.health_app:app --host 0.0.0.0 --port $PORT --workers 1
     healthCheckPath: /health
@@ -31,11 +40,11 @@ services:
 
     disk:
       name: bet-data-disk
-      mountPath: /data       # все данные здесь: модели, ledger, staging
-      sizeGB: 10             # минимальный Persistent Disk на Render
+      mountPath: /data
+      sizeGB: 10
 
     envVars:
-      # ── Пути (всегда абсолютные на Render) ──
+      # ── Пути (абсолютные на Render) ──
       - key: DATA_DIR
         value: /data
       - key: MODEL_DIR
@@ -47,7 +56,35 @@ services:
       - key: REPORTS_DIR
         value: /data/reports
 
-      # ── PostgreSQL (Render подставляет автоматически) ──
+      # ── Лиги и сезоны ──
+      - key: LEAGUES
+        value: "EPL,BUNDESLIGA,LALIGA,SERIEA"
+      - key: OPENFOOTBALL_SEASONS
+        value: "2021-22,2022-23,2023-24,2024-25"
+
+      # ── Active mode scheduler ──
+      - key: ACTIVE_MODE
+        value: "true"
+      - key: ACTIVE_REPORT_INTERVAL_HOURS
+        value: "3"
+      - key: SIGNAL_SCAN_INTERVAL_HOURS
+        value: "3"
+      - key: SETTLEMENT_INTERVAL_HOURS
+        value: "3"
+      - key: TRAINING_CHECK_INTERVAL_HOURS
+        value: "3"
+      - key: FORCE_TRAINING
+        value: "false"
+      - key: MIN_NEW_SETTLED_MATCHES_FOR_TRAINING
+        value: "10"
+      - key: TELEGRAM_STATUS_REPORTS_ENABLED
+        value: "true"
+      - key: TELEGRAM_SIGNAL_ALERTS_ENABLED
+        value: "true"
+      - key: SPORTS
+        value: "football"
+
+      # ── PostgreSQL ──
       - key: DATABASE_URL
         fromDatabase:
           name: bet-db
@@ -79,155 +116,12 @@ services:
       - key: PYTHONPATH
         value: /opt/render/project/src
 
-  # ──────────────────────────────────────────────────────────────────
-  # CRON JOB #1 — Settle Ledger (23:00 UTC ежедневно)
-  # Скачивает результаты матчей, закрывает открытые сигналы,
-  # запускает CUSUM детектор дрейфа, пишет отчёт
-  # ──────────────────────────────────────────────────────────────────
-  - type: cron
-    name: settle-ledger
-    runtime: python
-    region: frankfurt
-    plan: starter
-    schedule: "0 23 * * *"
-    buildCommand: pip install -r requirements-render.txt && pip install -e . --no-deps
-    startCommand: python -m src.cron.run_settle
-    branch: all-the-best
-
-    disk:
-      name: bet-data-disk   # тот же диск — модели и ledger общие
-      mountPath: /data
-
-    envVars:
-      - key: DATA_DIR
-        value: /data
-      - key: MODEL_DIR
-        value: /data/models
-      - key: LEDGER_PATH
-        value: /data/core/paper_signal_ledger.json
-      - key: STAGING_DIR
-        value: /data/staging
-      - key: REPORTS_DIR
-        value: /data/reports
-      - key: LEAGUES
-        value: "EPL,BUNDESLIGA,LALIGA,SERIEA"
-      - key: DATABASE_URL
-        fromDatabase:
-          name: bet-db
-          property: connectionString
-      - key: TELEGRAM_BOT_TOKEN
-        sync: false
-      - key: TELEGRAM_CHAT_ID
-        sync: false
-      - key: PAPER_TRADING_ONLY
-        value: "true"
-      - key: PYTHONUNBUFFERED
-        value: "1"
-      - key: PYTHONPATH
-        value: /opt/render/project/src
-
-  # ──────────────────────────────────────────────────────────────────
-  # CRON JOB #2 — Daily Trainer (06:00 UTC ежедневно)
-  # Переобучает Dixon-Coles на всей истории + settled данных.
-  # К 06:00 settlement (23:00) уже завершён — данные свежие.
-  # ──────────────────────────────────────────────────────────────────
-  - type: cron
-    name: daily-trainer
-    runtime: python
-    region: frankfurt
-    plan: starter
-    schedule: "0 6 * * *"
-    buildCommand: pip install -r requirements-render.txt && pip install -e . --no-deps
-    startCommand: python -m src.cron.run_trainer
-    branch: all-the-best
-
-    disk:
-      name: bet-data-disk
-      mountPath: /data
-
-    envVars:
-      - key: DATA_DIR
-        value: /data
-      - key: MODEL_DIR
-        value: /data/models
-      - key: LEDGER_PATH
-        value: /data/core/paper_signal_ledger.json
-      - key: STAGING_DIR
-        value: /data/staging
-      - key: REPORTS_DIR
-        value: /data/reports
-      - key: LEAGUES
-        value: "EPL,BUNDESLIGA,LALIGA,SERIEA"
-      - key: OPENFOOTBALL_SEASONS
-        value: "2021-22,2022-23,2023-24,2024-25"
-      - key: DATABASE_URL
-        fromDatabase:
-          name: bet-db
-          property: connectionString
-      - key: PAPER_TRADING_ONLY
-        value: "true"
-      - key: PYTHONUNBUFFERED
-        value: "1"
-      - key: PYTHONPATH
-        value: /opt/render/project/src
-
-  # ──────────────────────────────────────────────────────────────────
-  # CRON JOB #3 — Signal Pipeline (08:15 UTC ежедневно)
-  # Генерирует value bet сигналы на основе свежей модели.
-  # Запускается через ~2ч после daily-trainer — модель уже обучена.
-  # ──────────────────────────────────────────────────────────────────
-  - type: cron
-    name: signal-pipeline
-    runtime: python
-    region: frankfurt
-    plan: starter
-    schedule: "15 8 * * *"
-    buildCommand: pip install -r requirements-render.txt && pip install -e . --no-deps
-    startCommand: python -m src.cron.run_signals
-    branch: all-the-best
-
-    disk:
-      name: bet-data-disk
-      mountPath: /data
-
-    envVars:
-      - key: DATA_DIR
-        value: /data
-      - key: MODEL_DIR
-        value: /data/models
-      - key: LEDGER_PATH
-        value: /data/core/paper_signal_ledger.json
-      - key: STAGING_DIR
-        value: /data/staging
-      - key: REPORTS_DIR
-        value: /data/reports
-      - key: LEAGUES
-        value: "EPL,BUNDESLIGA,LALIGA,SERIEA"
-      - key: DATABASE_URL
-        fromDatabase:
-          name: bet-db
-          property: connectionString
-      - key: TELEGRAM_BOT_TOKEN
-        sync: false
-      - key: TELEGRAM_CHAT_ID
-        sync: false
-      - key: THE_ODDS_API_KEY
-        sync: false
-      - key: PAPER_TRADING_ONLY
-        value: "true"
-      - key: PYTHONUNBUFFERED
-        value: "1"
-      - key: PYTHONPATH
-        value: /opt/render/project/src
-
 # ──────────────────────────────────────────────────────────────────
 # POSTGRESQL — метаданные, аудит-лог, история drift-отчётов
-# Ledger и модели (.pkl) хранятся на Persistent Disk (не в БД):
-# это упрощает резервное копирование и не требует ORM.
 # ──────────────────────────────────────────────────────────────────
 databases:
   - name: bet-db
-    plan: free              # 256 MB RAM, 1 GB storage (free)
+    plan: free
     region: frankfurt
     databaseName: bet
     user: bet_user

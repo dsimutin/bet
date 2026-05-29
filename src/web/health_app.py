@@ -6,30 +6,69 @@ Endpoints:
     GET /health/model        — latest model Brier score + age
     GET /health/drift        — current CUSUM drift status + Kelly multiplier
     GET /health/disk         — persistent disk usage
+    GET /health/readiness    — deep readiness for signal generation
+    GET /health/active       — active mode status, last run timestamps, 24h stats
     GET /health/all          — all checks combined (for dashboards)
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import os
-from datetime import datetime, timezone
+from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 from glob import glob
 from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
-app = FastAPI(
-    title="Bet Health API",
-    description="Sports Betting Analytics — system health checks",
-    version="0.1.0",
-)
+_log = logging.getLogger(__name__)
 
 DATA_DIR = Path(os.environ.get("DATA_DIR", "data"))
 MODEL_DIR = Path(os.environ.get("MODEL_DIR", DATA_DIR / "models"))
 LEDGER_PATH = Path(os.environ.get("LEDGER_PATH", DATA_DIR / "core" / "paper_signal_ledger.json"))
 REPORTS_DIR = Path(os.environ.get("REPORTS_DIR", DATA_DIR / "reports"))
+
+
+def _env_bool(key: str, default: bool = False) -> bool:
+    return os.environ.get(key, str(default)).strip().lower() in ("1", "true", "yes")
+
+
+ACTIVE_MODE = _env_bool("ACTIVE_MODE", False)
+
+
+# ──────────────────────────────────────────────────────────────────
+# Lifespan: start/stop APScheduler when ACTIVE_MODE=true
+# ──────────────────────────────────────────────────────────────────
+
+@asynccontextmanager
+async def lifespan(fastapi_app: FastAPI):
+    if ACTIVE_MODE:
+        try:
+            from src.services.scheduler import start as scheduler_start
+            scheduler_start()
+            _log.info("[health_app] Active mode scheduler started")
+        except Exception as exc:
+            _log.error("[health_app] Scheduler start failed: %s", exc)
+    else:
+        _log.info("[health_app] ACTIVE_MODE=false — scheduler not started")
+    yield
+    if ACTIVE_MODE:
+        try:
+            from src.services.scheduler import stop as scheduler_stop
+            scheduler_stop()
+        except Exception:
+            pass
+
+
+app = FastAPI(
+    title="Bet Health API",
+    description="Sports Betting Analytics — system health checks",
+    version="0.2.0",
+    lifespan=lifespan,
+)
 
 
 def _utcnow() -> str:
@@ -226,7 +265,8 @@ def health_readiness():
 
     # 6. Last cron run timestamps from reports
     def _last_report(pattern: str) -> str | None:
-        files = sorted((DATA_DIR / "reports").glob(pattern), reverse=True) if (DATA_DIR / "reports").exists() else []
+        files = sorted((DATA_DIR / "reports").glob(pattern), reverse=True) \
+                if (DATA_DIR / "reports").exists() else []
         return files[0].name if files else None
 
     checks["last_settlement"] = {
@@ -265,6 +305,99 @@ def health_readiness():
 
 
 # ──────────────────────────────────────────────────────────────────
+# /health/active — active monitoring status
+# ──────────────────────────────────────────────────────────────────
+
+@app.get("/health/active")
+def health_active():
+    """Active mode status: last run timestamps, 24h stats, scheduler state."""
+    now = datetime.now(timezone.utc)
+    cutoff_24h = now - timedelta(hours=24)
+
+    active_enabled = ACTIVE_MODE
+    scheduler_running = False
+    if active_enabled:
+        try:
+            from src.services.scheduler import get_scheduler
+            scheduler_running = get_scheduler().running
+        except Exception:
+            pass
+
+    # Last runs from run history
+    last_runs: dict[str, str | None] = {
+        "signal_scan": None,
+        "settlement": None,
+        "training_check": None,
+        "active_report": None,
+    }
+    errors_24h: list[str] = []
+    signals_24h = 0
+    settled_24h = 0
+
+    try:
+        from src.models.run_history import read_recent, read_last_run
+        records = read_recent(500)
+
+        for run_type in last_runs:
+            rec = read_last_run(run_type)
+            if rec:
+                last_runs[run_type] = rec.get("started_at", "")[:19].replace("T", " ") + " UTC"
+
+        for rec in records:
+            try:
+                started = datetime.fromisoformat(rec["started_at"].replace("Z", "+00:00"))
+                if started >= cutoff_24h:
+                    signals_24h += rec.get("signals_count", 0)
+                    settled_24h += rec.get("settled_count", 0)
+                    errors_24h.extend(rec.get("errors", []))
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    # Model age
+    model_age_hours = None
+    meta_files = sorted(glob(str(MODEL_DIR / "dc_*.meta.json")))
+    for mf in reversed(meta_files):
+        try:
+            m = json.loads(Path(mf).read_text())
+            if m.get("status") == "production":
+                dt = datetime.fromisoformat(m["created_at_utc"].replace("Z", "+00:00"))
+                model_age_hours = round((now - dt).total_seconds() / 3600, 1)
+                break
+        except Exception:
+            pass
+
+    # Data freshness (last staging CSV mtime)
+    data_freshness: str | None = None
+    staging_csvs = sorted((DATA_DIR / "staging").glob("*.csv")) if (DATA_DIR / "staging").exists() else []
+    if staging_csvs:
+        try:
+            mtime = max(f.stat().st_mtime for f in staging_csvs)
+            dt = datetime.fromtimestamp(mtime, tz=timezone.utc)
+            age_h = round((now - dt).total_seconds() / 3600, 1)
+            data_freshness = f"{age_h}h ago"
+        except Exception:
+            pass
+
+    return {
+        "active_mode": active_enabled,
+        "scheduler_running": scheduler_running,
+        "interval_hours": int(os.environ.get("ACTIVE_REPORT_INTERVAL_HOURS", "3")),
+        "last_runs": last_runs,
+        "stats_24h": {
+            "signals": signals_24h,
+            "settled": settled_24h,
+            "errors": len(errors_24h),
+            "error_details": list(dict.fromkeys(errors_24h))[:5],
+        },
+        "model_age_hours": model_age_hours,
+        "data_freshness": data_freshness,
+        "ts": _utcnow(),
+    }
+
+
+# ──────────────────────────────────────────────────────────────────
 # /health/all — combined (для Render dashboard / внешних мониторов)
 # ──────────────────────────────────────────────────────────────────
 
@@ -275,6 +408,7 @@ def health_all():
     drift = health_drift()
     disk = health_disk()
     readiness = health_readiness()
+    active = health_active()
 
     def _body(resp):
         if hasattr(resp, "body"):
@@ -295,5 +429,6 @@ def health_all():
         "overall": overall,
         "checks": checks,
         "readiness": _body(readiness),
+        "active": _body(active),
         "ts": _utcnow(),
     }
