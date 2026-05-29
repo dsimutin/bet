@@ -86,6 +86,11 @@ class RollingFormBuilder:
         self._team_records = records
         return self
 
+    @property
+    def form_history(self) -> dict[str, list[dict[str, Any]]]:
+        """All team-match records (for debugging and inspection)."""
+        return dict(self._team_records)
+
     def team_form(self, team: str) -> TeamFormFeatures:
         records = self._team_records.get(team, [])[-self.window :]
         n = len(records)

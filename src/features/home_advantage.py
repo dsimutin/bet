@@ -61,6 +61,11 @@ class HomeAdvantageBuilder:
         self._away_records = away_rec
         return self
 
+    @property
+    def advantage_history(self) -> dict[str, list[dict]]:
+        """All home-game records per team (for debugging and inspection)."""
+        return dict(self._home_records)
+
     def features_for_match(
         self, home_team: str, away_team: str
     ) -> HomeAdvantageFeatures:

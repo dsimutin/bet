@@ -1,18 +1,20 @@
 """CUSUM-based concept drift detector for sports prediction model.
 
-Detects when the model's accuracy has shifted significantly compared to
-its recent baseline. When drift is detected, returns a recommended Kelly
-multiplier < 1.0 to reduce stake exposure.
+Two APIs:
+  Batch API  — reads from SignalLedger after settlement (production use).
+  Stream API — add_prediction() per result (testing / simulation).
 
-Usage:
-    from src.monitoring.drift_detector import CUSUMDriftDetector, DriftReport
-    from src.models.signal_ledger import SignalLedger
-
-    ledger = SignalLedger.load_or_create(Path("data/core/paper_signal_ledger.json"))
+Usage (batch):
+    from src.monitoring.drift_detector import CUSUMDriftDetector
     detector = CUSUMDriftDetector()
     report = detector.evaluate_ledger(ledger)
-    if report.drift_detected:
-        kelly_mult = report.kelly_multiplier  # 0.5
+
+Usage (stream):
+    detector = CUSUMDriftDetector(threshold=0.15, drift_window=14)
+    for result in results:
+        detector.add_prediction(predicted_prob=0.6, actual_outcome=result)
+    if detector.drift_detected:
+        kelly = detector.get_kelly_multiplier()  # 0.5
 """
 
 from __future__ import annotations
@@ -27,11 +29,11 @@ from typing import Any
 @dataclass(frozen=True)
 class DriftReport:
     drift_detected: bool
-    kelly_multiplier: float          # 1.0 = normal; 0.5 = drift detected
+    kelly_multiplier: float
     reason: str
-    recent_accuracy: float | None    # last drift_window bets
-    baseline_accuracy: float | None  # reference window before drift_window
-    cusum_value: float               # cumulative sum statistic
+    recent_accuracy: float | None
+    baseline_accuracy: float | None
+    cusum_value: float
     threshold: float
     n_recent: int
     n_baseline: int
@@ -46,10 +48,9 @@ class DriftReport:
 
 class CUSUMDriftDetector:
     """
-    Sliding-window CUSUM over model prediction errors from the signal ledger.
+    Sliding-window CUSUM detector with both batch (ledger) and stream APIs.
 
-    Drift is declared when recent_accuracy − baseline_accuracy < −threshold.
-    The detector requires at least ``min_window`` settled signals in each window.
+    Drift is declared when baseline_accuracy − recent_accuracy > threshold.
     """
 
     def __init__(
@@ -65,6 +66,195 @@ class CUSUMDriftDetector:
         self.baseline_size = drift_window * baseline_multiplier
         self.min_window = min_window
         self.kelly_on_drift = kelly_on_drift
+
+        # Stream API state
+        self._stream_errors: list[int] = []   # 0=correct, 1=error
+        self._stream_drift: bool = False
+
+    # ------------------------------------------------------------------
+    # Stream API (add_prediction / drift_detected / get_kelly_multiplier)
+    # ------------------------------------------------------------------
+
+    def add_prediction(self, predicted_prob: float, actual_outcome: int) -> bool:
+        """
+        Stream API: record one prediction result and check for drift.
+
+        Args:
+            predicted_prob: Model's predicted probability for the positive outcome.
+            actual_outcome: 1 if prediction was correct, 0 if wrong.
+
+        Returns:
+            True if drift was detected after this update.
+        """
+        error = 0 if actual_outcome == 1 else 1
+        self._stream_errors.append(error)
+        self._stream_drift = self._check_stream_drift()
+        return self._stream_drift
+
+    @property
+    def drift_detected(self) -> bool:
+        """True if stream drift has been detected (stream API)."""
+        return self._stream_drift
+
+    @property
+    def retrain_recommended(self) -> bool:
+        """True when drift is detected — recommend model retrain."""
+        return self._stream_drift
+
+    def get_kelly_multiplier(self) -> float:
+        """Return recommended Kelly multiplier: 0.5 on drift, 1.0 otherwise."""
+        return self.kelly_on_drift if self._stream_drift else 1.0
+
+    def reset_stream(self) -> None:
+        """Clear stream state after a retrain or manual reset."""
+        self._stream_errors = []
+        self._stream_drift = False
+
+    def _check_stream_drift(self) -> bool:
+        errors = self._stream_errors
+        total = len(errors)
+        need = self.min_window * 2
+        if total < need:
+            return False
+        recent = errors[-self.drift_window :]
+        baseline = errors[-self.drift_window - self.baseline_size : -self.drift_window]
+        if len(recent) < self.min_window or len(baseline) < self.min_window:
+            return False
+        recent_acc = 1.0 - sum(recent) / len(recent)
+        baseline_acc = 1.0 - sum(baseline) / len(baseline)
+        return (baseline_acc - recent_acc) > self.threshold
+
+    def stream_report(self) -> DriftReport:
+        """Return a DriftReport from current stream state."""
+        errors = self._stream_errors
+        total = len(errors)
+        need = self.min_window * 2
+        if total < need:
+            return self._no_data_report(f"insufficient_data: need {need}, got {total}")
+
+        recent = errors[-self.drift_window :]
+        baseline = errors[-self.drift_window - self.baseline_size : -self.drift_window]
+        if len(recent) < self.min_window or len(baseline) < self.min_window:
+            return self._no_data_report("insufficient_window_data")
+
+        recent_acc = 1.0 - sum(recent) / len(recent)
+        baseline_acc = 1.0 - sum(baseline) / len(baseline)
+        cusum = sum(e - (1.0 - baseline_acc) for e in recent) / len(recent)
+        drift = (baseline_acc - recent_acc) > self.threshold
+
+        return DriftReport(
+            drift_detected=drift,
+            kelly_multiplier=self.kelly_on_drift if drift else 1.0,
+            reason=(
+                f"accuracy dropped {baseline_acc:.2%}→{recent_acc:.2%} "
+                f"(Δ={baseline_acc - recent_acc:.2%} > threshold={self.threshold:.2%})"
+                if drift else
+                f"no_drift: baseline={baseline_acc:.2%} recent={recent_acc:.2%}"
+            ),
+            recent_accuracy=round(recent_acc, 4),
+            baseline_accuracy=round(baseline_acc, 4),
+            cusum_value=round(cusum, 4),
+            threshold=self.threshold,
+            n_recent=len(recent),
+            n_baseline=len(baseline),
+            retrain_recommended=drift,
+        )
+
+    # ------------------------------------------------------------------
+    # Batch API (evaluate from SignalLedger)
+    # ------------------------------------------------------------------
+
+    def evaluate_ledger(self, ledger: Any) -> DriftReport:
+        entries = _settled_entries_sorted(ledger.entries())
+        return self._evaluate_entries(entries)
+
+    def evaluate_ledger_path(self, path: Path) -> DriftReport:
+        if not path.exists():
+            return self._no_data_report("ledger_not_found")
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        entries = _settled_entries_sorted(raw.get("entries", {}))
+        return self._evaluate_entries(entries)
+
+    def _evaluate_entries(self, entries: list[dict[str, Any]]) -> DriftReport:
+        if len(entries) < self.min_window * 2:
+            return self._no_data_report(
+                f"insufficient_data: need {self.min_window * 2}, got {len(entries)}"
+            )
+        recent = entries[-self.drift_window :]
+        baseline = entries[-self.drift_window - self.baseline_size : -self.drift_window]
+        if len(recent) < self.min_window:
+            return self._no_data_report(f"insufficient_recent: {len(recent)} < {self.min_window}")
+        if len(baseline) < self.min_window:
+            return self._no_data_report(f"insufficient_baseline: {len(baseline)} < {self.min_window}")
+
+        recent_acc = _accuracy(recent)
+        baseline_acc = _accuracy(baseline)
+        baseline_error_rate = 1.0 - baseline_acc
+        cusum = sum(
+            (0.0 if e.get("result") == "win" else 1.0) - baseline_error_rate
+            for e in recent
+        ) / len(recent)
+        drift = (baseline_acc - recent_acc) > self.threshold
+
+        return DriftReport(
+            drift_detected=drift,
+            kelly_multiplier=self.kelly_on_drift if drift else 1.0,
+            reason=(
+                f"accuracy dropped {baseline_acc:.2%}→{recent_acc:.2%} "
+                f"(Δ={baseline_acc - recent_acc:.2%} > threshold={self.threshold:.2%})"
+                if drift else
+                f"no_drift: baseline={baseline_acc:.2%} recent={recent_acc:.2%} "
+                f"Δ={baseline_acc - recent_acc:.2%} ≤ {self.threshold:.2%}"
+            ),
+            recent_accuracy=round(recent_acc, 4),
+            baseline_accuracy=round(baseline_acc, 4),
+            cusum_value=round(cusum, 4),
+            threshold=self.threshold,
+            n_recent=len(recent),
+            n_baseline=len(baseline),
+            retrain_recommended=drift,
+        )
+
+    def _no_data_report(self, reason: str) -> DriftReport:
+        return DriftReport(
+            drift_detected=False,
+            kelly_multiplier=1.0,
+            reason=reason,
+            recent_accuracy=None,
+            baseline_accuracy=None,
+            cusum_value=0.0,
+            threshold=self.threshold,
+            n_recent=0,
+            n_baseline=0,
+            retrain_recommended=False,
+        )
+
+    def rolling_accuracy(self, ledger: Any, window_days: int = 14) -> dict[str, Any]:
+        entries = _settled_entries_sorted(ledger.entries())
+        cutoff = datetime.now(timezone.utc) - timedelta(days=window_days)
+        recent = [
+            e for e in entries
+            if _entry_ts(e) is not None and _entry_ts(e) >= cutoff
+        ]
+        if not recent:
+            return {"window_days": window_days, "n_bets": 0, "accuracy": None, "roi_pct": None}
+        wins = sum(1 for e in recent if e.get("result") == "win")
+        pnl = sum(float(e.get("pnl_units") or 0.0) for e in recent)
+        turnover = sum(float(e.get("stake_units") or 1.0) for e in recent)
+        return {
+            "window_days": window_days,
+            "n_bets": len(recent),
+            "accuracy": round(wins / len(recent), 4),
+            "roi_pct": round(pnl / turnover * 100, 4) if turnover else 0.0,
+        }
+
+    def save_report(self, report: DriftReport, path: Path) -> Path:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(report.to_dict(), indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        return path
 
     # ------------------------------------------------------------------
     # Main entry point

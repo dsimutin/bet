@@ -61,6 +61,11 @@ class RestDaysBuilder:
         self._all_dates = all_dates
         return self
 
+    @property
+    def rest_history(self) -> dict[str, list[date]]:
+        """All match dates per team (for debugging and inspection)."""
+        return dict(self._all_dates)
+
     def features_for_match(
         self,
         home_team: str,
