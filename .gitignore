@@ -30,6 +30,12 @@ data/injuries/*
 !data/signals/.gitkeep
 !data/injuries/.gitkeep
 
+# Models and ledger — persist in git (Render free plan has no disk)
+!data/core/paper_signal_ledger.json
+!data/models/*.pkl
+!data/models/*.meta.json
+!data/models/calibration_*.pkl
+
 # Jupyter
 .ipynb_checkpoints/
 notebooks/*.ipynb
