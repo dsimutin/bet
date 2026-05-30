@@ -12,6 +12,20 @@ services:
         value: /opt/render/project/src
       - key: PYTHONUNBUFFERED
         value: "1"
+      - key: ENABLE_RENDER_DAILY_PIPELINE
+        value: "true"
+      - key: RUN_PIPELINE_ON_STARTUP
+        value: "false"
+      - key: RENDER_DAILY_SIGNAL_UTC
+        value: "08:15"
+      - key: SCHEDULED_SEND_TELEGRAM
+        value: "false"
+      - key: LIVE_SPORT_KEYS
+        value: "soccer_epl"
+      - key: LEAGUES
+        value: "E0,SP1,D1,I1,F1"
+      - key: SEASONS
+        value: "2122,2223,2324,2425,2526"
       - key: THE_ODDS_API_KEY
         sync: false
       - key: TELEGRAM_BOT_TOKEN

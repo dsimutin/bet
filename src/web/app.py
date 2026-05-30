@@ -17,6 +17,8 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from src.web.render_scheduler import PipelineRunStatus, render_scheduler_enabled, scheduler_loop
+
 _ROOT = Path(__file__).parent.parent.parent
 _DATA = _ROOT / "data"
 _TEMPLATES = Path(__file__).parent / "templates"
@@ -24,19 +26,34 @@ _log = logging.getLogger(__name__)
 
 _tg_stop: asyncio.Event | None = None
 _tg_task: asyncio.Task | None = None
+_pipeline_stop: asyncio.Event | None = None
+_pipeline_task: asyncio.Task | None = None
+_pipeline_status = PipelineRunStatus()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    global _tg_stop, _tg_task
+    global _tg_stop, _tg_task, _pipeline_stop, _pipeline_task
     _tg_stop = asyncio.Event()
     _tg_task = asyncio.create_task(_start_telegram_collector(_tg_stop))
+    if render_scheduler_enabled():
+        _pipeline_stop = asyncio.Event()
+        _pipeline_task = asyncio.create_task(
+            scheduler_loop(_ROOT, _pipeline_status, _pipeline_stop)
+        )
     yield
     if _tg_stop:
         _tg_stop.set()
+    if _pipeline_stop:
+        _pipeline_stop.set()
     if _tg_task:
         try:
             await asyncio.wait_for(_tg_task, timeout=5.0)
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            pass
+    if _pipeline_task:
+        try:
+            await asyncio.wait_for(_pipeline_task, timeout=5.0)
         except (asyncio.TimeoutError, asyncio.CancelledError):
             pass
 
@@ -198,6 +215,14 @@ def api_model() -> list[dict[str, Any]]:
 @app.get("/api/readiness")
 def api_readiness() -> dict[str, Any]:
     return _daily_readiness() or {"available": False}
+
+
+@app.get("/api/pipeline/status")
+def api_pipeline_status() -> dict[str, Any]:
+    payload = _pipeline_status.to_dict()
+    payload["enabled"] = render_scheduler_enabled()
+    payload["running"] = _pipeline_task is not None and not _pipeline_task.done()
+    return payload
 
 
 # ── HTML dashboard ─────────────────────────────────────────────────────────────

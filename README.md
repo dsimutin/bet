@@ -420,6 +420,38 @@ Production-модели, calibration sidecar, `paper_signal_ledger.json` и кл
 quality-gate отчёты коммитятся обратно в репозиторий, поэтому следующий
 scheduled run стартует с накопленной памятью, а не с пустого checkout.
 
+### Render deployment
+
+`render.yaml` описывает бесплатный web service `betting-analytics`. На старте
+Render выполняет `scripts/bootstrap_data.py`: создаёт `data/`, скачивает
+OpenFootball EPL history и обучает production Dixon-Coles модель, если её ещё
+нет на persistent disk.
+
+Если секреты заведены именно в Render, включается встроенный web scheduler:
+
+- `ENABLE_RENDER_DAILY_PIPELINE=true` — каждый день запускает live pipeline из
+  Render web process и использует Render env vars.
+- `RENDER_DAILY_SIGNAL_UTC=08:15` — время ежедневного запуска в UTC.
+- `THE_ODDS_API_KEY` — включает live odds. Без него scheduler не падает, а
+  пишет статус `skipped`, если нет файлов в `data/staging/free_sources/`.
+- `SCHEDULED_SEND_TELEGRAM=false` по умолчанию создаёт только Telegram payload.
+  Для реальной отправки поставьте `true` и задайте `TELEGRAM_BOT_TOKEN` +
+  `TELEGRAM_CHAT_ID`.
+- `RUN_PIPELINE_ON_STARTUP=false` оставлен выключенным, чтобы деплой не тратил
+  API quota сразу при каждом рестарте.
+
+Проверка Render:
+
+```bash
+curl https://<your-render-app>.onrender.com/health
+curl https://<your-render-app>.onrender.com/api/pipeline/status
+```
+
+Dashboard сам не хранит секреты в коде: все ключи берутся только из Render
+Environment. Если вы используете бесплатный Render plan, keep-alive workflow
+может пинговать `/health`; для этого задайте GitHub Repository Variable
+`RENDER_URL=https://<your-render-app>.onrender.com`.
+
 ---
 
 ## Структура проекта
