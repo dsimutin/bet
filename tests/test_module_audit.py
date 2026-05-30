@@ -53,3 +53,17 @@ def test_web_modules_endpoint_returns_audit_payload() -> None:
     payload = response.json()
     assert payload["passed"] is True
     assert payload["summary"]["failed"] == 0
+
+
+def test_dashboard_renders_module_audit_panel() -> None:
+    from fastapi.testclient import TestClient
+
+    from src.web.app import app
+
+    with TestClient(app) as client:
+        response = client.get("/")
+
+    assert response.status_code == 200
+    assert "Модули проекта" in response.text
+    assert "backtest" in response.text
+    assert "models" in response.text

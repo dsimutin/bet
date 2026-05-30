@@ -44,6 +44,12 @@
   .model-metrics{display:flex;gap:16px;flex-wrap:wrap;margin-top:8px}
   .model-metric{font-size:.78rem;color:#a0aec0}
   .model-metric span{color:#e2e8f0;font-weight:600}
+  .module-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}
+  @media(max-width:900px){.module-grid{grid-template-columns:1fr 1fr}}
+  @media(max-width:500px){.module-grid{grid-template-columns:1fr}}
+  .module-item{border:1px solid #2d3748;background:#151923;border-radius:8px;padding:10px}
+  .module-name{font-size:.78rem;font-weight:700;color:#e2e8f0;margin-bottom:4px}
+  .module-count{font-size:.72rem;color:#718096}
   .section-title{font-size:.9rem;font-weight:700;color:#a0aec0;margin-bottom:12px;display:flex;align-items:center;gap:8px}
   .dot{width:8px;height:8px;border-radius:50%;background:#48bb78;display:inline-block}
   .dot-red{background:#fc8181}
@@ -141,11 +147,12 @@
     <!-- Daily readiness -->
     <div class="card">
       <div class="section-title">
-        <span class="dot {% if readiness and readiness.get('overall_ready') %}{% else %}dot-red{% endif %}"></span>
+        {% set readiness_ready = readiness and (readiness.get('passed') or readiness.get('overall_ready')) %}
+        <span class="dot {% if readiness_ready %}{% else %}dot-red{% endif %}"></span>
         Готовность бота
       </div>
       {% if readiness %}
-        {% set ready = readiness.get('overall_ready', False) %}
+        {% set ready = readiness_ready %}
         <div style="font-size:1.1rem;font-weight:700;margin-bottom:12px" class="{% if ready %}readiness-ok{% else %}readiness-fail{% endif %}">
           {% if ready %}✓ Готов к работе{% else %}✗ Не готов{% endif %}
         </div>
@@ -158,12 +165,12 @@
         {% endfor %}
         {% if readiness.get('checks') %}
         <div style="margin-top:12px">
-          {% for check_name, check in readiness.checks.items() %}
+          {% for check in readiness.checks %}
           <div style="font-size:.78rem;padding:4px 0;border-top:1px solid #2d3748">
             <span class="{% if check.passed %}readiness-ok{% else %}readiness-fail{% endif %}">
               {% if check.passed %}✓{% else %}✗{% endif %}
             </span>
-            {{ check_name }}: {{ check.reason or '' }}
+            {{ check.name }}: {{ check.details or check.reason or '' }}
           </div>
           {% endfor %}
         </div>
@@ -172,6 +179,38 @@
         <div class="empty">Запустите signal-pipeline workflow для получения отчёта готовности.</div>
       {% endif %}
     </div>
+  </div>
+
+  <!-- Project modules -->
+  <div class="card" style="margin-bottom:24px">
+    {% set module_summary = module_audit.get('summary', {}) if module_audit else {} %}
+    {% set modules_ok = module_audit and module_audit.get('passed') %}
+    <div class="section-title">
+      <span class="dot {% if modules_ok %}{% else %}dot-red{% endif %}"></span>
+      Модули проекта
+    </div>
+    {% if module_audit %}
+      <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:8px">
+        <div style="font-size:.8rem;color:#a0aec0">Всего проверок: <span style="color:#e2e8f0;font-weight:700">{{ module_summary.get('total', 0) }}</span></div>
+        <div style="font-size:.8rem;color:#a0aec0">Пройдено: <span class="readiness-ok" style="font-weight:700">{{ module_summary.get('passed', 0) }}</span></div>
+        <div style="font-size:.8rem;color:#a0aec0">Ошибок: <span class="{% if module_summary.get('failed', 0) == 0 %}readiness-ok{% else %}readiness-fail{% endif %}" style="font-weight:700">{{ module_summary.get('failed', 0) }}</span></div>
+      </div>
+      <div class="module-grid">
+        {% for package, stats in module_summary.get('by_package', {}).items() %}
+        <div class="module-item">
+          <div class="module-name">
+            <span class="{% if stats.get('failed', 0) == 0 %}readiness-ok{% else %}readiness-fail{% endif %}">
+              {% if stats.get('failed', 0) == 0 %}✓{% else %}✗{% endif %}
+            </span>
+            {{ package }}
+          </div>
+          <div class="module-count">{{ stats.get('passed', 0) }} ok · {{ stats.get('failed', 0) }} failed</div>
+        </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="empty">Module audit ещё не запускался.</div>
+    {% endif %}
   </div>
 
   <!-- Telegram collector status -->

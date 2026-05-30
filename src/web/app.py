@@ -154,6 +154,14 @@ def _module_audit() -> dict[str, Any] | None:
     return _load_json(_DATA / "reports" / "module_audit.json")
 
 
+def _module_audit_or_live() -> dict[str, Any]:
+    if audit := _module_audit():
+        return audit
+    from src.system.module_audit import run_module_audit
+
+    return run_module_audit().to_dict()
+
+
 def _latest_signals_report() -> dict[str, Any] | None:
     reports_dir = _DATA / "reports"
     if not reports_dir.exists():
@@ -223,11 +231,7 @@ def api_readiness() -> dict[str, Any]:
 
 @app.get("/api/modules")
 def api_modules() -> dict[str, Any]:
-    if audit := _module_audit():
-        return audit
-    from src.system.module_audit import run_module_audit
-
-    return run_module_audit().to_dict()
+    return _module_audit_or_live()
 
 
 @app.get("/api/pipeline/status")
@@ -249,6 +253,7 @@ def dashboard(request: Request) -> HTMLResponse:
     signals = _recent_signals(30)
     models = _model_status()
     readiness = _daily_readiness()
+    module_audit = _module_audit_or_live()
 
     live_path = _DATA / "staging" / "free_sources" / "telegram_live.jsonl"
     tg_status = {
@@ -278,6 +283,7 @@ def dashboard(request: Request) -> HTMLResponse:
             "models": models,
             "prod_model": prod_model,
             "readiness": readiness,
+            "module_audit": module_audit,
             "tg_status": tg_status,
             "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
         },
