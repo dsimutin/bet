@@ -32,6 +32,8 @@ data/models/*
 !data/models/*.meta.json
 !data/models/calibration_*.pkl
 !data/reports/.gitkeep
+!data/signals/.gitkeep
+!data/injuries/.gitkeep
 
 # Jupyter
 .ipynb_checkpoints/

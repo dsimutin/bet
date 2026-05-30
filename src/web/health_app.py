@@ -64,10 +64,44 @@ def _log_startup_env() -> None:
     _log.info("=== END DIAGNOSTICS ===")
 
 
+def _has_production_models() -> bool:
+    """Return True if at least one production model exists on disk."""
+    for f in MODEL_DIR.glob("dc_*.meta.json"):
+        try:
+            import json as _json
+            meta = _json.loads(f.read_text(encoding="utf-8"))
+            if meta.get("status") == "production":
+                return True
+        except Exception:
+            pass
+    return False
+
+
+def _bootstrap_models_in_background() -> None:
+    """Run run_trainer in a daemon thread so the web service starts immediately."""
+    import threading
+
+    def _run():
+        _log.info("[health_app] No production models found — running bootstrap training")
+        try:
+            from src.cron import run_trainer
+            run_trainer.main()
+            _log.info("[health_app] Bootstrap training complete")
+        except Exception as exc:
+            _log.error("[health_app] Bootstrap training failed: %s", exc)
+
+    t = threading.Thread(target=_run, daemon=True, name="bootstrap-trainer")
+    t.start()
+
+
 @asynccontextmanager
 async def lifespan(fastapi_app: FastAPI):
     _log_startup_env()
     if ACTIVE_MODE:
+        # Bootstrap: train models on first deploy if none exist
+        if not _has_production_models():
+            _log.info("[health_app] No production models — starting bootstrap training in background")
+            _bootstrap_models_in_background()
         try:
             from src.services.scheduler import start as scheduler_start
             scheduler_start()
