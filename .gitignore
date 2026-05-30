@@ -59,3 +59,4 @@ configs/secrets.local.yaml
 .swarm/memory.db-wal
 .claude/memory.db
 ruvector.db
+data/core/metadata.db
