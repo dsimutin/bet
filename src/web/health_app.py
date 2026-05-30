@@ -9,6 +9,7 @@ Endpoints:
     GET /health/readiness    — deep readiness for signal generation
     GET /health/active       — active mode status, last run timestamps, 24h stats
     GET /health/all          — all checks combined (for dashboards)
+    POST /trigger            — немедленно запустить отчёт и отправить в Telegram
 """
 
 from __future__ import annotations
@@ -586,5 +587,38 @@ def health_all():
         "checks": checks,
         "readiness": _body(readiness),
         "active": _body(active),
+        "ts": _utcnow(),
+    }
+
+
+# ──────────────────────────────────────────────────────────────────
+# /trigger — ручной запуск отчёта (для отладки и первого теста)
+# ──────────────────────────────────────────────────────────────────
+
+@app.post("/trigger")
+def trigger_report():
+    """Немедленно запустить active report и отправить в Telegram.
+
+    Используй для проверки что бот работает:
+        curl -X POST https://your-app.onrender.com/trigger
+    """
+    import threading
+
+    result: dict = {"started": False, "error": None}
+
+    def _run():
+        try:
+            from src.cron.run_active_report import main as report_main
+            report_main(force=True)
+        except Exception as exc:
+            _log.error("[trigger] report failed: %s", exc)
+
+    t = threading.Thread(target=_run, daemon=True, name="manual-trigger")
+    t.start()
+    result["started"] = True
+
+    return {
+        "status": "triggered",
+        "message": "Active report запущен в фоне — проверь Telegram через ~10 сек",
         "ts": _utcnow(),
     }
