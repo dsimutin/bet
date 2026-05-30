@@ -129,7 +129,7 @@ class BacktestMetrics(BaseModel):
 ```yaml
 input:
   signals_file: "data/signals/YYYY-MM-DD_signals.json"
-  ledger_db: "data/paper_ledger.sqlite"
+  ledger_db: "data/core/paper_signal_ledger.json"
 
 output:
   report: "data/reports/YYYY-MM-DD_report.md"
@@ -422,8 +422,9 @@ bet/
 │   ├── raw/                           # сырые данные от источников (не изменяются)
 │   ├── staging/                       # нормализованные parquet файлы
 │   ├── signals/                       # JSON сигналы по датам
+│   ├── injuries/                      # JSON события о травмах
 │   ├── reports/                       # Markdown отчёты и JSON метрики
-│   └── paper_ledger.sqlite            # бумажный леджер ставок
+│   └── core/paper_signal_ledger.json  # бумажный леджер ставок
 │
 ├── docs/
 │   ├── architecture.md                # архитектура системы

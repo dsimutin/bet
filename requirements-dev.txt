@@ -11,3 +11,6 @@ ipykernel>=6.0.0
 # Визуализация
 matplotlib>=3.8.0
 seaborn>=0.13.0
+
+# Убирает DeprecationWarning от starlette.testclient
+httpx2>=0.28.0
