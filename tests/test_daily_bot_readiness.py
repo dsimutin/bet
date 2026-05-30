@@ -71,6 +71,36 @@ sources:
     assert report.passed is True
 
 
+def test_readiness_allows_dry_run_without_candidate_sources(tmp_path) -> None:
+    report = evaluate_readiness(
+        free_source_dir=tmp_path / "empty",
+        free_source_config=tmp_path / "missing.yaml",
+        model_dir=tmp_path / "models",
+        ledger_path=tmp_path / "core" / "paper_signal_ledger.json",
+        env={},
+    )
+
+    assert report.passed is True
+    source_check = [check for check in report.checks if check.name == "candidate_sources"][0]
+    assert source_check.passed is True
+    assert "dry-run/no-op" in source_check.details
+
+
+def test_readiness_requires_candidate_sources_for_scheduled_send(tmp_path) -> None:
+    report = evaluate_readiness(
+        free_source_dir=tmp_path / "empty",
+        free_source_config=tmp_path / "missing.yaml",
+        model_dir=tmp_path / "models",
+        ledger_path=tmp_path / "core" / "paper_signal_ledger.json",
+        scheduled_send_telegram=True,
+        env={"TELEGRAM_BOT_TOKEN": "token", "TELEGRAM_CHAT_ID": "chat"},
+    )
+
+    assert report.passed is False
+    source_check = [check for check in report.checks if check.name == "candidate_sources"][0]
+    assert source_check.passed is False
+
+
 def test_readiness_cli_writes_report(tmp_path, monkeypatch) -> None:
     inbox = tmp_path / "free_sources"
     inbox.mkdir()

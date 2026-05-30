@@ -40,6 +40,7 @@ def evaluate_readiness(
     model_dir: Path = Path("data/models"),
     ledger_path: Path = Path("data/core/paper_signal_ledger.json"),
     scheduled_send_telegram: bool | None = None,
+    require_candidate_sources: bool | None = None,
     env: dict[str, str] | None = None,
 ) -> DailyBotReadinessReport:
     env_map = env if env is not None else dict(os.environ)
@@ -48,9 +49,14 @@ def evaluate_readiness(
         if scheduled_send_telegram is None
         else scheduled_send_telegram
     )
+    sources_required = (
+        send_enabled or _truthy(env_map.get("REQUIRE_CANDIDATE_SOURCES", "false"))
+        if require_candidate_sources is None
+        else require_candidate_sources
+    )
 
     checks = [
-        _source_check(free_source_dir, free_source_config, env_map),
+        _source_check(free_source_dir, free_source_config, env_map, sources_required),
         _telegram_check(send_enabled, env_map),
         _path_check("model_state_path", model_dir, expect_file=False),
         _path_check("ledger_state_path", ledger_path.parent, expect_file=False),
@@ -66,6 +72,7 @@ def _source_check(
     free_source_dir: Path,
     free_source_config: Path,
     env: dict[str, str],
+    require_candidate_sources: bool,
 ) -> ReadinessCheck:
     if env.get("THE_ODDS_API_KEY"):
         return ReadinessCheck("candidate_sources", True, "THE_ODDS_API_KEY is configured")
@@ -84,6 +91,13 @@ def _source_check(
             "candidate_sources",
             True,
             f"{configured} enabled free-source feed(s) configured",
+        )
+
+    if not require_candidate_sources:
+        return ReadinessCheck(
+            "candidate_sources",
+            True,
+            "No live candidate sources configured; dry-run/no-op mode is ready",
         )
 
     return ReadinessCheck(

@@ -77,9 +77,15 @@ jobs:
             --output-dir data/staging/free_sources \
             --report-path data/reports/free_source_ingest_report.json
 
+      - name: Run offline bot smoke
+        run: |
+          uv run --extra dev python -m src.models.run_daily_bot_smoke \
+            --output-dir data/reports/smoke
+
       - name: Audit daily bot readiness
         env:
           SCHEDULED_SEND_TELEGRAM: ${{ vars.SCHEDULED_SEND_TELEGRAM || 'false' }}
+          REQUIRE_CANDIDATE_SOURCES: ${{ github.event.inputs.send_telegram || vars.SCHEDULED_SEND_TELEGRAM || 'false' }}
         run: |
           uv run --extra dev python -m src.models.run_daily_bot_readiness \
             --free-source-dir data/staging/free_sources \
@@ -185,6 +191,8 @@ jobs:
             data/reports/live_odds_conversion_report.json
             data/reports/free_source_ingest_report.json
             data/reports/free_source_inbox_report.json
+            data/reports/smoke/*.json
+            data/reports/smoke/*.csv
             data/reports/*signals*.json
             data/reports/*telegram*.json
             data/core/paper_signal_ledger.json

@@ -22,6 +22,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--report-path", type=Path, default=Path("data/reports/daily_bot_readiness.json")
     )
+    parser.add_argument(
+        "--require-candidate-sources",
+        action="store_true",
+        help="Fail readiness when no live/API/free-source candidate feed is configured.",
+    )
     parser.add_argument("--require-ready", action="store_true")
     return parser
 
@@ -33,6 +38,7 @@ def main() -> None:
         free_source_config=args.free_source_config,
         model_dir=args.model_dir,
         ledger_path=args.ledger_path,
+        require_candidate_sources=args.require_candidate_sources,
     )
     args.report_path.parent.mkdir(parents=True, exist_ok=True)
     args.report_path.write_text(

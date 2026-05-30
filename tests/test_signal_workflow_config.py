@@ -37,6 +37,15 @@ def test_signal_workflow_writes_daily_bot_readiness_report() -> None:
     assert "Audit daily bot readiness" in workflow
     assert "src.models.run_daily_bot_readiness" in workflow
     assert "data/reports/daily_bot_readiness.json" in workflow
+    assert "REQUIRE_CANDIDATE_SOURCES" in workflow
+
+
+def test_signal_workflow_runs_offline_smoke_before_live_pipeline() -> None:
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+
+    assert "Run offline bot smoke" in workflow
+    assert "src.models.run_daily_bot_smoke" in workflow
+    assert "data/reports/smoke" in workflow
 
 
 def test_signal_workflow_can_train_production_model_from_openfootball() -> None:
