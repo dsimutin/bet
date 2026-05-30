@@ -42,7 +42,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 async def _start_telegram_collector(stop_event: asyncio.Event) -> None:
-    from src.ingest.telegram_collector import is_configured, run_collector
+    try:
+        from src.ingest.telegram_collector import is_configured, run_collector
+    except ImportError:
+        _log.info("Telegram collector disabled — telethon not installed (optional dependency)")
+        return
 
     if not is_configured():
         _log.info(
