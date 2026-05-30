@@ -24,14 +24,15 @@ services:
   # ──────────────────────────────────────────────────────────────────
   # WEB SERVICE — FastAPI + APScheduler (active monitoring mode)
   # Одиночный сервис: health API + встроенный планировщик задач.
-  # plan: standard рекомендуется для production (512 MB RAM, не спит).
-  # plan: starter — для разработки/тестирования (усыпает при простое).
+  # plan: free     — бесплатно, усыпает при простое (keep-alive job решает это)
+  # plan: starter  — $7/мес, усыпает при простое, 512 MB RAM
+  # plan: standard — $25/мес, не усыпает, рекомендуется для production
   # ──────────────────────────────────────────────────────────────────
   - type: web
     name: bet-api
     runtime: python
     region: frankfurt
-    plan: starter
+    plan: free
     buildCommand: pip install -r requirements-render.txt && pip install -e . --no-deps
     startCommand: uvicorn src.web.health_app:app --host 0.0.0.0 --port $PORT --workers 1
     healthCheckPath: /health

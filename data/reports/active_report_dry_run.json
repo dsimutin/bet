@@ -1,7 +1,0 @@
-{
-  "text": "\ud83e\udd16 Active report \u2014 2026-05-30 20:24 UTC\n\n\ud83d\udcca Data\nSports: football\nLeagues: none\nMatches found: 0\nUpcoming: 0\nFinished since last run: 0\nOdds loaded: 0\n\n\ud83d\udce1 Signals\nCandidates checked: 0\nNew value signals: 0\nSent to Telegram: 0\nDuplicates skipped: 0\n\n\ud83e\udde0 Training\nModel retrained: no\nReason: skip\nModel age: 1h\nModel status: unknown\n\n\ud83d\udcc8 Results\nSettled since last report: 0\nW/L/P: 0/0/0\nDrift: OK\n\n\ud83c\udfe5 Health\nLedger: OK (30 entries)\nModel: OK (SERIEA 1.3h old)\nDisk: 3.3 MB used\nLast signal scan: 2026-05-30 19:05 UTC (success)\nLast settlement: 2026-05-30 19:05 UTC (success)\nLast training check: 2026-05-30 19:05 UTC (skip)\nProviders: OpenFootball OK, Odds API no key, Flashscore disabled\nErrors: none",
-  "ts": "2026-05-30T20:24:29.225918+00:00",
-  "missing": [
-    "TELEGRAM_CHAT_ID"
-  ]
-}

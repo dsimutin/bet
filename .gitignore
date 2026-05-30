@@ -15,6 +15,9 @@ data/raw/*
 data/staging/*
 data/core/*
 data/models/*
+data/reports/*
+data/signals/*
+data/injuries/*
 !data/raw/.gitkeep
 !data/staging/.gitkeep
 !data/staging/*.csv
