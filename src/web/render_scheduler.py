@@ -88,6 +88,17 @@ def build_free_source_ingest_command(root: Path) -> list[str]:
     ]
 
 
+def build_module_audit_command(root: Path) -> list[str]:
+    return [
+        sys.executable,
+        "-m",
+        "src.system.run_module_audit",
+        "--report-path",
+        str(root / "data" / "reports" / "module_audit.json"),
+        "--require-pass",
+    ]
+
+
 def build_readiness_command(root: Path, require_candidate_sources: bool) -> list[str]:
     cmd = [
         sys.executable,
@@ -204,6 +215,7 @@ async def run_once(
     status.last_message = "running"
 
     preflight = [
+        PipelineStage("module_audit", build_module_audit_command(root)),
         PipelineStage("free_source_ingest", build_free_source_ingest_command(root)),
     ]
     if env_truthy(env_map.get("RUN_RENDER_SMOKE_BEFORE_PIPELINE")):

@@ -5,6 +5,7 @@ from pathlib import Path
 from src.web.render_scheduler import (
     PipelineRunStatus,
     build_free_source_ingest_command,
+    build_module_audit_command,
     build_readiness_command,
     build_render_pipeline_command,
     build_smoke_command,
@@ -64,9 +65,12 @@ def test_render_scheduler_refuses_send_without_telegram_secrets(tmp_path: Path) 
 
 
 def test_render_scheduler_has_preflight_ingest_and_readiness_commands(tmp_path: Path) -> None:
+    module_audit = build_module_audit_command(tmp_path)
     ingest = build_free_source_ingest_command(tmp_path)
     readiness = build_readiness_command(tmp_path, require_candidate_sources=True)
 
+    assert "src.system.run_module_audit" in module_audit
+    assert "--require-pass" in module_audit
     assert "src.ingest.run_free_source_ingest" in ingest
     assert str(tmp_path / "configs" / "free_sources.yaml") in ingest
     assert str(tmp_path / "data" / "staging" / "free_sources") in ingest

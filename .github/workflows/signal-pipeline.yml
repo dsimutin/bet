@@ -70,6 +70,12 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra dev
 
+      - name: Audit project modules
+        run: |
+          uv run --extra dev python -m src.system.run_module_audit \
+            --report-path data/reports/module_audit.json \
+            --require-pass
+
       - name: Ingest configured free sources
         run: |
           uv run --extra dev python -m src.ingest.run_free_source_ingest \
@@ -186,6 +192,7 @@ jobs:
             data/reports/model_delivery_quality_gate.json
             data/reports/ledger_delivery_quality_gate.json
             data/reports/daily_bot_readiness.json
+            data/reports/module_audit.json
             data/reports/live_odds_raw.json
             data/reports/live_odds_upcoming.csv
             data/reports/live_odds_conversion_report.json
@@ -214,6 +221,7 @@ jobs:
                       data/reports/model_delivery_quality_gate.json \
                       data/reports/ledger_delivery_quality_gate.json \
                       data/reports/daily_bot_readiness.json \
+                      data/reports/module_audit.json \
                       data/reports/signal_ledger_settlement_report.json \
                       data/reports/free_source_ingest_report.json \
                       data/reports/free_source_inbox_report.json; do

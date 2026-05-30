@@ -150,6 +150,10 @@ def _daily_readiness() -> dict[str, Any] | None:
     return _load_json(_DATA / "reports" / "daily_bot_readiness.json")
 
 
+def _module_audit() -> dict[str, Any] | None:
+    return _load_json(_DATA / "reports" / "module_audit.json")
+
+
 def _latest_signals_report() -> dict[str, Any] | None:
     reports_dir = _DATA / "reports"
     if not reports_dir.exists():
@@ -215,6 +219,15 @@ def api_model() -> list[dict[str, Any]]:
 @app.get("/api/readiness")
 def api_readiness() -> dict[str, Any]:
     return _daily_readiness() or {"available": False}
+
+
+@app.get("/api/modules")
+def api_modules() -> dict[str, Any]:
+    if audit := _module_audit():
+        return audit
+    from src.system.module_audit import run_module_audit
+
+    return run_module_audit().to_dict()
 
 
 @app.get("/api/pipeline/status")

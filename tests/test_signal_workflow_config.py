@@ -24,6 +24,9 @@ def test_signal_workflow_accepts_free_source_text_exports() -> None:
 def test_signal_workflow_ingests_configured_free_sources_before_scan() -> None:
     workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
 
+    assert "Audit project modules" in workflow
+    assert "src.system.run_module_audit" in workflow
+    assert "data/reports/module_audit.json" in workflow
     assert "Ingest configured free sources" in workflow
     assert "src.ingest.run_free_source_ingest" in workflow
     assert "--config configs/free_sources.yaml" in workflow
