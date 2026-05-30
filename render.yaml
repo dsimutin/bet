@@ -16,6 +16,8 @@ services:
         value: "true"
       - key: RUN_PIPELINE_ON_STARTUP
         value: "false"
+      - key: RUN_RENDER_SMOKE_BEFORE_PIPELINE
+        value: "false"
       - key: RENDER_DAILY_SIGNAL_UTC
         value: "08:15"
       - key: SCHEDULED_SEND_TELEGRAM

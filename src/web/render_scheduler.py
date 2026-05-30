@@ -14,23 +14,47 @@ from typing import Any
 FREE_SOURCE_PATTERNS = ("*.csv", "*.json", "*.jsonl", "*.ndjson", "*.txt")
 
 
+@dataclass(frozen=True)
+class PipelineStage:
+    name: str
+    command: list[str]
+
+
+@dataclass(frozen=True)
+class PipelineStageResult:
+    name: str
+    returncode: int
+    message: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "returncode": self.returncode,
+            "message": self.message,
+        }
+
+
 @dataclass
 class PipelineRunStatus:
     state: str = "idle"
+    current_stage: str | None = None
     last_started_at_utc: str | None = None
     last_finished_at_utc: str | None = None
     last_returncode: int | None = None
     last_message: str = ""
     last_command: list[str] = field(default_factory=list)
+    stage_results: list[PipelineStageResult] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "state": self.state,
+            "current_stage": self.current_stage,
             "last_started_at_utc": self.last_started_at_utc,
             "last_finished_at_utc": self.last_finished_at_utc,
             "last_returncode": self.last_returncode,
             "last_message": self.last_message,
             "last_command": self.last_command,
+            "stage_results": [result.to_dict() for result in self.stage_results],
         }
 
 
@@ -44,6 +68,59 @@ def render_scheduler_enabled(env: dict[str, str] | None = None) -> bool:
 
 
 def build_render_pipeline_command(
+    root: Path,
+    env: dict[str, str] | None = None,
+) -> tuple[list[str] | None, str]:
+    return build_render_signal_command(root, env)
+
+
+def build_free_source_ingest_command(root: Path) -> list[str]:
+    return [
+        sys.executable,
+        "-m",
+        "src.ingest.run_free_source_ingest",
+        "--config",
+        str(root / "configs" / "free_sources.yaml"),
+        "--output-dir",
+        str(root / "data" / "staging" / "free_sources"),
+        "--report-path",
+        str(root / "data" / "reports" / "free_source_ingest_report.json"),
+    ]
+
+
+def build_readiness_command(root: Path, require_candidate_sources: bool) -> list[str]:
+    cmd = [
+        sys.executable,
+        "-m",
+        "src.models.run_daily_bot_readiness",
+        "--free-source-dir",
+        str(root / "data" / "staging" / "free_sources"),
+        "--free-source-config",
+        str(root / "configs" / "free_sources.yaml"),
+        "--model-dir",
+        str(root / "data" / "models"),
+        "--ledger-path",
+        str(root / "data" / "core" / "paper_signal_ledger.json"),
+        "--report-path",
+        str(root / "data" / "reports" / "daily_bot_readiness.json"),
+        "--require-ready",
+    ]
+    if require_candidate_sources:
+        cmd.append("--require-candidate-sources")
+    return cmd
+
+
+def build_smoke_command(root: Path) -> list[str]:
+    return [
+        sys.executable,
+        "-m",
+        "src.models.run_daily_bot_smoke",
+        "--output-dir",
+        str(root / "data" / "reports" / "smoke"),
+    ]
+
+
+def build_render_signal_command(
     root: Path,
     env: dict[str, str] | None = None,
 ) -> tuple[list[str] | None, str]:
@@ -117,7 +194,42 @@ async def run_once(
     status: PipelineRunStatus,
     env: dict[str, str] | None = None,
 ) -> None:
-    cmd, reason = build_render_pipeline_command(root, env)
+    env_map = env if env is not None else dict(os.environ)
+    run_env = {**dict(os.environ), **env_map}
+    status.stage_results = []
+    status.current_stage = None
+    status.last_command = []
+    status.state = "running"
+    status.last_started_at_utc = _now_utc()
+    status.last_message = "running"
+
+    preflight = [
+        PipelineStage("free_source_ingest", build_free_source_ingest_command(root)),
+    ]
+    if env_truthy(env_map.get("RUN_RENDER_SMOKE_BEFORE_PIPELINE")):
+        preflight.append(PipelineStage("offline_smoke", build_smoke_command(root)))
+    preflight.append(
+        PipelineStage(
+            "daily_bot_readiness",
+            build_readiness_command(
+                root,
+                require_candidate_sources=env_truthy(env_map.get("SCHEDULED_SEND_TELEGRAM")),
+            ),
+        )
+    )
+
+    for stage in preflight:
+        result = await _run_command_stage(root, stage, status, run_env)
+        status.stage_results.append(result)
+        if result.returncode != 0:
+            status.state = "failed"
+            status.current_stage = None
+            status.last_returncode = result.returncode
+            status.last_message = result.message
+            status.last_finished_at_utc = _now_utc()
+            return
+
+    cmd, reason = build_render_signal_command(root, env_map)
     status.last_command = cmd or []
     if cmd is None:
         status.state = "skipped"
@@ -126,25 +238,46 @@ async def run_once(
         status.last_finished_at_utc = _now_utc()
         return
 
-    status.state = "running"
-    status.last_started_at_utc = _now_utc()
-    status.last_message = "running"
+    pipeline_result = await _run_command_stage(
+        root,
+        PipelineStage("signal_pipeline", cmd),
+        status,
+        run_env,
+    )
+    status.stage_results.append(pipeline_result)
+    status.last_returncode = pipeline_result.returncode
+    status.last_finished_at_utc = _now_utc()
+    status.current_stage = None
+    if pipeline_result.returncode == 0:
+        status.state = "ok"
+        status.last_message = pipeline_result.message or "pipeline completed"
+    else:
+        status.state = "failed"
+        status.last_message = pipeline_result.message or "pipeline failed"
+
+
+async def _run_command_stage(
+    root: Path,
+    stage: PipelineStage,
+    status: PipelineRunStatus,
+    env: dict[str, str],
+) -> PipelineStageResult:
+    status.current_stage = stage.name
+    status.last_command = stage.command
     result = await asyncio.to_thread(
         subprocess.run,
-        cmd,
+        stage.command,
         cwd=root,
+        env=env,
         check=False,
         text=True,
         capture_output=True,
     )
-    status.last_returncode = result.returncode
-    status.last_finished_at_utc = _now_utc()
-    if result.returncode == 0:
-        status.state = "ok"
-        status.last_message = _tail(result.stdout) or "pipeline completed"
-    else:
-        status.state = "failed"
-        status.last_message = _tail(result.stderr) or _tail(result.stdout) or "pipeline failed"
+    return PipelineStageResult(
+        name=stage.name,
+        returncode=result.returncode,
+        message=_tail(result.stdout) or _tail(result.stderr),
+    )
 
 
 async def scheduler_loop(

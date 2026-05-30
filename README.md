@@ -430,7 +430,9 @@ OpenFootball EPL history и обучает production Dixon-Coles модель, 
 Если секреты заведены именно в Render, включается встроенный web scheduler:
 
 - `ENABLE_RENDER_DAILY_PIPELINE=true` — каждый день запускает live pipeline из
-  Render web process и использует Render env vars.
+  Render web process и использует Render env vars. Перед сигналами Render
+  выполняет тот же preflight, что и GitHub workflow: free-source ingest,
+  readiness audit, затем benchmark/trainer/signal/ledger/Telegram pipeline.
 - `RENDER_DAILY_SIGNAL_UTC=08:15` — время ежедневного запуска в UTC.
 - `THE_ODDS_API_KEY` — включает live odds. Без него scheduler не падает, а
   пишет статус `skipped`, если нет файлов в `data/staging/free_sources/`.
@@ -439,6 +441,8 @@ OpenFootball EPL history и обучает production Dixon-Coles модель, 
   `TELEGRAM_CHAT_ID`.
 - `RUN_PIPELINE_ON_STARTUP=false` оставлен выключенным, чтобы деплой не тратил
   API quota сразу при каждом рестарте.
+- `RUN_RENDER_SMOKE_BEFORE_PIPELINE=false` можно временно включить в Render для
+  ежедневной проверки synthetic smoke-контура без записи в основной ledger.
 
 Проверка Render:
 
