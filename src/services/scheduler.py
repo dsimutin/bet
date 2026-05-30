@@ -41,10 +41,31 @@ def get_scheduler() -> Any:
     return _scheduler
 
 
+def _log_startup_diagnostics() -> None:
+    """Log env var presence at startup without exposing secret values."""
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
+    masked_chat = ("***" + chat_id[-4:]) if len(chat_id) >= 4 else ("***" if chat_id else "(empty)")
+    _log.info("=== STARTUP DIAGNOSTICS ===")
+    _log.info("ACTIVE_MODE=%s", os.environ.get("ACTIVE_MODE", "false"))
+    _log.info("TELEGRAM_STATUS_REPORTS_ENABLED=%s", os.environ.get("TELEGRAM_STATUS_REPORTS_ENABLED", "true"))
+    _log.info("TELEGRAM_SIGNAL_ALERTS_ENABLED=%s", os.environ.get("TELEGRAM_SIGNAL_ALERTS_ENABLED", "true"))
+    _log.info("TELEGRAM_BOT_TOKEN_PRESENT=%s", bool(token))
+    _log.info("TELEGRAM_BOT_TOKEN_LENGTH=%d", len(token))
+    _log.info("TELEGRAM_CHAT_ID_PRESENT=%s", bool(chat_id))
+    _log.info("TELEGRAM_CHAT_ID_MASKED=%s", masked_chat)
+    _log.info("THE_ODDS_API_KEY_PRESENT=%s", bool(os.environ.get("THE_ODDS_API_KEY", "")))
+    _log.info("DATA_DIR=%s", os.environ.get("DATA_DIR", "data"))
+    _log.info("SCHEDULER_ENABLED=%s", ACTIVE_MODE)
+    _log.info("=== END DIAGNOSTICS ===")
+
+
 def start(loop: asyncio.AbstractEventLoop | None = None) -> None:
     """Register all jobs and start the scheduler. No-op if ACTIVE_MODE is false."""
+    _log_startup_diagnostics()
+
     if not ACTIVE_MODE:
-        _log.info("[scheduler] ACTIVE_MODE=false — scheduler not started")
+        _log.info("[scheduler] ACTIVE SCHEDULER DISABLED: ACTIVE_MODE is false")
         return
 
     sched = get_scheduler()
@@ -106,11 +127,12 @@ def start(loop: asyncio.AbstractEventLoop | None = None) -> None:
     )
 
     sched.start()
-    _log.info(
-        "[scheduler] Started. Jobs: signal_scan@:00, settlement@:20, "
-        "training_check@:40, active_report@:50 every %dh UTC | keep_alive every 14min",
-        interval_h,
-    )
+    _log.info("[scheduler] ACTIVE SCHEDULER STARTED")
+    _log.info("[scheduler] Jobs registered: %d", len(sched.get_jobs()))
+    for job in sched.get_jobs():
+        next_run = job.next_run_time
+        next_str = next_run.strftime("%Y-%m-%d %H:%M:%S UTC") if next_run else "not scheduled"
+        _log.info("[scheduler] %-15s next_run=%s", job.id, next_str)
 
 
 def stop() -> None:

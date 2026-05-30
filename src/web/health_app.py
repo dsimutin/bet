@@ -43,8 +43,30 @@ ACTIVE_MODE = _env_bool("ACTIVE_MODE", False)
 # Lifespan: start/stop APScheduler when ACTIVE_MODE=true
 # ──────────────────────────────────────────────────────────────────
 
+def _log_startup_env() -> None:
+    """Log env var presence at startup — safe (no secret values)."""
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
+    masked = ("***" + chat_id[-4:]) if len(chat_id) >= 4 else ("***" if chat_id else "(empty)")
+    _log.info("=== STARTUP DIAGNOSTICS ===")
+    _log.info("ACTIVE_MODE=%s", os.environ.get("ACTIVE_MODE", "false"))
+    _log.info("TELEGRAM_STATUS_REPORTS_ENABLED=%s",
+              os.environ.get("TELEGRAM_STATUS_REPORTS_ENABLED", "true"))
+    _log.info("TELEGRAM_SIGNAL_ALERTS_ENABLED=%s",
+              os.environ.get("TELEGRAM_SIGNAL_ALERTS_ENABLED", "true"))
+    _log.info("TELEGRAM_BOT_TOKEN_PRESENT=%s", bool(token))
+    _log.info("TELEGRAM_BOT_TOKEN_LENGTH=%d", len(token))
+    _log.info("TELEGRAM_CHAT_ID_PRESENT=%s", bool(chat_id))
+    _log.info("TELEGRAM_CHAT_ID_MASKED=%s", masked)
+    _log.info("THE_ODDS_API_KEY_PRESENT=%s", bool(os.environ.get("THE_ODDS_API_KEY", "")))
+    _log.info("DATA_DIR=%s", os.environ.get("DATA_DIR", "data"))
+    _log.info("SCHEDULER_ENABLED=%s", ACTIVE_MODE)
+    _log.info("=== END DIAGNOSTICS ===")
+
+
 @asynccontextmanager
 async def lifespan(fastapi_app: FastAPI):
+    _log_startup_env()
     if ACTIVE_MODE:
         try:
             from src.services.scheduler import start as scheduler_start
@@ -293,12 +315,64 @@ def health_readiness():
     else:
         checks["drift"] = {"ready": True, "detail": "no drift_report yet (ok on first run)"}
 
+    # 8. Scheduler state (only relevant when ACTIVE_MODE=true)
+    if ACTIVE_MODE:
+        sched_running = False
+        try:
+            from src.services.scheduler import get_scheduler
+            sched_running = get_scheduler().running
+        except Exception:
+            pass
+        checks["scheduler"] = {
+            "ready": sched_running,
+            "detail": "Scheduler running" if sched_running
+                      else "ACTIVE_MODE=true but scheduler not running — check startup logs",
+        }
+
+    # 9. Telegram config required when status reports enabled
+    status_reports_on = _env_bool("TELEGRAM_STATUS_REPORTS_ENABLED", True)
+    if ACTIVE_MODE and status_reports_on:
+        tg_ok = bool(os.environ.get("TELEGRAM_BOT_TOKEN")) and bool(os.environ.get("TELEGRAM_CHAT_ID"))
+        checks["telegram_config"] = {
+            "ready": tg_ok,
+            "detail": "Telegram configured" if tg_ok
+                      else "Status reports enabled but TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID missing",
+        }
+
+    # 10. Active report overdue (> 4 hours since last run)
+    if ACTIVE_MODE:
+        try:
+            from src.models.run_history import read_last_run
+            last = read_last_run("active_report")
+            if last:
+                last_dt = datetime.fromisoformat(last["started_at"].replace("Z", "+00:00"))
+                age_h = (datetime.now(timezone.utc) - last_dt).total_seconds() / 3600
+                overdue = age_h > 4.0
+                checks["active_report_freshness"] = {
+                    "ready": not overdue,
+                    "detail": f"Last report {age_h:.1f}h ago" + (" — OVERDUE (>4h)" if overdue else ""),
+                }
+            else:
+                checks["active_report_freshness"] = {"ready": True, "detail": "no report yet (ok on first run)"}
+        except Exception:
+            pass
+
+    # 11. Repeated Telegram delivery failures
+    tg_delivery = _read_tg_delivery_status()
+    if tg_delivery.get("last_status") == "failed":
+        checks["telegram_delivery"] = {
+            "ready": False,
+            "detail": f"Last Telegram delivery failed: {tg_delivery.get('last_error', 'unknown')}",
+        }
+
     ready_for_signals = all(
         checks[k]["ready"] for k in ("model", "ledger", "staging_data")
     )
+    degraded = not all(c.get("ready", True) for c in checks.values())
 
     return {
         "ready_for_signals": ready_for_signals,
+        "degraded": degraded,
         "checks": checks,
         "ts": _utcnow(),
     }
@@ -308,28 +382,45 @@ def health_readiness():
 # /health/active — active monitoring status
 # ──────────────────────────────────────────────────────────────────
 
+def _read_tg_delivery_status() -> dict:
+    """Read last Telegram delivery status from disk."""
+    path = REPORTS_DIR / "tg_delivery_status.json"
+    if path.exists():
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {}
+
+
 @app.get("/health/active")
 def health_active():
-    """Active mode status: last run timestamps, 24h stats, scheduler state."""
+    """Active mode status: scheduler, Telegram, per-job next_run, 24h stats."""
     now = datetime.now(timezone.utc)
     cutoff_24h = now - timedelta(hours=24)
 
     active_enabled = ACTIVE_MODE
     scheduler_running = False
+    jobs_info: dict[str, dict] = {}
+
     if active_enabled:
         try:
             from src.services.scheduler import get_scheduler
-            scheduler_running = get_scheduler().running
+            sched = get_scheduler()
+            scheduler_running = sched.running
+            if scheduler_running:
+                for job in sched.get_jobs():
+                    next_run = job.next_run_time
+                    jobs_info[job.id] = {
+                        "next_run": next_run.isoformat() if next_run else None,
+                        "last_run": None,
+                        "status": None,
+                    }
         except Exception:
             pass
 
     # Last runs from run history
-    last_runs: dict[str, str | None] = {
-        "signal_scan": None,
-        "settlement": None,
-        "training_check": None,
-        "active_report": None,
-    }
+    run_types = ["signal_scan", "settlement", "training_check", "active_report"]
     errors_24h: list[str] = []
     signals_24h = 0
     settled_24h = 0
@@ -338,10 +429,19 @@ def health_active():
         from src.models.run_history import read_recent, read_last_run
         records = read_recent(500)
 
-        for run_type in last_runs:
+        for run_type in run_types:
             rec = read_last_run(run_type)
             if rec:
-                last_runs[run_type] = rec.get("started_at", "")[:19].replace("T", " ") + " UTC"
+                ts = rec.get("started_at", "")[:19].replace("T", " ") + " UTC"
+                status = rec.get("status", "unknown")
+                reason = rec.get("training_reason", "") if run_type == "training_check" else ""
+                info: dict = {"last_run": ts, "status": status}
+                if reason:
+                    info["reason"] = reason
+                if run_type in jobs_info:
+                    jobs_info[run_type].update(info)
+                else:
+                    jobs_info[run_type] = {"next_run": None, **info}
 
         for rec in records:
             try:
@@ -354,6 +454,20 @@ def health_active():
                 pass
     except Exception:
         pass
+
+    # Telegram section
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
+    tg_delivery = _read_tg_delivery_status()
+    telegram_info = {
+        "bot_token_present": bool(token),
+        "chat_id_present": bool(chat_id),
+        "status_reports_enabled": _env_bool("TELEGRAM_STATUS_REPORTS_ENABLED", True),
+        "signal_alerts_enabled": _env_bool("TELEGRAM_SIGNAL_ALERTS_ENABLED", True),
+        "last_delivery_status": tg_delivery.get("last_status"),
+        "last_delivery_at": tg_delivery.get("last_at"),
+        "last_error": tg_delivery.get("last_error"),
+    }
 
     # Model age
     model_age_hours = None
@@ -380,10 +494,18 @@ def health_active():
         except Exception:
             pass
 
+    # last_runs: simple backward-compatible dict
+    last_runs = {
+        run_type: jobs_info.get(run_type, {}).get("last_run")
+        for run_type in ["signal_scan", "settlement", "training_check", "active_report"]
+    }
+
     return {
         "active_mode": active_enabled,
         "scheduler_running": scheduler_running,
         "interval_hours": int(os.environ.get("ACTIVE_REPORT_INTERVAL_HOURS", "3")),
+        "telegram": telegram_info,
+        "jobs": jobs_info,
         "last_runs": last_runs,
         "stats_24h": {
             "signals": signals_24h,

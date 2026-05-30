@@ -4,11 +4,13 @@ Runs signal scan, settlement, smart training check, then sends
 a comprehensive status report to Telegram. Safe to call manually.
 
 Scheduled via APScheduler (in web service) or as standalone CLI:
-    python -m src.cron.run_active_report
+    python -m src.cron.run_active_report          # normal run
+    python -m src.cron.run_active_report --force  # send immediately (bypass ACTIVE_MODE)
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import logging
 import os
@@ -58,10 +60,10 @@ SEASONS = os.environ.get("OPENFOOTBALL_SEASONS", "2021-22,2022-23,2023-24,2024-2
 # Public entry point
 # ---------------------------------------------------------------------------
 
-def main() -> None:
+def main(force: bool = False) -> None:
     started = datetime.now(timezone.utc)
     t0 = time.perf_counter()
-    _log.info("[active] Starting at %s", started.isoformat())
+    _log.info("[active] Starting at %s%s", started.isoformat(), " (--force)" if force else "")
     _log.info("[active] Sports: %s | Leagues: %s", SPORTS, LEAGUES)
 
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -103,19 +105,21 @@ def main() -> None:
                        signals_result, settlement_result, training_result, errors)
 
     # Step 5: Format and send report
+    delivery_status = "skipped"
     if TELEGRAM_STATUS_REPORTS_ENABLED:
         try:
-            _send_status_report(signals_result, settlement_result, training_result)
+            delivery_status = _send_status_report(signals_result, settlement_result, training_result)
         except Exception as e:
             _log.error("[active] Status report send failed: %s", e)
             errors.append(f"telegram_report: {e}")
+            delivery_status = "failed"
     else:
         _log.info("[active] Telegram status reports disabled (TELEGRAM_STATUS_REPORTS_ENABLED=false)")
 
     status = "partial" if errors else "success"
-    _log.info("[active] Done in %.1fs | status=%s | signals=%d | settled=%d",
+    _log.info("[active] Done in %.1fs | status=%s | signals=%d | settled=%d | tg=%s",
               elapsed, status, signals_result.get("signals_count", 0),
-              settlement_result.get("settled_count", 0))
+              settlement_result.get("settled_count", 0), delivery_status)
 
 
 # ---------------------------------------------------------------------------
@@ -522,12 +526,39 @@ def _send_signal_alerts(signals: list[dict]) -> int:
     return sent
 
 
+def _mask_chat_id(chat_id: str) -> str:
+    if len(chat_id) >= 4:
+        return "***" + chat_id[-4:]
+    return "***" if chat_id else "(empty)"
+
+
+def _save_tg_delivery_status(status: str, error: str | None = None) -> None:
+    """Persist last Telegram delivery status for /health/active."""
+    try:
+        REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+        (REPORTS_DIR / "tg_delivery_status.json").write_text(
+            json.dumps({
+                "last_status": status,
+                "last_at": datetime.now(timezone.utc).isoformat(),
+                "last_error": error,
+            }, indent=2),
+            encoding="utf-8",
+        )
+    except Exception as e:
+        _log.warning("[active] Could not save tg_delivery_status: %s", e)
+
+
 def _send_status_report(
     signals_result: dict[str, Any],
     settlement_result: dict[str, Any],
     training_result: dict[str, Any],
-) -> None:
-    """Format and send the 3-hour active status report to Telegram."""
+) -> str:
+    """Format and send the 3-hour active status report to Telegram.
+
+    Returns delivery status: "sent" | "dry_run" | "failed".
+    """
+    import urllib.request
+    import urllib.error
     from src.reporting.active_report import format_active_report
 
     text = format_active_report(signals_result, settlement_result, training_result)
@@ -537,29 +568,33 @@ def _send_status_report(
     print(text)
     print("=" * 60 + "\n")
 
-    token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-    chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
 
-    if not (token and chat_id):
-        _log.info("[active] Telegram not configured — status report logged to stdout only")
-        # Save dry-run payload
+    if not token or not chat_id:
+        missing = []
+        if not token:
+            missing.append("TELEGRAM_BOT_TOKEN")
+        if not chat_id:
+            missing.append("TELEGRAM_CHAT_ID")
+        _log.info("[active] DRY RUN: Telegram config incomplete — missing: %s", ", ".join(missing))
         out = REPORTS_DIR / "active_report_dry_run.json"
-        out.write_text(json.dumps({"text": text, "ts": datetime.now(timezone.utc).isoformat()},
-                                   indent=2), encoding="utf-8")
-        return
+        out.write_text(
+            json.dumps({"text": text, "ts": datetime.now(timezone.utc).isoformat(),
+                        "missing": missing}, indent=2),
+            encoding="utf-8",
+        )
+        _save_tg_delivery_status("dry_run")
+        return "dry_run"
 
-    # Send via raw urllib (plain text, no parse_mode to avoid formatting issues)
-    import urllib.request
-    import urllib.error
-
+    # Send via raw urllib — plain text, NO parse_mode (empty string causes 400 Bad Request)
     payload = json.dumps({
         "chat_id": chat_id,
         "text": text,
-        "parse_mode": "",
         "disable_web_page_preview": True,
     }).encode("utf-8")
 
-    # Retry up to 3 times with backoff
+    last_error: str | None = None
     for attempt in range(3):
         try:
             req = urllib.request.Request(
@@ -570,19 +605,39 @@ def _send_status_report(
             with urllib.request.urlopen(req, timeout=15) as resp:
                 body = json.loads(resp.read())
                 if body.get("ok"):
-                    _log.info("[active] Status report sent to Telegram")
-                    return
+                    _log.info("[active] Status report sent to Telegram (chat=%s)",
+                              _mask_chat_id(chat_id))
+                    _save_tg_delivery_status("sent")
+                    return "sent"
                 else:
-                    _log.warning("[active] Telegram API returned not-ok: %s", body)
-                    break
+                    desc = body.get("description", str(body))
+                    _log.error("[active] Telegram API not-ok: %s", desc)
+                    last_error = f"api_error: {desc}"
+                    _save_tg_delivery_status("failed", last_error)
+                    return "failed"
         except urllib.error.HTTPError as e:
-            _log.warning("[active] Telegram HTTP error (attempt %d): %s", attempt + 1, e)
+            body_raw = ""
+            try:
+                body_raw = e.read().decode("utf-8", errors="replace")
+                err_desc = json.loads(body_raw).get("description", body_raw)
+            except Exception:
+                err_desc = body_raw or str(e)
+            last_error = f"http_{e.code}: {err_desc}"
+            _log.error("[active] Telegram HTTP %d: %s (attempt %d)", e.code, err_desc, attempt + 1)
+            # 4xx are permanent errors — do not retry
+            if 400 <= e.code < 500:
+                _save_tg_delivery_status("failed", last_error)
+                return "failed"
             if attempt < 2:
                 time.sleep(2 ** attempt)
-        except Exception as e:
-            _log.warning("[active] Telegram send error (attempt %d): %s", attempt + 1, e)
+        except OSError as e:
+            last_error = f"network: {e}"
+            _log.warning("[active] Telegram network error (attempt %d): %s", attempt + 1, e)
             if attempt < 2:
                 time.sleep(2 ** attempt)
+
+    _save_tg_delivery_status("failed", last_error)
+    return "failed"
 
 
 # ---------------------------------------------------------------------------
@@ -677,4 +732,11 @@ def _write_run_history(
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="3-hour active monitoring report")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Send report immediately, bypassing ACTIVE_MODE check",
+    )
+    args = parser.parse_args()
+    main(force=args.force)
