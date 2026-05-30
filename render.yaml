@@ -23,10 +23,14 @@ services:
 
   # ──────────────────────────────────────────────────────────────────
   # WEB SERVICE — FastAPI + APScheduler (active monitoring mode)
-  # Одиночный сервис: health API + встроенный планировщик задач.
   # plan: free     — бесплатно, усыпает при простое (keep-alive job решает это)
   # plan: starter  — $7/мес, усыпает при простое, 512 MB RAM
   # plan: standard — $25/мес, не усыпает, рекомендуется для production
+  #
+  # ХРАНЕНИЕ ДАННЫХ:
+  #   Disk не используется (требует платный план).
+  #   Модели и леджер хранятся в git (data/models/, data/core/).
+  #   Runtime-артефакты (reports/, signals/) — эфемерные, не нужна персистентность.
   # ──────────────────────────────────────────────────────────────────
   - type: web
     name: bet-api
@@ -39,23 +43,18 @@ services:
     autoDeploy: true
     branch: all-the-best
 
-    disk:
-      name: bet-data-disk
-      mountPath: /data
-      sizeGB: 10
-
     envVars:
-      # ── Пути (абсолютные на Render) ──
+      # ── Пути (относительные — всё живёт внутри репозитория) ──
       - key: DATA_DIR
-        value: /data
+        value: data
       - key: MODEL_DIR
-        value: /data/models
+        value: data/models
       - key: LEDGER_PATH
-        value: /data/core/paper_signal_ledger.json
+        value: data/core/paper_signal_ledger.json
       - key: STAGING_DIR
-        value: /data/staging
+        value: data/staging
       - key: REPORTS_DIR
-        value: /data/reports
+        value: data/reports
 
       # ── Лиги и сезоны ──
       - key: LEAGUES
@@ -85,27 +84,13 @@ services:
       - key: SPORTS
         value: "football"
 
-      # ── PostgreSQL ──
-      - key: DATABASE_URL
-        fromDatabase:
-          name: bet-db
-          property: connectionString
-
       # ── Telegram (заполнить в Dashboard → Environment) ──
       - key: TELEGRAM_BOT_TOKEN
         sync: false
       - key: TELEGRAM_CHAT_ID
         sync: false
-      - key: TELEGRAM_API_ID
-        sync: false
-      - key: TELEGRAM_API_HASH
-        sync: false
-      - key: TELEGRAM_SESSION_STR
-        sync: false
-      - key: TELEGRAM_CHANNELS
-        sync: false
 
-      # ── The Odds API ──
+      # ── The Odds API (опционально) ──
       - key: THE_ODDS_API_KEY
         sync: false
 
@@ -116,14 +101,3 @@ services:
         value: "1"
       - key: PYTHONPATH
         value: /opt/render/project/src
-
-# ──────────────────────────────────────────────────────────────────
-# POSTGRESQL — метаданные, аудит-лог, история drift-отчётов
-# ──────────────────────────────────────────────────────────────────
-databases:
-  - name: bet-db
-    plan: free
-    region: frankfurt
-    databaseName: bet
-    user: bet_user
-    postgresMajorVersion: "16"

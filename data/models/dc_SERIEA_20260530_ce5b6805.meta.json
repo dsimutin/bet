@@ -1,0 +1,20 @@
+{
+  "model_id": "dc_SERIEA_20260530_ce5b6805",
+  "league": "SERIEA",
+  "trained_on": {
+    "start": "2021-08-21",
+    "end": "2025-05-18"
+  },
+  "n_matches": 1510,
+  "dataset_hash": "sha256:ce5b6805834f48cecf4e55fdd949b1bed49a8fc3616aa2362cee92e0d2c456c4",
+  "status": "production",
+  "converged": true,
+  "created_at_utc": "2026-05-30T19:04:55.594813+00:00",
+  "model_path": "data/models/dc_SERIEA_20260530_ce5b6805.pkl",
+  "calibration_path": "data/models/calibration_dc_SERIEA_20260530_ce5b6805.pkl",
+  "brier_score": 0.6244734911168545,
+  "log_loss": 1.033791901432147,
+  "max_brier_score": 0.65,
+  "max_log_loss": 1.2,
+  "promotion_reason": "first_model_passed_absolute_brier_gate"
+}

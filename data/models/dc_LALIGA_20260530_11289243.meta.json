@@ -1,0 +1,20 @@
+{
+  "model_id": "dc_LALIGA_20260530_11289243",
+  "league": "LALIGA",
+  "trained_on": {
+    "start": "2021-08-13",
+    "end": "2025-05-18"
+  },
+  "n_matches": 1510,
+  "dataset_hash": "sha256:1128924390f2ef3c5d6e6526c808ddd8a4e54a35679891e4a263d263aad8c968",
+  "status": "production",
+  "converged": true,
+  "created_at_utc": "2026-05-30T19:04:46.893981+00:00",
+  "model_path": "data/models/dc_LALIGA_20260530_11289243.pkl",
+  "calibration_path": "data/models/calibration_dc_LALIGA_20260530_11289243.pkl",
+  "brier_score": 0.5356003405289175,
+  "log_loss": 0.9069840645363878,
+  "max_brier_score": 0.65,
+  "max_log_loss": 1.2,
+  "promotion_reason": "first_model_passed_absolute_brier_gate"
+}
