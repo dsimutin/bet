@@ -60,3 +60,10 @@ configs/secrets.local.yaml
 data/models/*.pkl
 data/models/*.meta.json
 data/models/calibration_*.pkl
+
+# Ruflo / claude-flow runtime artifacts
+.swarm/memory.db
+.swarm/memory.db-shm
+.swarm/memory.db-wal
+.claude/memory.db
+ruvector.db
