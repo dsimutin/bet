@@ -145,12 +145,14 @@ async def lifespan(fastapi_app: FastAPI):
         except Exception as exc:
             _log.error("[health_app] Scheduler start FAILED: %s", exc, exc_info=True)
         # Notify Telegram that the bot restarted (verifies credentials on every deploy)
+        odds_key_present = bool(os.environ.get("THE_ODDS_API_KEY", "").strip())
+        odds_status = "✅ THE_ODDS_API_KEY задан — сигналы активны" if odds_key_present else "⚠️ THE_ODDS_API_KEY не задан — сигналов не будет"
         _send_startup_telegram(
             f"🤖 Бот запущен / Bot started\n"
             f"ACTIVE_MODE=true | Scheduler running\n"
             f"Leagues: {os.environ.get('LEAGUES', 'EPL,BUNDESLIGA,LALIGA,SERIEA')}\n"
-            f"Первый отчёт / Next report: через ~10 мин (к следующему часу)\n"
-            f"Сигналы будут если задан THE_ODDS_API_KEY\n"
+            f"{odds_status}\n"
+            f"Первый отчёт через ~10 мин (к следующему часу)\n"
             f"Запущен: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}"
         )
     else:

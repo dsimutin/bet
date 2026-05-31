@@ -178,15 +178,26 @@ def _run_signal_scan() -> dict[str, Any]:
                 per_league[league] = league_info
                 continue
 
-            signals = generate_signals_for_league(
-                model=model, league=league, scan_date=today,
-                staging_dir=STAGING_DIR, odds_api_key=api_key,
-            )
-            candidates_checked += 1
-            league_info["signals"] = len(signals)
-            league_info["status"] = "ok" if signals else "no_fixtures"
+            try:
+                signals = generate_signals_for_league(
+                    model=model, league=league, scan_date=today,
+                    staging_dir=STAGING_DIR, odds_api_key=api_key,
+                )
+                candidates_checked += 1
+                league_info["signals"] = len(signals)
+                league_info["status"] = "ok" if signals else "no_fixtures"
+            except Exception as e:
+                _log.error("[active] %s: signal generation error: %s", league, e)
+                source_errors.append(f"{league}: {e}")
+                league_info["status"] = "error"
+                league_info["error"] = str(e)[:120]
             per_league[league] = league_info
-            all_signals.extend(signals)
+            all_signals.extend(signals if league_info["status"] != "error" else [])
+
+        # Detect Odds API key errors by checking if api_key was set but all leagues got no_fixtures
+        if api_key and not all_signals and not source_errors:
+            # Try a quick validation call to distinguish "no matches today" from "bad key"
+            _validate_odds_api_key_in_background(api_key, providers_ok, providers_skip)
 
         if not all_signals and not source_errors:
             no_signal_reason = _determine_no_signal_reason(api_key, providers_skip)
@@ -660,11 +671,44 @@ def _send_status_report(
 # Helpers
 # ---------------------------------------------------------------------------
 
+def _validate_odds_api_key_in_background(
+    api_key: str,
+    providers_ok: list[str],
+    providers_skip: list[str],
+) -> None:
+    """Quick check: verify the Odds API key is valid by fetching available sports."""
+    try:
+        import urllib.request as _urllib
+        req = _urllib.Request(
+            f"https://api.the-odds-api.com/v4/sports?apiKey={api_key}",
+            headers={"User-Agent": "bet-analytics/1.0"},
+        )
+        with _urllib.urlopen(req, timeout=8) as resp:
+            if resp.status == 200:
+                _log.info("[active] Odds API key is VALID — no upcoming matches today")
+                # Update providers list in-place
+                if "Odds API" not in providers_ok:
+                    providers_ok.append("Odds API ✅ (ключ верный)")
+            else:
+                _log.warning("[active] Odds API key check returned %s", resp.status)
+    except Exception as exc:
+        code = getattr(getattr(exc, "code", None), "__str__", lambda: str(exc))()
+        _log.warning("[active] Odds API key validation failed: %s", exc)
+        # Replace "Odds API" with error entry
+        if "Odds API" in providers_ok:
+            providers_ok.remove("Odds API")
+        providers_skip.append(f"Odds API ❌ ошибка ключа ({code})")
+
+
 def _determine_no_signal_reason(api_key: str, providers_skip: list[str]) -> str:
     if not api_key and not (STAGING_DIR / f"{LEAGUES[0]}_latest.csv").exists():
         return "no odds source available (no Odds API key, no staged CSV)"
     if not api_key:
         return "using staged data only; no upcoming fixtures found"
+    # Key is set — check if any provider errored
+    odds_errors = [p for p in providers_skip if "Odds API" in p and "ошибка" in p]
+    if odds_errors:
+        return f"Odds API error: check THE_ODDS_API_KEY in Render Dashboard"
     return "no value signals found (no matches meet edge threshold)"
 
 

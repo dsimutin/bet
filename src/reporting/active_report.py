@@ -91,7 +91,13 @@ def _section_football_by_league(signals_result: dict[str, Any]) -> list[str]:
                 lines.append(f"  {label}: ❌ ошибка")
             elif status == "no_fixtures":
                 if has_api:
-                    lines.append(f"  {label}: ✅ нет матчей сегодня")
+                    # Check if Odds API actually errored
+                    providers_skip = signals_result.get("providers_skip", [])
+                    api_errored = any("Odds API" in p and "ошибка" in p for p in providers_skip)
+                    if api_errored:
+                        lines.append(f"  {label}: ⚠️ Odds API ошибка ключа")
+                    else:
+                        lines.append(f"  {label}: ✅ нет матчей сегодня")
                 else:
                     lines.append(f"  {label}: — нет фикстур (нет Odds API)")
             elif n > 0:
@@ -258,8 +264,13 @@ def _section_health(settlement_result: dict[str, Any]) -> list[str]:
     except Exception:
         pass
 
-    # Odds API status
-    odds_key = bool(os.environ.get("THE_ODDS_API_KEY"))
-    lines.append(f"Odds API: {'✅ ключ есть' if odds_key else '❌ ключа нет'}")
+    # Odds API status — show key presence AND validation result if available
+    odds_key_raw = os.environ.get("THE_ODDS_API_KEY", "").strip()
+    if odds_key_raw:
+        key_len = len(odds_key_raw)
+        key_hint = f"{odds_key_raw[:4]}...{odds_key_raw[-4:]}" if key_len > 8 else "***"
+        lines.append(f"Odds API: ✅ ключ задан ({key_len} симв., {key_hint})")
+    else:
+        lines.append("Odds API: ❌ ключа нет — добавь THE_ODDS_API_KEY")
 
     return lines
