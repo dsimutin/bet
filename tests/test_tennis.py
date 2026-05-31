@@ -312,3 +312,64 @@ class TestTennisActiveReport:
         )
         assert "Djokovic" in text
         assert "5.2" in text
+
+
+# ---------------------------------------------------------------------------
+# TennisMarkovModel tests
+# ---------------------------------------------------------------------------
+
+class TestTennisMarkovModel:
+    def _make_matches(self) -> pd.DataFrame:
+        rows = []
+        from datetime import date, timedelta
+        base = date(2024, 1, 1)
+        for i in range(40):
+            rows.append({
+                "match_date": base + timedelta(days=i),
+                "winner_name": "Player A",
+                "loser_name": "Player B",
+                "surface": "hard",
+                "w_svpt": 80, "w_1stIn": 55, "w_1stWon": 42, "w_2ndWon": 14,
+                "l_svpt": 80, "l_1stIn": 50, "l_1stWon": 35, "l_2ndWon": 12,
+                "score": "6-3 6-4",
+            })
+        return pd.DataFrame(rows)
+
+    def test_fit_trains(self):
+        from src.models.tennis_markov import TennisMarkovModel
+        model = TennisMarkovModel()
+        model.fit(self._make_matches())
+        assert model.params.n_matches == 40
+        assert model.params.n_players == 2
+
+    def test_predict_proba_range(self):
+        from src.models.tennis_markov import TennisMarkovModel
+        model = TennisMarkovModel()
+        model.fit(self._make_matches())
+        p = model.predict_proba("Player A", "Player B", "hard")
+        assert 0.0 < p < 1.0
+
+    def test_symmetry(self):
+        from src.models.tennis_markov import TennisMarkovModel
+        model = TennisMarkovModel()
+        model.fit(self._make_matches())
+        p1 = model.predict_proba("Player A", "Player B", "hard")
+        p2 = model.predict_proba("Player B", "Player A", "hard")
+        assert abs(p1 + p2 - 1.0) < 1e-6
+
+    def test_p_win_game_sanity(self):
+        from src.models.tennis_markov import _p_win_game
+        assert abs(_p_win_game(0.5) - 0.5) < 1e-9
+        assert _p_win_game(0.7) > _p_win_game(0.6) > _p_win_game(0.5)
+        assert 0.0 < _p_win_game(0.65) < 1.0
+
+    def test_save_load_roundtrip(self, tmp_path):
+        from src.models.tennis_markov import TennisMarkovModel
+        model = TennisMarkovModel()
+        model.fit(self._make_matches())
+        path = tmp_path / "markov.pkl"
+        model.save(path)
+        loaded = TennisMarkovModel.load(path)
+        p1 = model.predict_proba("Player A", "Player B", "hard")
+        p2 = loaded.predict_proba("Player A", "Player B", "hard")
+        assert abs(p1 - p2) < 1e-6

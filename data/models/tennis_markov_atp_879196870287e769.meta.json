@@ -1,0 +1,20 @@
+{
+  "model_type": "tennis_markov_v1",
+  "sport": "tennis",
+  "tour": "ATP",
+  "status": "production",
+  "n_matches": 20246,
+  "n_players": 997,
+  "trained_at_utc": "2026-05-31T12:44:10.258574+00:00",
+  "dataset_hash": "879196870287e769",
+  "model_path": "data/models/tennis_markov_atp_879196870287e769.pkl",
+  "features": [
+    "serve_point_win_pct",
+    "elo_blend",
+    "markov_chain"
+  ],
+  "markov_weight_range": [
+    0.2,
+    0.7
+  ]
+}

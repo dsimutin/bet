@@ -239,21 +239,29 @@ async def _job_tennis_retrain() -> None:
             _log.warning("[tennis_retrain] No data — skipping retrain")
             return
 
-        _log.info("[tennis_retrain] Training on %d matches", len(df))
+        import shutil
+        _log.info("[tennis_retrain] Training ELO + Markov on %d matches", len(df))
+
+        # ELO model
         model = TennisEloModel()
         model.fit(df)
-
         tag = model.params.dataset_hash
-        model_id = f"tennis_elo_atp_{tag}"
-        model_path = model_dir / f"{model_id}.pkl"
-        meta_path = model_dir / f"{model_id}.meta.json"
-        model.save(model_path)
-        model.save_meta(meta_path, model_path)
+        elo_path = model_dir / f"tennis_elo_atp_{tag}.pkl"
+        model.save(elo_path)
+        model.save_meta(model_dir / f"tennis_elo_atp_{tag}.meta.json", elo_path)
+        shutil.copy2(elo_path, model_dir / "tennis_elo_atp_latest.pkl")
+        _log.info("[tennis_retrain] ELO done: %d players", model.params.n_players)
 
-        import shutil
-        latest = model_dir / "tennis_elo_atp_latest.pkl"
-        shutil.copy2(model_path, latest)
-        _log.info("[tennis_retrain] Done: %d players, %d matches", model.params.n_players, model.params.n_matches)
+        # Markov model
+        from src.models.tennis_markov import TennisMarkovModel
+        markov = TennisMarkovModel()
+        markov.fit(df)
+        markov_tag = markov.params.dataset_hash
+        markov_path = model_dir / f"tennis_markov_atp_{markov_tag}.pkl"
+        markov.save(markov_path)
+        markov.save_meta(model_dir / f"tennis_markov_atp_{markov_tag}.meta.json", markov_path)
+        shutil.copy2(markov_path, model_dir / "tennis_markov_atp_latest.pkl")
+        _log.info("[tennis_retrain] Markov done: %d players", markov.params.n_players)
 
     loop = asyncio.get_event_loop()
     try:

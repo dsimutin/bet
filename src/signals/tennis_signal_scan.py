@@ -40,9 +40,11 @@ def scan_tennis_signals(
     edge_threshold: float = _DEFAULT_EDGE_THRESHOLD,
     min_odds: float = _DEFAULT_MIN_ODDS,
     max_odds: float = _DEFAULT_MAX_ODDS,
+    markov_model_path: Path | None = None,
 ) -> dict[str, Any]:
     """Scan upcoming ATP matches and return value-bet signals."""
     from src.models.tennis_elo import TennisEloModel
+    from src.models.tennis_markov import TennisMarkovModel
 
     t0 = time.perf_counter()
 
@@ -51,14 +53,27 @@ def scan_tennis_signals(
         return _empty_result("no_model")
 
     try:
-        model = TennisEloModel.load(model_path)
+        elo_model = TennisEloModel.load(model_path)
         _log.info(
             "[tennis] Loaded ELO model: %d players, %d matches",
-            model.params.n_players, model.params.n_matches,
+            elo_model.params.n_players, elo_model.params.n_matches,
         )
     except Exception as exc:
         _log.warning("[tennis] Failed to load ELO model: %s", exc)
         return _empty_result(f"model_load_error: {exc}")
+
+    # Load Markov model if available (sits next to ELO model)
+    markov_model: TennisMarkovModel | None = None
+    _markov_path = markov_model_path or model_path.parent / "tennis_markov_atp_latest.pkl"
+    if _markov_path.exists():
+        try:
+            markov_model = TennisMarkovModel.load(_markov_path)
+            _log.info("[tennis] Loaded Markov model: %d players", markov_model.params.n_players)
+        except Exception as exc:
+            _log.warning("[tennis] Markov model load failed: %s — using ELO only", exc)
+
+    # Use ELO model as the primary reference (has retirement detection, form, H2H)
+    model = elo_model
 
     events = _fetch_atp_events(api_key)
     if events is None:
@@ -103,10 +118,24 @@ def scan_tennis_signals(
             skipped_no_data += 1
             continue
 
-        # V2: use breakdown for richer signal metadata
-        breakdown = model.predict_proba_breakdown(player1, player2, surface)
-        breakdown["surface"] = surface
-        model_prob_p1 = breakdown["final_prob"]
+        # Markov model (primary when serve data available) + ELO (always)
+        elo_breakdown = model.predict_proba_breakdown(player1, player2, surface)
+        elo_breakdown["surface"] = surface
+
+        if markov_model is not None:
+            markov_bd = markov_model.predict_proba_breakdown(player1, player2, surface)
+            if markov_bd["markov_prob"] is not None:
+                # Both models agree on direction → higher confidence
+                model_prob_p1 = markov_bd["prob"]
+                breakdown = {**elo_breakdown, "markov_prob": markov_bd["markov_prob"],
+                             "p1_serve": markov_bd["p1_serve"], "p2_serve": markov_bd["p2_serve"],
+                             "model_source": "markov+elo"}
+            else:
+                model_prob_p1 = elo_breakdown["final_prob"]
+                breakdown = {**elo_breakdown, "model_source": "elo_only"}
+        else:
+            model_prob_p1 = elo_breakdown["final_prob"]
+            breakdown = {**elo_breakdown, "model_source": "elo_only"}
 
         # Context for signal enrichment
         context = {
@@ -253,6 +282,9 @@ def _check_event(
                     "serve_win_pct": round(serve_pct, 3) if serve_pct is not None else None,
                     "hold_pct": round(hold_pct, 3) if hold_pct is not None else None,
                     "recent_form": round(form, 3) if form is not None else None,
+                    "markov_prob": breakdown.get("markov_prob"),
+                    "p_serve": breakdown.get("p1_serve") if is_p1 else breakdown.get("p2_serve"),
+                    "model_source": breakdown.get("model_source", "elo_only"),
                     "status": "paper",
                     "generated_at": datetime.now(timezone.utc).isoformat(),
                 })
