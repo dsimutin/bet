@@ -126,6 +126,18 @@ def start(loop: asyncio.AbstractEventLoop | None = None) -> None:
         replace_existing=True,
     )
 
+    # Tennis ELO retrain: every Monday at 02:30 UTC (off-peak, weekly is enough)
+    sched.add_job(
+        _job_tennis_retrain,
+        "cron",
+        day_of_week="mon",
+        hour=2,
+        minute=30,
+        id="tennis_retrain",
+        replace_existing=True,
+        misfire_grace_time=3600,  # 1h grace — retrain any time Monday if missed
+    )
+
     sched.start()
     _log.info("[scheduler] ACTIVE SCHEDULER STARTED")
     _log.info("[scheduler] Jobs registered: %d", len(sched.get_jobs()))
@@ -201,3 +213,51 @@ async def _job_keep_alive() -> None:
             _log.debug("[scheduler] keep_alive ping %s → %s", url, resp.status)
     except Exception as exc:
         _log.debug("[scheduler] keep_alive ping failed (non-critical): %s", exc)
+
+
+async def _job_tennis_retrain() -> None:
+    """Weekly ATP ELO retrain — runs in thread pool, saves latest.pkl to disk."""
+    _log.info("[scheduler] → tennis_retrain starting")
+
+    def _retrain() -> None:
+        import os as _os
+        from pathlib import Path
+        from src.ingest.tennis_atp import build_atp_dataset
+        from src.models.tennis_elo import TennisEloModel
+
+        data_dir = Path(_os.environ.get("DATA_DIR", "data"))
+        model_dir = Path(_os.environ.get("MODEL_DIR", data_dir / "models"))
+        cache_dir = data_dir / "raw" / "tennis_atp"
+
+        from datetime import datetime as _dt
+        current_year = _dt.utcnow().year
+        years = list(range(2019, current_year + 1))
+
+        _log.info("[tennis_retrain] Downloading ATP data for %s", years)
+        df = build_atp_dataset(years, cache_dir=cache_dir, use_cache=False)
+        if df.empty:
+            _log.warning("[tennis_retrain] No data — skipping retrain")
+            return
+
+        _log.info("[tennis_retrain] Training on %d matches", len(df))
+        model = TennisEloModel()
+        model.fit(df)
+
+        tag = model.params.dataset_hash
+        model_id = f"tennis_elo_atp_{tag}"
+        model_path = model_dir / f"{model_id}.pkl"
+        meta_path = model_dir / f"{model_id}.meta.json"
+        model.save(model_path)
+        model.save_meta(meta_path, model_path)
+
+        import shutil
+        latest = model_dir / "tennis_elo_atp_latest.pkl"
+        shutil.copy2(model_path, latest)
+        _log.info("[tennis_retrain] Done: %d players, %d matches", model.params.n_players, model.params.n_matches)
+
+    loop = asyncio.get_event_loop()
+    try:
+        await loop.run_in_executor(None, _retrain)
+        _log.info("[scheduler] ← tennis_retrain done")
+    except Exception as exc:
+        _log.exception("[scheduler] tennis_retrain raised: %s", exc)

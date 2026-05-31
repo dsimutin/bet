@@ -295,6 +295,18 @@ def _section_training(training_result: dict[str, Any]) -> list[str]:
     else:
         lines.append("  Нет production моделей!")
 
+    # Tennis ELO model status
+    tennis_meta_path = MODEL_DIR / "tennis_elo_atp_latest.pkl"
+    if tennis_meta_path.exists():
+        # Show age in days
+        try:
+            age_days = (datetime.now(timezone.utc).timestamp() - tennis_meta_path.stat().st_mtime) / 86400
+            lines.append(f"  🎾 ATP ELO: production (обновлена {age_days:.0f} дн. назад)")
+        except Exception:
+            lines.append("  🎾 ATP ELO: production")
+    else:
+        lines.append("  🎾 ATP ELO: нет модели")
+
     if trained:
         lines.append(f"Переобучение: да ({league}, {n_matches} матчей)")
         if old_brier is not None and new_brier is not None:
