@@ -5,7 +5,7 @@
   "status": "production",
   "n_matches": 20246,
   "n_players": 997,
-  "trained_at_utc": "2026-05-31T12:33:16.936497+00:00",
+  "trained_at_utc": "2026-05-31T13:15:03.956381+00:00",
   "dataset_hash": "879196870287e769",
   "model_path": "data/models/tennis_elo_atp_879196870287e769.pkl",
   "elo_k": 32.0,

@@ -235,14 +235,25 @@ class TennisEloModel:
         recent = entries[-n:]
         return sum(1 for e in recent if e["won"]) / len(recent)
 
-    def retired_recently(self, player: str, n_matches: int = 3, days: int = 60) -> bool:
-        """True if player retired (injury) in last n_matches or within last `days` days."""
+    def retired_recently(self, player: str, days: int = 14) -> bool:
+        """True if player's LAST match was a retirement within `days` days.
+
+        If the player has played any match AFTER the retirement, they've recovered
+        and this returns False.
+        """
         retirements = self._retirements.get(player, [])
         if not retirements:
             return False
+        last_retirement = retirements[-1]
+        last_match = self._last_match.get(player)
+
+        # Player played after the retirement → recovered
+        if last_match and last_match > last_retirement:
+            return False
+
+        # Only flag if retirement was very recent (within `days` days)
         cutoff = date.today() - timedelta(days=days)
-        recent_retirements = [d for d in retirements[-n_matches:] if d >= cutoff]
-        return len(recent_retirements) > 0
+        return last_retirement >= cutoff
 
     def get_tourney_level_winrate(self, player: str, level: str) -> float | None:
         """Win rate on specific tourney level: G=GrandSlam, M=Masters, A=250/500."""
