@@ -140,6 +140,11 @@ def _run_signal_scan() -> dict[str, Any]:
     registry = ModelRegistry(MODEL_DIR)
 
     all_signals: list[dict] = []
+    active_soccer_leagues: list[str] = []  # leagues with events right now per Odds API
+
+    # Quick sports probe: find which soccer leagues have events today
+    if api_key:
+        active_soccer_leagues = _probe_active_soccer_leagues(api_key)
     candidates_checked = 0
     sent_count = 0
     dupes_skipped = 0
@@ -254,6 +259,7 @@ def _run_signal_scan() -> dict[str, Any]:
         "duration_s": round(elapsed, 1),
         "per_league": per_league,
         "has_odds_api_key": bool(api_key),
+        "active_soccer_leagues": active_soccer_leagues,
     }
 
     _write_run_history_simple(
@@ -670,6 +676,31 @@ def _send_status_report(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _probe_active_soccer_leagues(api_key: str) -> list[str]:
+    """Query /sports to find soccer competitions that currently have events.
+
+    Returns a list of active sport_key strings (e.g. ['soccer_epl', 'soccer_usa_mls']).
+    Returns [] on any error (non-critical — used only for reporting).
+    """
+    try:
+        import urllib.request as _urllib, json as _json
+        req = _urllib.Request(
+            f"https://api.the-odds-api.com/v4/sports?apiKey={api_key}&all=false",
+            headers={"User-Agent": "bet-analytics/1.0"},
+        )
+        with _urllib.urlopen(req, timeout=10) as resp:
+            sports = _json.loads(resp.read())
+        active = [
+            s["key"] for s in sports
+            if s.get("group", "").lower() == "soccer" and s.get("active", False)
+        ]
+        _log.info("[active] Odds API active soccer leagues: %d found — %s", len(active), active[:8])
+        return active
+    except Exception as exc:
+        _log.warning("[active] Could not probe active leagues: %s", exc)
+        return []
+
 
 def _validate_odds_api_key_in_background(
     api_key: str,

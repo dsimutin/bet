@@ -832,23 +832,41 @@ def generate_signals_for_league(
 
     api_key = odds_api_key or os.environ.get("THE_ODDS_API_KEY", "")
     candidates: pd.DataFrame | None = None
+    api_returned_empty = False
 
     # -- Source 1: The Odds API ------------------------------------------
     if api_key:
         candidates = _fetch_odds_api_candidates(league, api_key, bookmaker_prefix)
         if candidates is not None and candidates.empty:
+            # API responded OK but zero upcoming events — off-season or no fixtures today
+            api_returned_empty = True
             candidates = None
+            # Do NOT fall back to staged data: staged CSVs are historical results,
+            # not upcoming fixtures. An empty API response means no matches today.
+            _log.info(
+                "[signals] %s: Odds API returned 0 events for %s "
+                "(off-season or no matches today — not falling back to staged data)",
+                league,
+                scan_date,
+            )
+            return []
 
     # -- Source 2: Staged upcoming fixtures CSV --------------------------
-    if candidates is None and staging_dir is not None:
+    # Only used when API key is NOT set (pure offline/dev mode)
+    if candidates is None and not api_key and staging_dir is not None:
         candidates = _load_staged_upcoming(league, staging_dir, scan_date, bookmaker_prefix)
 
     if candidates is None or candidates.empty:
-        _log.info(
-            "[signals] %s: no candidate matches for %s — skipping (no odds source available)",
-            league,
-            scan_date,
-        )
+        if api_key:
+            _log.warning(
+                "[signals] %s: Odds API fetch FAILED for %s — check key and network",
+                league, scan_date,
+            )
+        else:
+            _log.info(
+                "[signals] %s: no upcoming fixtures in staged data for %s",
+                league, scan_date,
+            )
         return []
 
     _log.info("[signals] %s: %d candidate rows for %s", league, len(candidates), scan_date)

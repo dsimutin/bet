@@ -49,13 +49,26 @@ def format_active_report(
     parts += _section_training(training_result)
     parts += _section_health(settlement_result)
 
-    # Guidance when no Odds API key
-    if not signals_result.get("has_odds_api_key"):
+    has_api = signals_result.get("has_odds_api_key", False)
+    active_soccer = signals_result.get("active_soccer_leagues", [])
+    total_signals = signals_result.get("signals_count", 0)
+
+    if not has_api:
         parts += [
             "─────────────────────",
             "⚠️ Для сигналов нужен THE_ODDS_API_KEY",
             "Render Dashboard → Environment → добавь ключ",
             "Бесплатный план: https://the-odds-api.com (500 req/month)",
+        ]
+    elif has_api and active_soccer and total_signals == 0:
+        # Key works, but configured leagues are in off-season
+        # Show what IS active so user knows bot is healthy
+        active_display = [s.replace("soccer_", "").replace("_", " ").title() for s in active_soccer[:6]]
+        parts += [
+            "─────────────────────",
+            "ℹ️ Все настроенные лиги в межсезонье",
+            f"Активны сейчас ({len(active_soccer)}): {', '.join(active_display)}",
+            "Сигналы появятся когда начнётся новый сезон (август)",
         ]
 
     return "\n".join(parts).strip()
@@ -70,11 +83,18 @@ def _section_football_by_league(signals_result: dict[str, Any]) -> list[str]:
     per_league: dict[str, dict] = signals_result.get("per_league", {})
     has_api = signals_result.get("has_odds_api_key", False)
     total_signals = signals_result.get("signals_count", 0)
+    active_soccer = signals_result.get("active_soccer_leagues", [])
+    providers_skip = signals_result.get("providers_skip", [])
+    api_errored = any("Odds API" in p and "ошибка" in p for p in providers_skip)
+
+    _SPORT_KEY = {
+        "EPL": "soccer_epl", "BUNDESLIGA": "soccer_germany_bundesliga",
+        "LALIGA": "soccer_spain_la_liga", "SERIEA": "soccer_italy_serie_a",
+    }
 
     lines = ["⚽ Football — сигналы по лигам"]
 
     if not per_league:
-        # Fallback: no per-league data
         leagues = signals_result.get("leagues", [])
         for lg in leagues:
             label = _LEAGUE_DISPLAY.get(lg, lg)
@@ -84,20 +104,20 @@ def _section_football_by_league(signals_result: dict[str, Any]) -> list[str]:
             label = _LEAGUE_DISPLAY.get(league, league)
             status = info.get("status", "ok")
             n = info.get("signals", 0)
+            sport_key = _SPORT_KEY.get(league, "")
 
             if status == "no_model":
                 lines.append(f"  {label}: ⚠️ нет модели")
             elif status == "error":
-                lines.append(f"  {label}: ❌ ошибка")
+                err = info.get("error", "")
+                lines.append(f"  {label}: ❌ {err[:60]}" if err else f"  {label}: ❌ ошибка")
+            elif api_errored:
+                lines.append(f"  {label}: ⚠️ Odds API — неверный ключ")
             elif status == "no_fixtures":
-                if has_api:
-                    # Check if Odds API actually errored
-                    providers_skip = signals_result.get("providers_skip", [])
-                    api_errored = any("Odds API" in p and "ошибка" in p for p in providers_skip)
-                    if api_errored:
-                        lines.append(f"  {label}: ⚠️ Odds API ошибка ключа")
-                    else:
-                        lines.append(f"  {label}: ✅ нет матчей сегодня")
+                if has_api and active_soccer and sport_key not in active_soccer:
+                    lines.append(f"  {label}: 🔴 межсезонье (лига не активна)")
+                elif has_api:
+                    lines.append(f"  {label}: ✅ нет матчей сегодня")
                 else:
                     lines.append(f"  {label}: — нет фикстур (нет Odds API)")
             elif n > 0:
