@@ -29,6 +29,18 @@ _LEAGUE_DISPLAY = {
     "LIGUE1": "🇫🇷 Ligue 1",
 }
 
+# Odds API sport_key for each configured league
+_LEAGUE_SPORT_KEY = {
+    "EPL": "soccer_epl",
+    "BUNDESLIGA": "soccer_germany_bundesliga",
+    "LALIGA": "soccer_spain_la_liga",
+    "SERIEA": "soccer_italy_serie_a",
+    "LIGUE1": "soccer_france_ligue_one",
+}
+
+# World Cup 2026: group stage starts 2026-06-11
+_WORLD_CUP_2026_START = datetime(2026, 6, 11, tzinfo=timezone.utc)
+
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -63,12 +75,16 @@ def format_active_report(
     elif has_api and active_soccer and total_signals == 0:
         # Key works, but configured leagues are in off-season
         # Show what IS active so user knows bot is healthy
+        now_dt = datetime.now(timezone.utc)
+        days_to_wc = (_WORLD_CUP_2026_START - now_dt).days
+        wc_note = f"🏆 ЧМ 2026 через {days_to_wc} дн. (11 июня)!" if 0 < days_to_wc <= 30 else ""
         active_display = [s.replace("soccer_", "").replace("_", " ").title() for s in active_soccer[:6]]
+        parts += ["─────────────────────", "ℹ️ Все настроенные лиги в межсезонье"]
+        if wc_note:
+            parts.append(wc_note)
         parts += [
-            "─────────────────────",
-            "ℹ️ Все настроенные лиги в межсезонье",
             f"Активны сейчас ({len(active_soccer)}): {', '.join(active_display)}",
-            "Сигналы появятся когда начнётся новый сезон (август)",
+            "Сигналы вернутся в августе (EPL, Бундеслига, Ла Лига, Серия А, Лига 1)",
         ]
 
     return "\n".join(parts).strip()
@@ -87,12 +103,15 @@ def _section_football_by_league(signals_result: dict[str, Any]) -> list[str]:
     providers_skip = signals_result.get("providers_skip", [])
     api_errored = any("Odds API" in p and "ошибка" in p for p in providers_skip)
 
-    _SPORT_KEY = {
-        "EPL": "soccer_epl", "BUNDESLIGA": "soccer_germany_bundesliga",
-        "LALIGA": "soccer_spain_la_liga", "SERIEA": "soccer_italy_serie_a",
-    }
-
     lines = ["⚽ Football — сигналы по лигам"]
+
+    # World Cup 2026 countdown block
+    now = datetime.now(timezone.utc)
+    days_to_wc = (_WORLD_CUP_2026_START - now).days
+    if 0 < days_to_wc <= 30:
+        lines.append(f"  🏆 ЧМ 2026: старт через {days_to_wc} дн. (11 июня)")
+    elif days_to_wc <= 0 and "soccer_fifa_world_cup" in active_soccer:
+        lines.append("  🏆 ЧМ 2026: идёт! Сигналы по национальным командам не поддерживаются (нет модели)")
 
     if not per_league:
         leagues = signals_result.get("leagues", [])
@@ -104,7 +123,7 @@ def _section_football_by_league(signals_result: dict[str, Any]) -> list[str]:
             label = _LEAGUE_DISPLAY.get(league, league)
             status = info.get("status", "ok")
             n = info.get("signals", 0)
-            sport_key = _SPORT_KEY.get(league, "")
+            sport_key = _LEAGUE_SPORT_KEY.get(league, "")
 
             if status == "no_model":
                 lines.append(f"  {label}: ⚠️ нет модели")

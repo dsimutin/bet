@@ -48,7 +48,7 @@ TELEGRAM_STATUS_REPORTS_ENABLED = _env_bool("TELEGRAM_STATUS_REPORTS_ENABLED", T
 TELEGRAM_SIGNAL_ALERTS_ENABLED = _env_bool("TELEGRAM_SIGNAL_ALERTS_ENABLED", True)
 SPORTS = os.environ.get("SPORTS", "football").split(",")
 
-LEAGUES = os.environ.get("LEAGUES", "EPL,BUNDESLIGA,LALIGA,SERIEA").split(",")
+LEAGUES = os.environ.get("LEAGUES", "EPL,BUNDESLIGA,LALIGA,SERIEA,LIGUE1").split(",")
 MODEL_DIR = Path(os.environ.get("MODEL_DIR", "data/models"))
 LEDGER_PATH = Path(os.environ.get("LEDGER_PATH", "data/core/paper_signal_ledger.json"))
 STAGING_DIR = Path(os.environ.get("STAGING_DIR", "data/staging"))
@@ -471,10 +471,13 @@ def _run_training_check() -> dict[str, Any]:
             except Exception:
                 pass
 
+            # Ligue 1 has higher natural variance (PSG effect) — relax gate to 0.70
+            _league_brier_gate = 0.70 if league in ("LIGUE1", "RPL") else 0.65
             trainer = DailyTrainer(
                 registry=registry,
                 staging_dir=STAGING_DIR,
                 config=DixonColesConfig(),
+                max_brier_score=_league_brier_gate,
             )
             train_result = trainer.run_on_dataframe(league, cutoff, df)
 

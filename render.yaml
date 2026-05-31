@@ -57,7 +57,7 @@ services:
 
       # ── Лиги и сезоны ──
       - key: LEAGUES
-        value: "EPL,BUNDESLIGA,LALIGA,SERIEA"
+        value: "EPL,BUNDESLIGA,LALIGA,SERIEA,LIGUE1"
       - key: OPENFOOTBALL_SEASONS
         value: "2022-23,2023-24,2024-25,2025-26"
 
