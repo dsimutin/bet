@@ -147,6 +147,7 @@ def _run_signal_scan() -> dict[str, Any]:
     providers_skip: list[str] = []
     source_errors: list[str] = []
     no_signal_reason = ""
+    per_league: dict[str, dict] = {}  # league → {signals, model_brier, status}
 
     # Football signals (only sport with model)
     if "football" in SPORTS:
@@ -157,14 +158,24 @@ def _run_signal_scan() -> dict[str, Any]:
             providers_ok.append("OpenFootball (staged)")
 
         for league in LEAGUES:
+            league_info: dict[str, Any] = {"signals": 0, "model_brier": None, "status": "ok"}
             try:
                 model = registry.load_latest(league, production_only=True)
+                # Grab brier score from model meta
+                try:
+                    league_info["model_brier"] = getattr(model, "brier_score", None)
+                except Exception:
+                    pass
             except FileNotFoundError:
                 _log.info("[active] %s: no production model — skipping", league)
                 providers_skip.append(f"{league} model")
+                league_info["status"] = "no_model"
+                per_league[league] = league_info
                 continue
             except Exception as e:
                 source_errors.append(f"{league}: {e}")
+                league_info["status"] = "error"
+                per_league[league] = league_info
                 continue
 
             signals = generate_signals_for_league(
@@ -172,6 +183,9 @@ def _run_signal_scan() -> dict[str, Any]:
                 staging_dir=STAGING_DIR, odds_api_key=api_key,
             )
             candidates_checked += 1
+            league_info["signals"] = len(signals)
+            league_info["status"] = "ok" if signals else "no_fixtures"
+            per_league[league] = league_info
             all_signals.extend(signals)
 
         if not all_signals and not source_errors:
@@ -227,6 +241,8 @@ def _run_signal_scan() -> dict[str, Any]:
         "providers_skip": providers_skip,
         "source_errors": source_errors,
         "duration_s": round(elapsed, 1),
+        "per_league": per_league,
+        "has_odds_api_key": bool(api_key),
     }
 
     _write_run_history_simple(

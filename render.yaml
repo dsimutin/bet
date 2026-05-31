@@ -37,7 +37,7 @@ services:
     runtime: python
     region: frankfurt
     buildCommand: pip install -r requirements-render.txt && pip install -e . --no-deps
-    startCommand: uvicorn src.web.health_app:app --host 0.0.0.0 --port $PORT --workers 1
+    startCommand: uvicorn src.web.health_app:app --host 0.0.0.0 --port $PORT --workers 1 --log-level info
     healthCheckPath: /health
     autoDeploy: true
     branch: all-the-best
@@ -59,7 +59,7 @@ services:
       - key: LEAGUES
         value: "EPL,BUNDESLIGA,LALIGA,SERIEA"
       - key: OPENFOOTBALL_SEASONS
-        value: "2021-22,2022-23,2023-24,2024-25"
+        value: "2022-23,2023-24,2024-25,2025-26"
 
       # ── Active mode scheduler ──
       - key: ACTIVE_MODE

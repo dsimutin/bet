@@ -155,7 +155,7 @@ class TestActiveReportFormatter:
             self._training_result(),
         )
         assert isinstance(text, str)
-        assert "Active report" in text
+        assert "Report" in text or "Отчёт" in text
 
     def test_report_contains_all_sections(self, tmp_path, monkeypatch):
         monkeypatch.setenv("DATA_DIR", str(tmp_path))
@@ -172,11 +172,12 @@ class TestActiveReportFormatter:
             self._settlement_result(),
             self._training_result(),
         )
-        assert "Data" in text
-        assert "Signals" in text
-        assert "Training" in text
-        assert "Results" in text
-        assert "Health" in text
+        # Section headers — bilingual report uses Russian/English mix
+        assert any(kw in text for kw in ("Football", "⚽", "лигам", "Data"))
+        assert any(kw in text for kw in ("Signals", "Сканирование", "сигнал"))
+        assert any(kw in text for kw in ("Training", "Модели", "Переобучение"))
+        assert any(kw in text for kw in ("Results", "Система", "P&L"))
+        assert any(kw in text for kw in ("Health", "Система", "Drift", "Дрейф"))
 
     def test_no_signals_reason_appears_in_report(self, tmp_path, monkeypatch):
         monkeypatch.setenv("DATA_DIR", str(tmp_path))

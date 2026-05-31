@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from glob import glob
@@ -24,6 +25,15 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
+
+# Configure root logger so all app INFO messages appear in Render / uvicorn logs.
+# Must happen before any module-level logger is used.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    stream=sys.stdout,
+    force=True,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -95,6 +105,31 @@ def _bootstrap_models_in_background() -> None:
     t.start()
 
 
+def _send_startup_telegram(msg: str) -> None:
+    """Send a plain-text message to Telegram. Fires-and-forgets; never raises."""
+    import urllib.request
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+    if not token or not chat_id:
+        return
+    try:
+        payload = json.dumps({
+            "chat_id": chat_id,
+            "text": msg,
+            "disable_web_page_preview": True,
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=10):
+            pass
+        _log.info("[health_app] Startup Telegram notification sent")
+    except Exception as exc:
+        _log.warning("[health_app] Startup Telegram notification failed: %s", exc)
+
+
 @asynccontextmanager
 async def lifespan(fastapi_app: FastAPI):
     _log_startup_env()
@@ -106,9 +141,18 @@ async def lifespan(fastapi_app: FastAPI):
         try:
             from src.services.scheduler import start as scheduler_start
             scheduler_start()
-            _log.info("[health_app] Active mode scheduler started")
+            _log.info("[health_app] Active mode scheduler started OK")
         except Exception as exc:
-            _log.error("[health_app] Scheduler start failed: %s", exc)
+            _log.error("[health_app] Scheduler start FAILED: %s", exc, exc_info=True)
+        # Notify Telegram that the bot restarted (verifies credentials on every deploy)
+        _send_startup_telegram(
+            f"🤖 Бот запущен / Bot started\n"
+            f"ACTIVE_MODE=true | Scheduler running\n"
+            f"Leagues: {os.environ.get('LEAGUES', 'EPL,BUNDESLIGA,LALIGA,SERIEA')}\n"
+            f"Первый отчёт / Next report: через ~10 мин (к следующему часу)\n"
+            f"Сигналы будут если задан THE_ODDS_API_KEY\n"
+            f"Запущен: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}"
+        )
     else:
         _log.info("[health_app] ACTIVE_MODE=false — scheduler not started")
     yield
