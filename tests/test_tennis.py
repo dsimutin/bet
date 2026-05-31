@@ -450,3 +450,71 @@ class TestTennisAbstractScraper:
         _save_cache(path, {"Sinner": {"hard": 0.72}})
         assert _is_cache_fresh(path, 24)
         assert not _is_cache_fresh(path, 0)  # max_age=0 → always stale
+
+
+# ---------------------------------------------------------------------------
+# ATP Rankings + name resolver (unit — no HTTP)
+# ---------------------------------------------------------------------------
+
+class TestATPRankings:
+    def _mock_players_csv(self) -> str:
+        return "player_id,name_first,name_last,hand,dob,ioc,height,wikidata_id\n207989,Jannik,Sinner,R,20010816,ITA,188,\n206173,Carlos,Alcaraz,R,20030505,ESP,185,\n100644,Alexander,Zverev,R,19970420,GER,198,\n"
+
+    def _mock_rankings_csv(self) -> str:
+        return "ranking_date,rank,player,points\n20260105,1,207989,14750\n20260105,2,206173,11960\n20260105,3,100644,5705\n"
+
+    def test_download_players_parses_correctly(self):
+        from src.ingest.atp_rankings import _download_players
+        from unittest.mock import patch
+        with patch("src.ingest.atp_rankings._get", return_value=self._mock_players_csv()):
+            result = _download_players("http://fake")
+        assert "207989" in result
+        assert result["207989"]["name_first"] == "Jannik"
+        assert result["206173"]["name_last"] == "Alcaraz"
+
+    def test_download_rankings_parses_correctly(self):
+        from src.ingest.atp_rankings import _download_rankings
+        from unittest.mock import patch
+        with patch("src.ingest.atp_rankings._get", return_value=self._mock_rankings_csv()):
+            result = _download_rankings("http://fake")
+        assert len(result) == 3
+        assert result[0]["rank"] == 1
+        assert result[0]["player_id"] == "207989"
+
+    def test_get_rankings_combines_players_and_rankings(self, tmp_path):
+        from src.ingest.atp_rankings import get_rankings
+        from unittest.mock import patch
+        with patch("src.ingest.atp_rankings._download_players",
+                   return_value={"207989": {"name_first": "Jannik", "name_last": "Sinner"},
+                                 "206173": {"name_first": "Carlos", "name_last": "Alcaraz"}}), \
+             patch("src.ingest.atp_rankings._download_rankings",
+                   return_value=[{"rank": 1, "player_id": "207989", "points": 14750},
+                                 {"rank": 2, "player_id": "206173", "points": 11960}]):
+            rows = get_rankings(top_n=10, tour="atp", cache_dir=tmp_path)
+        assert rows[0]["full_name"] == "Jannik Sinner"
+        assert rows[1]["full_name"] == "Carlos Alcaraz"
+        assert rows[0]["rank"] == 1
+
+    def test_build_name_resolver_abbreviations(self, tmp_path):
+        from src.ingest.atp_rankings import build_name_resolver
+        from unittest.mock import patch
+        mock_rankings = [{"rank": 1, "player_id": "1", "name_first": "Jannik",
+                          "name_last": "Sinner", "full_name": "Jannik Sinner", "points": 14000},
+                         {"rank": 2, "player_id": "2", "name_first": "Carlos",
+                          "name_last": "Alcaraz", "full_name": "Carlos Alcaraz", "points": 12000}]
+        with patch("src.ingest.atp_rankings.get_rankings", return_value=mock_rankings):
+            resolver = build_name_resolver(top_n=10, cache_dir=tmp_path)
+
+        assert resolver.get("J. Sinner") == "Jannik Sinner"
+        assert resolver.get("Sinner") == "Jannik Sinner"
+        assert resolver.get("Jannik Sinner") == "Jannik Sinner"
+        assert resolver.get("C. Alcaraz") == "Carlos Alcaraz"
+
+    def test_resolve_name_passthrough(self, tmp_path):
+        from src.ingest.atp_rankings import resolve_name
+        from unittest.mock import patch
+        resolver = {"Jannik Sinner": "Jannik Sinner", "j. sinner": "Jannik Sinner"}
+        result = resolve_name("J. Sinner", resolver=resolver)
+        assert result == "Jannik Sinner"
+        result2 = resolve_name("Unknown Player", resolver=resolver)
+        assert result2 == "Unknown Player"

@@ -75,6 +75,20 @@ def scan_tennis_signals(
         except Exception as exc:
             _log.warning("[tennis] Markov model load failed: %s — using ELO only", exc)
 
+    # Build rankings-based name resolver (ATP + WTA) and rank lookup
+    _name_resolver: dict[str, str] = {}
+    _rank_lookup: dict[str, int] = {}   # full_name → current rank
+    try:
+        from src.ingest.atp_rankings import build_name_resolver, get_rankings
+        _name_resolver = build_name_resolver(top_n=300)
+        for tour in ("atp", "wta"):
+            for row in get_rankings(top_n=300, tour=tour):
+                _rank_lookup[row["full_name"]] = row["rank"]
+        _log.info("[tennis] Name resolver: %d entries, rank lookup: %d players",
+                  len(_name_resolver), len(_rank_lookup))
+    except Exception as exc:
+        _log.debug("[tennis] Rankings unavailable: %s", exc)
+
     # Inject live serve stats from Tennis Abstract (current-season accuracy boost)
     if markov_model is not None:
         try:
@@ -107,8 +121,8 @@ def scan_tennis_signals(
             continue
 
         # Resolve abbreviated names ("N. Djokovic") to full names in model
-        player1 = _resolve_player_name(player1_raw, model)
-        player2 = _resolve_player_name(player2_raw, model)
+        player1 = _resolve_player_name(player1_raw, model, _name_resolver)
+        player2 = _resolve_player_name(player2_raw, model, _name_resolver)
 
         # Prefer surface-specific prediction; infer surface from description if available
         surface = _infer_surface(event)
@@ -165,6 +179,8 @@ def scan_tennis_signals(
             "p2_retired_recently": model.retired_recently(player2),
             "consensus_p1": consensus_p1,
             "consensus_p2": consensus_p2,
+            "p1_rank": _rank_lookup.get(player1),
+            "p2_rank": _rank_lookup.get(player2),
         }
 
         event_signals = _check_event(
@@ -282,6 +298,8 @@ def _check_event(
                 hold_pct = model.get_hold_rate(player, breakdown.get("surface", "hard"))
                 ctx = context or {}
                 form = ctx.get("p1_form" if is_p1 else "p2_form")
+                p_rank = ctx.get("p1_rank" if is_p1 else "p2_rank")
+                opp_rank = ctx.get("p2_rank" if is_p1 else "p1_rank")
                 signals.append({
                     "signal_id": f"ten_{event_id[:8]}_{book_key}_{player[:4].replace(' ', '')}",
                     "sport": "tennis",
@@ -310,6 +328,8 @@ def _check_event(
                     "p_serve": breakdown.get("p1_serve") if is_p1 else breakdown.get("p2_serve"),
                     "best_of": best_of,
                     "model_source": breakdown.get("model_source", "elo_only"),
+                    "rank": p_rank,
+                    "opp_rank": opp_rank,
                     "capper_support": (ctx.get("consensus_p1") if is_p1 else ctx.get("consensus_p2") or {}).get("support"),
                     "capper_tips": (ctx.get("consensus_p1") if is_p1 else ctx.get("consensus_p2") or {}).get("n_tips", 0),
                     "capper_avg_odds": (ctx.get("consensus_p1") if is_p1 else ctx.get("consensus_p2") or {}).get("avg_odds"),
@@ -320,14 +340,30 @@ def _check_event(
     return signals
 
 
-def _resolve_player_name(name: str, model: Any) -> str:
+def _resolve_player_name(
+    name: str,
+    model: Any,
+    resolver: dict[str, str] | None = None,
+) -> str:
     """Resolve abbreviated name ("N. Djokovic") to full name in model ("Novak Djokovic").
+
+    Resolution order:
+    1. Exact match in model → return as-is
+    2. Rankings resolver (ATP/WTA player CSV) → full canonical name
+    3. Scan model's known players by last-name + first-initial
 
     Falls back to the original name if no match found.
     """
-    # If model already knows this exact name, return as-is
+    # 1. Exact model match
     if model.has_enough_data(name, min_matches=1):
         return name
+
+    # 2. Rankings resolver lookup
+    if resolver:
+        resolved = resolver.get(name) or resolver.get(name.lower())
+        if resolved and model.has_enough_data(resolved, min_matches=1):
+            _log.debug("[tennis] Rankings resolved '%s' → '%s'", name, resolved)
+            return resolved
 
     parts = name.strip().split()
     if len(parts) < 2:
@@ -338,10 +374,7 @@ def _resolve_player_name(name: str, model: Any) -> str:
     last = parts[-1].lower()
     is_abbreviated = len(first) == 1
 
-    if not is_abbreviated:
-        return name
-
-    # Search model's known players for last-name + first-initial match
+    # 3. Scan model's known players for last-name + first-initial match
     candidates = []
     for known in model.known_players():
         kparts = known.strip().split()
@@ -349,14 +382,16 @@ def _resolve_player_name(name: str, model: Any) -> str:
             continue
         k_last = kparts[-1].lower()
         k_first_init = kparts[0][0].lower() if kparts[0] else ""
-        if k_last == last and k_first_init == first.lower():
-            candidates.append(known)
+        if k_last == last:
+            if is_abbreviated and k_first_init == first.lower():
+                candidates.append(known)
+            elif not is_abbreviated and known.lower() == name.lower():
+                return known
 
     if len(candidates) == 1:
-        _log.debug("[tennis] Resolved '%s' → '%s'", name, candidates[0])
+        _log.debug("[tennis] Model-scan resolved '%s' → '%s'", name, candidates[0])
         return candidates[0]
 
-    # Multiple matches (same initial + surname) — return original
     return name
 
 

@@ -167,30 +167,42 @@ def _notify_telegram(signals: list[dict], today: date) -> None:
 
 
 def _format_tennis_signal(sig: dict) -> str:
-    player = sig.get("player", "?")
+    player   = sig.get("player", "?")
     opponent = sig.get("opponent", "?")
-    odds = sig.get("entry_odds", "?")
-    edge = sig.get("edge_pct", "?")
-    mp = sig.get("model_prob", 0)
-    mp_str = f"{mp:.1%}" if isinstance(mp, float) else str(mp)
-    surface = sig.get("surface", "hard").capitalize()
-    book = sig.get("bookmaker", "?")
-    serve = sig.get("serve_win_pct")
+    odds     = sig.get("entry_odds", "?")
+    edge     = sig.get("edge_pct", "?")
+    mp       = sig.get("model_prob", 0)
+    mp_str   = f"{mp:.1%}" if isinstance(mp, float) else str(mp)
+    surface  = sig.get("surface", "hard").capitalize()
+    tour     = sig.get("tour", "ATP")
+    book     = sig.get("bookmaker", "?")
+    best_of  = sig.get("best_of", 3)
+    bo_str   = " | BO5" if best_of == 5 else ""
+
+    rank     = sig.get("rank")
+    opp_rank = sig.get("opp_rank")
+    rank_str = f" (#{rank})" if rank else ""
+    opp_rank_str = f" (#{opp_rank})" if opp_rank else ""
+
+    serve    = sig.get("serve_win_pct")
     serve_str = f" | подача {serve:.1%}" if serve else ""
-    days = sig.get("days_since_last_match")
+    days     = sig.get("days_since_last_match")
     rest_str = f" | отдых {days}д" if days is not None else ""
-    form = sig.get("recent_form")
+    form     = sig.get("recent_form")
     form_str = f" | форма {form:.0%}" if form is not None else ""
-    cap = sig.get("capper_support")
-    cap_n = sig.get("capper_tips", 0)
-    cap_str = f"\n👥 Каперы: {cap:.0%} за ({cap_n} прогнозов)" if cap is not None and cap_n > 0 else ""
-    markov = sig.get("markov_prob")
+    cap      = sig.get("capper_support")
+    cap_n    = sig.get("capper_tips", 0)
+    cap_str  = f"\n👥 Каперы: {cap:.0%} за ({cap_n} прогнозов)" if cap is not None and cap_n > 0 else ""
+    markov   = sig.get("markov_prob")
     markov_str = f" | Марков={markov:.1%}" if markov else ""
+    src      = sig.get("model_source", "elo_only")
+    src_str  = " 🧮" if "markov" in src else ""
+
     return (
-        f"🎾 ATP Сигнал — {surface}\n"
-        f"{player} vs {opponent}\n"
+        f"🎾 {tour} Сигнал — {surface}{bo_str}\n"
+        f"{player}{rank_str} vs {opponent}{opp_rank_str}\n"
         f"Ставка: победа <b>{player}</b>\n"
-        f"@ <b>{odds}</b> | edge=<b>{edge}%</b> | модель={mp_str}{markov_str}\n"
+        f"@ <b>{odds}</b> | edge=<b>{edge}%</b> | модель={mp_str}{markov_str}{src_str}\n"
         f"BK: {book}{serve_str}{rest_str}{form_str}{cap_str}\n"
         f"📄 Paper trade"
     )
