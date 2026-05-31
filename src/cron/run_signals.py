@@ -37,6 +37,11 @@ def main() -> None:
         except Exception as e:
             print(f"[signals] {league}: FAILED — {e}", file=sys.stderr)
 
+    # Tennis ATP scan (runs alongside football leagues)
+    tennis_signals = _run_tennis(model_dir)
+    all_signals.extend(tennis_signals)
+    print(f"[signals] tennis_atp: {len(tennis_signals)} signals")
+
     if not all_signals:
         print("[signals] No signals generated today.")
         _log_run("signal-pipeline", "no_signals", time.perf_counter() - t0, "0 signals")
@@ -99,6 +104,23 @@ def _run_league(league: str, model_dir: Path, staging_dir: Path, today: date) ->
     )
 
 
+def _run_tennis(model_dir: Path) -> list[dict]:
+    """Scan ATP tennis signals via ELO model."""
+    from src.signals.tennis_signal_scan import scan_tennis_signals
+
+    api_key = os.environ.get("THE_ODDS_API_KEY", "")
+    if not api_key:
+        return []
+
+    model_path = model_dir / "tennis_elo_atp_latest.pkl"
+    try:
+        result = scan_tennis_signals(model_path=model_path, api_key=api_key)
+        return result.get("all_signals", [])
+    except Exception as e:
+        print(f"[signals] tennis_atp: FAILED — {e}", file=sys.stderr)
+        return []
+
+
 def _notify_telegram(signals: list[dict], today: date) -> None:
     """Send signals via TelegramSender.
 
@@ -130,7 +152,11 @@ def _notify_telegram(signals: list[dict], today: date) -> None:
     sent = 0
     for sig in signals:
         try:
-            result = sender.send_signal(sig)
+            if sig.get("sport") == "tennis":
+                text = _format_tennis_signal(sig)
+                result = sender.send_message(text)
+            else:
+                result = sender.send_signal(sig)
             if result.get("ok"):
                 sent += 1
         except Exception as e:
@@ -138,6 +164,29 @@ def _notify_telegram(signals: list[dict], today: date) -> None:
                   file=sys.stderr)
 
     print(f"[signals] Telegram: {sent}/{len(signals)} signals sent")
+
+
+def _format_tennis_signal(sig: dict) -> str:
+    player = sig.get("player", "?")
+    opponent = sig.get("opponent", "?")
+    odds = sig.get("entry_odds", "?")
+    edge = sig.get("edge_pct", "?")
+    mp = sig.get("model_prob", 0)
+    mp_str = f"{mp:.1%}" if isinstance(mp, float) else str(mp)
+    surface = sig.get("surface", "hard").capitalize()
+    book = sig.get("bookmaker", "?")
+    serve = sig.get("serve_win_pct")
+    serve_str = f" | подача {serve:.1%}" if serve else ""
+    days = sig.get("days_since_last_match")
+    rest_str = f" | отдых {days}д" if days is not None else ""
+    return (
+        f"🎾 ATP Сигнал — {surface}\n"
+        f"{player} vs {opponent}\n"
+        f"Ставка: победа <b>{player}</b>\n"
+        f"@ <b>{odds}</b> | edge=<b>{edge}%</b> | модель={mp_str}\n"
+        f"BK: {book}{serve_str}{rest_str}\n"
+        f"📄 Paper trade"
+    )
 
 
 def _log_run(job: str, status: str, duration_s: float, message: str, meta: dict | None = None):

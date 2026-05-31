@@ -24,7 +24,7 @@ _log = logging.getLogger(__name__)
 
 _ODDS_API_BASE = "https://api.the-odds-api.com/v4"
 _TENNIS_SPORT_KEY = "tennis_atp"
-_DEFAULT_EDGE_THRESHOLD = 3.0  # minimum edge % to emit a signal
+_DEFAULT_EDGE_THRESHOLD = 2.0  # minimum edge % to emit a signal
 _DEFAULT_MIN_ODDS = 1.30
 _DEFAULT_MAX_ODDS = 6.00
 _PREFERRED_BOOKS = ["pinnacle", "bet365", "draftkings", "fanduel", "betfair_ex_uk"]
@@ -72,10 +72,14 @@ def scan_tennis_signals(
     skipped_no_data = 0
 
     for event in events:
-        player1 = str(event.get("home_team", "")).strip()
-        player2 = str(event.get("away_team", "")).strip()
-        if not player1 or not player2:
+        player1_raw = str(event.get("home_team", "")).strip()
+        player2_raw = str(event.get("away_team", "")).strip()
+        if not player1_raw or not player2_raw:
             continue
+
+        # Resolve abbreviated names ("N. Djokovic") to full names in model
+        player1 = _resolve_player_name(player1_raw, model)
+        player2 = _resolve_player_name(player2_raw, model)
 
         # Prefer surface-specific prediction; infer surface from description if available
         surface = _infer_surface(event)
@@ -236,24 +240,75 @@ def _check_event(
     return signals
 
 
+def _resolve_player_name(name: str, model: Any) -> str:
+    """Resolve abbreviated name ("N. Djokovic") to full name in model ("Novak Djokovic").
+
+    Falls back to the original name if no match found.
+    """
+    # If model already knows this exact name, return as-is
+    if model.has_enough_data(name, min_matches=1):
+        return name
+
+    parts = name.strip().split()
+    if len(parts) < 2:
+        return name
+
+    # Check if first token looks like an initial ("N." or "N")
+    first = parts[0].rstrip(".")
+    last = parts[-1].lower()
+    is_abbreviated = len(first) == 1
+
+    if not is_abbreviated:
+        return name
+
+    # Search model's known players for last-name + first-initial match
+    candidates = []
+    for known in model.known_players():
+        kparts = known.strip().split()
+        if not kparts:
+            continue
+        k_last = kparts[-1].lower()
+        k_first_init = kparts[0][0].lower() if kparts[0] else ""
+        if k_last == last and k_first_init == first.lower():
+            candidates.append(known)
+
+    if len(candidates) == 1:
+        _log.debug("[tennis] Resolved '%s' → '%s'", name, candidates[0])
+        return candidates[0]
+
+    # Multiple matches (same initial + surname) — return original
+    return name
+
+
 def _match_odds_fuzzy(
     player1: str, player2: str, odds_map: dict[str, float]
 ) -> tuple[float | None, float | None]:
-    """Fuzzy player name matching: try last-name lookup as fallback."""
-    def last_name(name: str) -> str:
-        parts = name.strip().split()
-        return parts[-1].lower() if parts else ""
+    """Fuzzy player name matching for tennis.
 
-    p1_last = last_name(player1)
-    p2_last = last_name(player2)
+    Handles formats like:
+    - "Novak Djokovic" vs "N. Djokovic" (Odds API abbreviated)
+    - "Carlos Alcaraz" vs "C. Alcaraz"
+    """
+    def _parts(name: str) -> tuple[str, str]:
+        """Return (first_initial, last_name) both lowercased."""
+        parts = name.strip().split()
+        if not parts:
+            return "", ""
+        last = parts[-1].lower()
+        first_init = parts[0][0].lower() if parts[0] else ""
+        return first_init, last
+
+    p1_init, p1_last = _parts(player1)
+    p2_init, p2_last = _parts(player2)
 
     odds_p1 = None
     odds_p2 = None
     for name, price in odds_map.items():
-        nl = last_name(name)
-        if nl == p1_last:
+        n_init, n_last = _parts(name)
+        # Match if last name matches AND first initial matches (or one side has no initial)
+        if n_last == p1_last and (not n_init or not p1_init or n_init == p1_init):
             odds_p1 = price
-        elif nl == p2_last:
+        elif n_last == p2_last and (not n_init or not p2_init or n_init == p2_init):
             odds_p2 = price
     return odds_p1, odds_p2
 
