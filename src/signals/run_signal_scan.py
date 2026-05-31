@@ -47,6 +47,8 @@ _LEAGUE_TO_SPORT_KEY: dict[str, str] = {
     "I1": "soccer_italy_serie_a",
     "LIGUE1": "soccer_france_ligue_one",
     "F1": "soccer_france_ligue_one",
+    "WORLD_CUP": "soccer_fifa_world_cup",
+    "FIFA_WC": "soccer_fifa_world_cup",
 }
 
 # ---------------------------------------------------------------------------
