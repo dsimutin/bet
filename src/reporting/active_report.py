@@ -50,12 +50,14 @@ def format_active_report(
     signals_result: dict[str, Any],
     settlement_result: dict[str, Any],
     training_result: dict[str, Any],
+    tennis_result: dict[str, Any] | None = None,
 ) -> str:
     """Return a ready-to-send Telegram text for the active status report."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     parts: list[str] = [f"🤖 Отчёт / Report — {now}", ""]
 
     parts += _section_football_by_league(signals_result)
+    parts += _section_tennis(tennis_result or {})
     parts += _section_signals(signals_result)
     parts += _section_ledger_pnl()
     parts += _section_training(training_result)
@@ -159,6 +161,46 @@ def _section_football_by_league(signals_result: dict[str, Any]) -> list[str]:
                 lg_label = _LEAGUE_DISPLAY.get(lg, lg)
                 lines.append(f"  🎯 {home} vs {away}")
                 lines.append(f"     {sel} @ {odds_val} | edge={edge}% | {lg_label}")
+
+    return lines + [""]
+
+
+def _section_tennis(tennis_result: dict[str, Any]) -> list[str]:
+    """Tennis (ATP) signal section."""
+    if not tennis_result:
+        return []
+
+    status = tennis_result.get("status", "skip")
+    n = tennis_result.get("signals_count", 0)
+    events = tennis_result.get("events_checked", 0)
+    reason = tennis_result.get("no_signal_reason", "")
+    skipped = tennis_result.get("skipped_no_data", 0)
+
+    lines = ["🎾 Теннис ATP / Tennis"]
+
+    if status == "skip" and reason == "no_api_key":
+        lines.append("  — нет Odds API ключа")
+    elif status == "skip" and reason == "no_model":
+        lines.append("  ⚠️ нет модели (запусти train_tennis_elo)")
+    elif status == "error":
+        lines.append(f"  ❌ {reason[:80]}")
+    elif status == "skip" and reason == "no_upcoming_events":
+        lines.append("  ✅ нет матчей сегодня")
+    elif n > 0:
+        lines.append(f"  🎯 {n} сигнал{'а' if 1 < n < 5 else 'ов' if n >= 5 else ''} из {events} матчей")
+        top = tennis_result.get("top_signals", [])
+        for s in top[:3]:
+            player = s.get("player", "?")
+            opponent = s.get("opponent", "?")
+            edge = s.get("edge_pct", "?")
+            odds = s.get("entry_odds", "?")
+            lines.append(f"  🎯 {player} vs {opponent}")
+            lines.append(f"     победа {player} @ {odds} | edge={edge}%")
+    else:
+        msg = f"  ✅ {events} матчей — edge не найден"
+        if skipped:
+            msg += f" ({skipped} пропущено — мало данных)"
+        lines.append(msg)
 
     return lines + [""]
 

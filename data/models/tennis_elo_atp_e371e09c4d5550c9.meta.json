@@ -1,0 +1,14 @@
+{
+  "model_type": "tennis_elo",
+  "sport": "tennis",
+  "tour": "ATP",
+  "status": "production",
+  "n_matches": 18924,
+  "n_players": 940,
+  "trained_at_utc": "2026-05-31T09:00:39.490059+00:00",
+  "dataset_hash": "e371e09c4d5550c9",
+  "model_path": "data/models/tennis_elo_atp_e371e09c4d5550c9.pkl",
+  "elo_k": 32.0,
+  "elo_start": 1500.0,
+  "elo_scale": 400.0
+}

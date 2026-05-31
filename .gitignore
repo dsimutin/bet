@@ -36,6 +36,9 @@ data/injuries/*
 !data/models/*.meta.json
 !data/models/calibration_*.pkl
 
+# Tennis ATP raw data cache — needed to re-train on Render deploy
+!data/raw/tennis_atp/
+
 # Jupyter
 .ipynb_checkpoints/
 notebooks/*.ipynb

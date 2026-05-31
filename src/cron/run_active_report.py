@@ -69,17 +69,26 @@ def main(force: bool = False) -> None:
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
     signals_result: dict[str, Any] = {}
+    tennis_result: dict[str, Any] = {}
     settlement_result: dict[str, Any] = {}
     training_result: dict[str, Any] = {}
     errors: list[str] = []
 
-    # Step 1: Signal scan
+    # Step 1: Signal scan (football)
     try:
         signals_result = _run_signal_scan()
     except Exception as e:
         _log.error("[active] Signal scan failed: %s", e)
         errors.append(f"signal_scan: {e}")
         signals_result = _empty_signals_result("signal scan error: " + str(e))
+
+    # Step 1b: Tennis signal scan
+    try:
+        tennis_result = _run_tennis_scan()
+    except Exception as e:
+        _log.error("[active] Tennis scan failed: %s", e)
+        errors.append(f"tennis_scan: {e}")
+        tennis_result = {"signals_count": 0, "status": "error", "no_signal_reason": str(e)}
 
     # Step 2: Settlement
     try:
@@ -108,7 +117,7 @@ def main(force: bool = False) -> None:
     delivery_status = "skipped"
     if TELEGRAM_STATUS_REPORTS_ENABLED:
         try:
-            delivery_status = _send_status_report(signals_result, settlement_result, training_result)
+            delivery_status = _send_status_report(signals_result, settlement_result, training_result, tennis_result)
         except Exception as e:
             _log.error("[active] Status report send failed: %s", e)
             errors.append(f"telegram_report: {e}")
@@ -272,6 +281,65 @@ def _run_signal_scan() -> dict[str, Any]:
     _log.info("[active] Signal scan: %d signals from %d leagues in %.1fs",
               len(all_signals), candidates_checked, elapsed)
     return result
+
+
+def _run_tennis_scan() -> dict[str, Any]:
+    """Run ATP tennis signal scan. Returns summary dict."""
+    from src.signals.tennis_signal_scan import scan_tennis_signals
+
+    api_key = os.environ.get("THE_ODDS_API_KEY", "")
+    if not api_key:
+        _log.info("[active] Tennis scan skipped — no Odds API key")
+        return {"signals_count": 0, "status": "skip", "no_signal_reason": "no_api_key",
+                "tour": "ATP", "sport": "tennis"}
+
+    model_path = MODEL_DIR / "tennis_elo_atp_latest.pkl"
+    result = scan_tennis_signals(model_path=model_path, api_key=api_key)
+    _log.info(
+        "[active] Tennis scan: %d signals, %d events checked (status=%s)",
+        result.get("signals_count", 0), result.get("events_checked", 0), result.get("status"),
+    )
+
+    # Send Telegram alerts for tennis signals
+    if TELEGRAM_SIGNAL_ALERTS_ENABLED and result.get("all_signals"):
+        _send_tennis_alerts(result["all_signals"])
+
+    return result
+
+
+def _send_tennis_alerts(signals: list[dict]) -> None:
+    """Send Telegram alert for each new tennis signal."""
+    from src.integrations.telegram_sender import TelegramConfig, TelegramSender
+
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
+    dry_run = not (token and chat_id)
+
+    config = TelegramConfig(bot_token=token, chat_id=chat_id, dry_run=dry_run)
+    sender = TelegramSender(config)
+
+    for sig in signals[:5]:  # cap to 5 per scan to avoid spam
+        player = sig.get("player", "?")
+        opponent = sig.get("opponent", "?")
+        edge = sig.get("edge_pct", "?")
+        odds = sig.get("entry_odds", "?")
+        book = sig.get("bookmaker", "?")
+        mp = sig.get("model_prob", 0)
+        mp_str = f"{mp:.1%}" if isinstance(mp, float) else str(mp)
+        msg = (
+            f"🎾 ATP Сигнал\n"
+            f"{player} vs {opponent}\n"
+            f"Ставка: победа {player}\n"
+            f"@ {odds} | edge={edge}% | модель={mp_str}\n"
+            f"BK: {book} | Paper trade"
+        )
+        if dry_run:
+            _log.info("[active] [DRY-RUN tennis] %s", msg.replace("\n", " "))
+        else:
+            try:
+                sender.send_message(msg)
+            except Exception as exc:
+                _log.warning("[active] Tennis alert send failed: %s", exc)
 
 
 def _run_settlement() -> dict[str, Any]:
@@ -588,6 +656,7 @@ def _send_status_report(
     signals_result: dict[str, Any],
     settlement_result: dict[str, Any],
     training_result: dict[str, Any],
+    tennis_result: dict[str, Any] | None = None,
 ) -> str:
     """Format and send the 3-hour active status report to Telegram.
 
@@ -597,7 +666,7 @@ def _send_status_report(
     import urllib.error
     from src.reporting.active_report import format_active_report
 
-    text = format_active_report(signals_result, settlement_result, training_result)
+    text = format_active_report(signals_result, settlement_result, training_result, tennis_result)
 
     # Always print to stdout for logs
     print("\n" + "=" * 60)
