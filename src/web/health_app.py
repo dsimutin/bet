@@ -658,3 +658,72 @@ def trigger_report():
         "message": "Active report запущен в фоне — проверь Telegram через ~10 сек",
         "ts": _utcnow(),
     }
+
+
+@app.get("/debug/tennis")
+def debug_tennis():
+    """Диагностика теннисного сканера — что реально возвращает Odds API.
+
+    Показывает:
+      - сколько матчей нашлось
+      - почему сигналы не генерируются (нет edge, нет матчей, нет модели)
+      - edge для каждого матча без порога фильтрации
+
+    Использование: GET /debug/tennis
+    """
+    from pathlib import Path
+
+    api_key = os.environ.get("THE_ODDS_API_KEY", "")
+    model_dir = Path(os.environ.get("MODEL_DIR", "data/models"))
+    model_path = model_dir / "tennis_elo_atp_latest.pkl"
+
+    if not api_key:
+        return {"error": "THE_ODDS_API_KEY not set", "signals": []}
+
+    if not model_path.exists():
+        return {"error": f"No model at {model_path}", "signals": []}
+
+    try:
+        from src.signals.tennis_signal_scan import scan_tennis_debug
+        result = scan_tennis_debug(model_path=model_path, api_key=api_key)
+        return {
+            "ts": _utcnow(),
+            "model_players": result.get("model_players", 0),
+            "n_events": result.get("n_events", 0),
+            "top_edges": result.get("rows", [])[:20],
+            "error": result.get("error"),
+        }
+    except Exception as exc:
+        _log.exception("[debug/tennis] failed: %s", exc)
+        return {"error": str(exc), "ts": _utcnow()}
+
+
+@app.post("/trigger/tennis-scan")
+def trigger_tennis_scan():
+    """Немедленно запустить теннисный скан сигналов.
+
+    curl -X POST https://your-app.onrender.com/trigger/tennis-scan
+    """
+    import threading
+
+    def _run():
+        try:
+            from pathlib import Path
+            from src.signals.tennis_signal_scan import scan_tennis_signals
+            from src.cron.run_signals import _run_tennis
+            model_dir = Path(os.environ.get("MODEL_DIR", "data/models"))
+            signals = _run_tennis(model_dir)
+            _log.info("[trigger/tennis-scan] Done: %d signals", len(signals))
+            if signals:
+                from src.cron.run_signals import _notify_telegram
+                from datetime import date
+                _notify_telegram(signals, date.today())
+        except Exception as exc:
+            _log.exception("[trigger/tennis-scan] failed: %s", exc)
+
+    threading.Thread(target=_run, daemon=True, name="tennis-scan-trigger").start()
+    return {
+        "status": "triggered",
+        "message": "Теннисный скан запущен — результаты придут в Telegram через ~30 сек",
+        "ts": _utcnow(),
+    }
