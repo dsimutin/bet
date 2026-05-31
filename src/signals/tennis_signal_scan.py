@@ -79,7 +79,6 @@ def scan_tennis_signals(
 
         # Prefer surface-specific prediction; infer surface from description if available
         surface = _infer_surface(event)
-        model_prob_p1 = model.predict_proba(player1, player2, surface)
 
         p1_known = model.has_enough_data(player1)
         p2_known = model.has_enough_data(player2)
@@ -93,14 +92,21 @@ def scan_tennis_signals(
             skipped_no_data += 1
             continue
 
+        # V2: use breakdown for richer signal metadata
+        breakdown = model.predict_proba_breakdown(player1, player2, surface)
+        breakdown["surface"] = surface
+        model_prob_p1 = breakdown["final_prob"]
+
         event_signals = _check_event(
             event=event,
             player1=player1,
             player2=player2,
             model_prob_p1=model_prob_p1,
+            breakdown=breakdown,
             edge_threshold=edge_threshold,
             min_odds=min_odds,
             max_odds=max_odds,
+            model=model,
         )
         signals.extend(event_signals)
 
@@ -132,9 +138,11 @@ def _check_event(
     player1: str,
     player2: str,
     model_prob_p1: float,
+    breakdown: dict[str, Any],
     edge_threshold: float,
     min_odds: float,
     max_odds: float,
+    model: Any,
 ) -> list[dict[str, Any]]:
     """Check one event across all bookmakers, return signals with edge above threshold."""
     signals: list[dict[str, Any]] = []
@@ -193,12 +201,18 @@ def _check_event(
                     continue
 
                 opponent = player2 if player == player1 else player1
+                is_p1 = player == player1
+                days_rest = model.days_since_last_match(player)
+                opp_days_rest = model.days_since_last_match(opponent)
+                serve_pct = model.get_serve_win_pct(player, breakdown.get("surface", "hard"))
+                hold_pct = model.get_hold_rate(player, breakdown.get("surface", "hard"))
                 signals.append({
                     "signal_id": f"ten_{event_id[:8]}_{book_key}_{player[:4].replace(' ', '')}",
                     "sport": "tennis",
                     "tour": "ATP",
                     "player": player,
                     "opponent": opponent,
+                    "surface": breakdown.get("surface", "hard"),
                     "event_id": event_id,
                     "commence_time": commence,
                     "bookmaker": book_key,
@@ -207,6 +221,14 @@ def _check_event(
                     "market_prob": round(fair_prob, 4),
                     "edge_pct": round(edge_pct, 2),
                     "reference_fair_odds": round(fair_model_odds, 3),
+                    # V2 breakdown
+                    "elo_prob": round(breakdown["elo_prob"] if is_p1 else 1.0 - breakdown["elo_prob"], 4),
+                    "serve_adj": round(breakdown.get("serve_adj", 0.0) * (1 if is_p1 else -1), 4),
+                    "h2h_adj": round(breakdown.get("h2h_adj", 0.0) * (1 if is_p1 else -1), 4),
+                    "days_since_last_match": days_rest,
+                    "opp_days_since_last_match": opp_days_rest,
+                    "serve_win_pct": round(serve_pct, 3) if serve_pct is not None else None,
+                    "hold_pct": round(hold_pct, 3) if hold_pct is not None else None,
                     "status": "paper",
                     "generated_at": datetime.now(timezone.utc).isoformat(),
                 })
