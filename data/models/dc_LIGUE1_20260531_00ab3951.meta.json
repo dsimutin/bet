@@ -1,0 +1,20 @@
+{
+  "model_id": "dc_LIGUE1_20260531_00ab3951",
+  "league": "LIGUE1",
+  "trained_on": {
+    "start": "2022-08-05",
+    "end": "2026-05-17"
+  },
+  "n_matches": 1274,
+  "dataset_hash": "sha256:00ab39517447053cb713cf5f10bbf6f6efceb61ead13000d5adb75627df2eae7",
+  "status": "archived",
+  "converged": true,
+  "created_at_utc": "2026-05-31T08:45:52.263917+00:00",
+  "model_path": "data/models/dc_LIGUE1_20260531_00ab3951.pkl",
+  "calibration_path": "data/models/calibration_dc_LIGUE1_20260531_00ab3951.pkl",
+  "brier_score": 0.6757326488985156,
+  "log_loss": 1.1369393746583047,
+  "max_brier_score": 0.65,
+  "max_log_loss": 1.2,
+  "promotion_reason": "brier_score 0.675733 > max_brier_score 0.650000"
+}
