@@ -1,0 +1,20 @@
+{
+  "model_type": "tennis_elo_v2",
+  "sport": "tennis",
+  "tour": "ATP",
+  "status": "production",
+  "n_matches": 20246,
+  "n_players": 997,
+  "trained_at_utc": "2026-05-31T11:52:47.728193+00:00",
+  "dataset_hash": "879196870287e769",
+  "model_path": "data/models/tennis_elo_atp_879196870287e769.pkl",
+  "elo_k": 32.0,
+  "elo_start": 1500.0,
+  "elo_scale": 400.0,
+  "decay_half_life_days": 180,
+  "features": [
+    "surface_elo",
+    "serve_return_stats",
+    "h2h_recency"
+  ]
+}
