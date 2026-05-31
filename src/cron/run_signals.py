@@ -179,12 +179,14 @@ def _format_tennis_signal(sig: dict) -> str:
     serve_str = f" | подача {serve:.1%}" if serve else ""
     days = sig.get("days_since_last_match")
     rest_str = f" | отдых {days}д" if days is not None else ""
+    form = sig.get("recent_form")
+    form_str = f" | форма {form:.0%}" if form is not None else ""
     return (
         f"🎾 ATP Сигнал — {surface}\n"
         f"{player} vs {opponent}\n"
         f"Ставка: победа <b>{player}</b>\n"
         f"@ <b>{odds}</b> | edge=<b>{edge}%</b> | модель={mp_str}\n"
-        f"BK: {book}{serve_str}{rest_str}\n"
+        f"BK: {book}{serve_str}{rest_str}{form_str}\n"
         f"📄 Paper trade"
     )
 

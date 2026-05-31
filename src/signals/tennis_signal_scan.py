@@ -96,10 +96,25 @@ def scan_tennis_signals(
             skipped_no_data += 1
             continue
 
+        # Skip if either player retired recently (injury risk)
+        if model.retired_recently(player1) or model.retired_recently(player2):
+            injured = [p for p in [player1, player2] if model.retired_recently(p)]
+            _log.debug("[tennis] Skipping %s vs %s — recent retirement: %s", player1, player2, injured)
+            skipped_no_data += 1
+            continue
+
         # V2: use breakdown for richer signal metadata
         breakdown = model.predict_proba_breakdown(player1, player2, surface)
         breakdown["surface"] = surface
         model_prob_p1 = breakdown["final_prob"]
+
+        # Context for signal enrichment
+        context = {
+            "p1_form": model.get_recent_form(player1, surface),
+            "p2_form": model.get_recent_form(player2, surface),
+            "p1_retired_recently": model.retired_recently(player1),
+            "p2_retired_recently": model.retired_recently(player2),
+        }
 
         event_signals = _check_event(
             event=event,
@@ -111,6 +126,7 @@ def scan_tennis_signals(
             min_odds=min_odds,
             max_odds=max_odds,
             model=model,
+            context=context,
         )
         signals.extend(event_signals)
 
@@ -147,6 +163,7 @@ def _check_event(
     min_odds: float,
     max_odds: float,
     model: Any,
+    context: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Check one event across all bookmakers, return signals with edge above threshold."""
     signals: list[dict[str, Any]] = []
@@ -210,6 +227,8 @@ def _check_event(
                 opp_days_rest = model.days_since_last_match(opponent)
                 serve_pct = model.get_serve_win_pct(player, breakdown.get("surface", "hard"))
                 hold_pct = model.get_hold_rate(player, breakdown.get("surface", "hard"))
+                ctx = context or {}
+                form = ctx.get("p1_form" if is_p1 else "p2_form")
                 signals.append({
                     "signal_id": f"ten_{event_id[:8]}_{book_key}_{player[:4].replace(' ', '')}",
                     "sport": "tennis",
@@ -233,6 +252,7 @@ def _check_event(
                     "opp_days_since_last_match": opp_days_rest,
                     "serve_win_pct": round(serve_pct, 3) if serve_pct is not None else None,
                     "hold_pct": round(hold_pct, 3) if hold_pct is not None else None,
+                    "recent_form": round(form, 3) if form is not None else None,
                     "status": "paper",
                     "generated_at": datetime.now(timezone.utc).isoformat(),
                 })

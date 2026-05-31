@@ -87,6 +87,11 @@ class TennisEloModel:
         # Last match date per player
         self._last_match: dict[str, date] = {}
 
+        # Recent form: player → list of {won: bool, surface, tourney_level, date}
+        self._recent_form: dict[str, list[dict]] = defaultdict(list)
+        # Retirements: player → list of dates when they retired (loser who RET)
+        self._retirements: dict[str, list[date]] = defaultdict(list)
+
         self.params: TennisEloParams = TennisEloParams()
 
     # ---------------------------------------------------------------------------
@@ -112,6 +117,7 @@ class TennisEloModel:
             self._update_elo(winner, loser, surface)
             self._update_serve_stats(winner, loser, surface, row)
             self._update_h2h(winner, loser, surface, match_date)
+            self._update_form(winner, loser, surface, match_date, row)
             self._last_match[winner] = match_date
             self._last_match[loser] = match_date
             n += 1
@@ -219,6 +225,33 @@ class TennisEloModel:
     def known_players(self) -> list[str]:
         return list(self._overall.keys())
 
+    def get_recent_form(self, player: str, surface: str | None = None, n: int = 10) -> float | None:
+        """Win rate over last N matches (optionally surface-filtered). None if <3 matches."""
+        entries = self._recent_form.get(player, [])
+        if surface:
+            entries = [e for e in entries if e["surface"] == surface.lower()]
+        if len(entries) < 3:
+            return None
+        recent = entries[-n:]
+        return sum(1 for e in recent if e["won"]) / len(recent)
+
+    def retired_recently(self, player: str, n_matches: int = 3, days: int = 60) -> bool:
+        """True if player retired (injury) in last n_matches or within last `days` days."""
+        retirements = self._retirements.get(player, [])
+        if not retirements:
+            return False
+        cutoff = date.today() - timedelta(days=days)
+        recent_retirements = [d for d in retirements[-n_matches:] if d >= cutoff]
+        return len(recent_retirements) > 0
+
+    def get_tourney_level_winrate(self, player: str, level: str) -> float | None:
+        """Win rate on specific tourney level: G=GrandSlam, M=Masters, A=250/500."""
+        entries = [e for e in self._recent_form.get(player, [])
+                   if e.get("tourney_level") == level]
+        if len(entries) < 3:
+            return None
+        return sum(1 for e in entries if e["won"]) / len(entries)
+
     # ---------------------------------------------------------------------------
     # Persistence
     # ---------------------------------------------------------------------------
@@ -257,6 +290,29 @@ class TennisEloModel:
     # ---------------------------------------------------------------------------
     # Internal helpers
     # ---------------------------------------------------------------------------
+
+    def _update_form(
+        self, winner: str, loser: str, surface: str, match_date: date, row: Any
+    ) -> None:
+        """Track recent match outcomes and retirements."""
+        level = str(row.get("tourney_level", "A") or "A")
+        score = str(row.get("score", "") or "")
+        is_retirement = "RET" in score.upper() or "W/O" in score.upper()
+
+        self._recent_form[winner].append({
+            "won": True, "surface": surface, "tourney_level": level, "date": match_date
+        })
+        self._recent_form[loser].append({
+            "won": False, "surface": surface, "tourney_level": level, "date": match_date
+        })
+        # Keep only last 50 entries
+        if len(self._recent_form[winner]) > 50:
+            self._recent_form[winner] = self._recent_form[winner][-50:]
+        if len(self._recent_form[loser]) > 50:
+            self._recent_form[loser] = self._recent_form[loser][-50:]
+
+        if is_retirement and match_date:
+            self._retirements[loser].append(match_date)
 
     def _elo_prob(self, player1: str, player2: str, surface: str) -> float:
         """Pure ELO win probability with surface fallback."""
