@@ -181,12 +181,17 @@ def _format_tennis_signal(sig: dict) -> str:
     rest_str = f" | отдых {days}д" if days is not None else ""
     form = sig.get("recent_form")
     form_str = f" | форма {form:.0%}" if form is not None else ""
+    cap = sig.get("capper_support")
+    cap_n = sig.get("capper_tips", 0)
+    cap_str = f"\n👥 Каперы: {cap:.0%} за ({cap_n} прогнозов)" if cap is not None and cap_n > 0 else ""
+    markov = sig.get("markov_prob")
+    markov_str = f" | Марков={markov:.1%}" if markov else ""
     return (
         f"🎾 ATP Сигнал — {surface}\n"
         f"{player} vs {opponent}\n"
         f"Ставка: победа <b>{player}</b>\n"
-        f"@ <b>{odds}</b> | edge=<b>{edge}%</b> | модель={mp_str}\n"
-        f"BK: {book}{serve_str}{rest_str}{form_str}\n"
+        f"@ <b>{odds}</b> | edge=<b>{edge}%</b> | модель={mp_str}{markov_str}\n"
+        f"BK: {book}{serve_str}{rest_str}{form_str}{cap_str}\n"
         f"📄 Paper trade"
     )
 

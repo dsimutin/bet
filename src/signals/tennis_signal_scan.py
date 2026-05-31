@@ -118,6 +118,11 @@ def scan_tennis_signals(
             skipped_no_data += 1
             continue
 
+        # Capper consensus (passive enrichment, does not filter signals)
+        from src.ingest.capper_consensus import get_capper_consensus
+        consensus_p1 = get_capper_consensus(player1, player2)
+        consensus_p2 = get_capper_consensus(player2, player1)
+
         # Markov model (primary when serve data available) + ELO (always)
         elo_breakdown = model.predict_proba_breakdown(player1, player2, surface)
         elo_breakdown["surface"] = surface
@@ -143,6 +148,8 @@ def scan_tennis_signals(
             "p2_form": model.get_recent_form(player2, surface),
             "p1_retired_recently": model.retired_recently(player1),
             "p2_retired_recently": model.retired_recently(player2),
+            "consensus_p1": consensus_p1,
+            "consensus_p2": consensus_p2,
         }
 
         event_signals = _check_event(
@@ -285,6 +292,9 @@ def _check_event(
                     "markov_prob": breakdown.get("markov_prob"),
                     "p_serve": breakdown.get("p1_serve") if is_p1 else breakdown.get("p2_serve"),
                     "model_source": breakdown.get("model_source", "elo_only"),
+                    "capper_support": (ctx.get("consensus_p1") if is_p1 else ctx.get("consensus_p2") or {}).get("support"),
+                    "capper_tips": (ctx.get("consensus_p1") if is_p1 else ctx.get("consensus_p2") or {}).get("n_tips", 0),
+                    "capper_avg_odds": (ctx.get("consensus_p1") if is_p1 else ctx.get("consensus_p2") or {}).get("avg_odds"),
                     "status": "paper",
                     "generated_at": datetime.now(timezone.utc).isoformat(),
                 })
