@@ -23,11 +23,14 @@ from typing import Any
 _log = logging.getLogger(__name__)
 
 _ODDS_API_BASE = "https://api.the-odds-api.com/v4"
-_TENNIS_SPORT_KEY = "tennis_atp"
-_DEFAULT_EDGE_THRESHOLD = 2.0  # minimum edge % to emit a signal
-_DEFAULT_MIN_ODDS = 1.30
-_DEFAULT_MAX_ODDS = 6.00
+_TENNIS_SPORT_KEYS = ["tennis_atp", "tennis_wta"]
+_DEFAULT_EDGE_THRESHOLD = 1.5  # minimum edge % to emit a signal
+_DEFAULT_MIN_ODDS = 1.25
+_DEFAULT_MAX_ODDS = 8.00
 _PREFERRED_BOOKS = ["pinnacle", "bet365", "draftkings", "fanduel", "betfair_ex_uk"]
+
+# Grand Slam tournaments use best-of-5 for men
+_GRAND_SLAM_KEYWORDS = ["roland garros", "french open", "wimbledon", "us open", "australian open"]
 
 
 # ---------------------------------------------------------------------------
@@ -72,6 +75,17 @@ def scan_tennis_signals(
         except Exception as exc:
             _log.warning("[tennis] Markov model load failed: %s — using ELO only", exc)
 
+    # Inject live serve stats from Tennis Abstract (current-season accuracy boost)
+    if markov_model is not None:
+        try:
+            from src.ingest.tennis_abstract import fetch_serve_stats
+            live_stats = fetch_serve_stats()
+            if live_stats:
+                markov_model.inject_live_serve_stats(live_stats)
+                _log.info("[tennis] Live serve stats injected: %d players", len(live_stats))
+        except Exception as exc:
+            _log.debug("[tennis] Live stats fetch skipped: %s", exc)
+
     # Use ELO model as the primary reference (has retirement detection, form, H2H)
     model = elo_model
 
@@ -98,6 +112,7 @@ def scan_tennis_signals(
 
         # Prefer surface-specific prediction; infer surface from description if available
         surface = _infer_surface(event)
+        best_of = _infer_best_of(event)
 
         p1_known = model.has_enough_data(player1)
         p2_known = model.has_enough_data(player2)
@@ -128,7 +143,7 @@ def scan_tennis_signals(
         elo_breakdown["surface"] = surface
 
         if markov_model is not None:
-            markov_bd = markov_model.predict_proba_breakdown(player1, player2, surface)
+            markov_bd = markov_model.predict_proba_breakdown(player1, player2, surface, best_of)
             if markov_bd["markov_prob"] is not None:
                 # Both models agree on direction → higher confidence
                 model_prob_p1 = markov_bd["prob"]
@@ -163,6 +178,7 @@ def scan_tennis_signals(
             max_odds=max_odds,
             model=model,
             context=context,
+            best_of=best_of,
         )
         signals.extend(event_signals)
 
@@ -200,6 +216,7 @@ def _check_event(
     max_odds: float,
     model: Any,
     context: dict[str, Any] | None = None,
+    best_of: int = 3,
 ) -> list[dict[str, Any]]:
     """Check one event across all bookmakers, return signals with edge above threshold."""
     signals: list[dict[str, Any]] = []
@@ -268,7 +285,7 @@ def _check_event(
                 signals.append({
                     "signal_id": f"ten_{event_id[:8]}_{book_key}_{player[:4].replace(' ', '')}",
                     "sport": "tennis",
-                    "tour": "ATP",
+                    "tour": "ATP" if "atp" in event.get("_sport_key", "atp") else "WTA",
                     "player": player,
                     "opponent": opponent,
                     "surface": breakdown.get("surface", "hard"),
@@ -291,6 +308,7 @@ def _check_event(
                     "recent_form": round(form, 3) if form is not None else None,
                     "markov_prob": breakdown.get("markov_prob"),
                     "p_serve": breakdown.get("p1_serve") if is_p1 else breakdown.get("p2_serve"),
+                    "best_of": best_of,
                     "model_source": breakdown.get("model_source", "elo_only"),
                     "capper_support": (ctx.get("consensus_p1") if is_p1 else ctx.get("consensus_p2") or {}).get("support"),
                     "capper_tips": (ctx.get("consensus_p1") if is_p1 else ctx.get("consensus_p2") or {}).get("n_tips", 0),
@@ -382,20 +400,45 @@ def _infer_surface(event: dict[str, Any]) -> str:
     return infer_surface(title)
 
 
+def _infer_best_of(event: dict[str, Any]) -> int:
+    """Detect best-of-5 for Grand Slam men's matches."""
+    sport_key = event.get("_sport_key", "")
+    # WTA always best-of-3
+    if "wta" in sport_key:
+        return 3
+    title = str(event.get("sport_title", "") or "").lower()
+    if any(gs in title for gs in _GRAND_SLAM_KEYWORDS):
+        return 5
+    return 3
+
+
 def _fetch_atp_events(api_key: str) -> list[dict[str, Any]] | None:
-    """Fetch upcoming ATP events with h2h odds from The Odds API."""
-    url = (
-        f"{_ODDS_API_BASE}/sports/{_TENNIS_SPORT_KEY}/odds"
-        f"?apiKey={api_key}&regions=eu,uk&markets=h2h&oddsFormat=decimal&dateFormat=iso"
-    )
-    try:
-        req = _urllib.Request(url, headers={"User-Agent": "bet-analytics/1.0"})
-        with _urllib.urlopen(req, timeout=15) as resp:
-            data = json.loads(resp.read())
-        return data if isinstance(data, list) else []
-    except Exception as exc:
-        _log.warning("[tennis] Odds API error: %s", exc)
-        return None
+    """Fetch upcoming ATP/WTA events with h2h odds from The Odds API."""
+    all_events: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+
+    for sport_key in _TENNIS_SPORT_KEYS:
+        url = (
+            f"{_ODDS_API_BASE}/sports/{sport_key}/odds"
+            f"?apiKey={api_key}&regions=eu,uk,us&markets=h2h&oddsFormat=decimal&dateFormat=iso"
+        )
+        try:
+            req = _urllib.Request(url, headers={"User-Agent": "bet-analytics/1.0"})
+            with _urllib.urlopen(req, timeout=15) as resp:
+                data = json.loads(resp.read())
+            if isinstance(data, list):
+                for event in data:
+                    eid = event.get("id", "")
+                    if eid not in seen_ids:
+                        seen_ids.add(eid)
+                        # Tag with sport key for surface inference
+                        event["_sport_key"] = sport_key
+                        all_events.append(event)
+                _log.info("[tennis] %s: %d events", sport_key, len(data) if isinstance(data, list) else 0)
+        except Exception as exc:
+            _log.warning("[tennis] Odds API error for %s: %s", sport_key, exc)
+
+    return all_events if all_events else None
 
 
 def _empty_result(reason: str) -> dict[str, Any]:
@@ -410,4 +453,92 @@ def _empty_result(reason: str) -> dict[str, Any]:
         "duration_s": 0.0,
         "status": "skip",
         "no_signal_reason": reason,
+    }
+
+
+def scan_tennis_debug(model_path: Path, api_key: str) -> dict[str, Any]:
+    """Diagnostic scan — returns raw edge values without threshold filtering.
+
+    Useful for diagnosing why signals are not generated.
+    """
+    from src.models.tennis_elo import TennisEloModel
+    from src.models.tennis_markov import TennisMarkovModel
+
+    if not model_path.exists():
+        return {"error": "no_model"}
+
+    elo_model = TennisEloModel.load(model_path)
+
+    markov_model = None
+    markov_path = model_path.parent / "tennis_markov_atp_latest.pkl"
+    if markov_path.exists():
+        try:
+            markov_model = TennisMarkovModel.load(markov_path)
+            from src.ingest.tennis_abstract import fetch_serve_stats
+            live_stats = fetch_serve_stats()
+            if live_stats:
+                markov_model.inject_live_serve_stats(live_stats)
+        except Exception:
+            pass
+
+    events = _fetch_atp_events(api_key)
+    if not events:
+        return {"error": "no_events", "events_raw": events}
+
+    debug_rows = []
+    for event in events[:30]:
+        p1_raw = str(event.get("home_team", ""))
+        p2_raw = str(event.get("away_team", ""))
+        p1 = _resolve_player_name(p1_raw, elo_model)
+        p2 = _resolve_player_name(p2_raw, elo_model)
+        surface = _infer_surface(event)
+        best_of = _infer_best_of(event)
+
+        p1_known = elo_model.has_enough_data(p1)
+        p2_known = elo_model.has_enough_data(p2)
+
+        if not p1_known or not p2_known:
+            debug_rows.append({
+                "p1": p1, "p2": p2, "surface": surface,
+                "skip": "insufficient_data",
+                "p1_matches": elo_model._match_count.get(p1, 0),
+                "p2_matches": elo_model._match_count.get(p2, 0),
+            })
+            continue
+
+        elo_bd = elo_model.predict_proba_breakdown(p1, p2, surface)
+        model_prob = elo_bd["final_prob"]
+
+        if markov_model is not None:
+            m_bd = markov_model.predict_proba_breakdown(p1, p2, surface, best_of)
+            if m_bd["markov_prob"] is not None:
+                model_prob = m_bd["prob"]
+
+        # Best odds from any bookmaker
+        best_odds_p1 = max(
+            (float(o.get("price", 0))
+             for bk in event.get("bookmakers", [])
+             for mkt in bk.get("markets", []) if mkt.get("key") == "h2h"
+             for o in mkt.get("outcomes", []) if o.get("name") == p1),
+            default=None,
+        )
+
+        edge_p1 = None
+        if best_odds_p1 and model_prob > 0:
+            fair_model_odds = 1.0 / model_prob
+            edge_p1 = round((best_odds_p1 / fair_model_odds - 1) * 100, 2)
+
+        debug_rows.append({
+            "p1": p1, "p2": p2, "surface": surface, "best_of": best_of,
+            "model_prob_p1": round(model_prob, 4),
+            "best_odds_p1": best_odds_p1,
+            "edge_p1_pct": edge_p1,
+            "n_bookmakers": len(event.get("bookmakers", [])),
+        })
+
+    debug_rows.sort(key=lambda r: abs(r.get("edge_p1_pct") or 0), reverse=True)
+    return {
+        "n_events": len(events),
+        "model_players": elo_model.params.n_players,
+        "rows": debug_rows,
     }

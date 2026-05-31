@@ -126,7 +126,7 @@ def start(loop: asyncio.AbstractEventLoop | None = None) -> None:
         replace_existing=True,
     )
 
-    # Tennis ELO retrain: every Monday at 02:30 UTC (off-peak, weekly is enough)
+    # Tennis ELO retrain: every Monday at 02:30 UTC (full retrain)
     sched.add_job(
         _job_tennis_retrain,
         "cron",
@@ -136,6 +136,18 @@ def start(loop: asyncio.AbstractEventLoop | None = None) -> None:
         id="tennis_retrain",
         replace_existing=True,
         misfire_grace_time=3600,  # 1h grace — retrain any time Monday if missed
+    )
+
+    # Tennis daily data refresh: re-download current-year ATP CSV + retrain if new matches
+    # Runs every day at 06:00 UTC (early morning, before signal scan at 09:00)
+    sched.add_job(
+        _job_tennis_daily_refresh,
+        "cron",
+        hour=6,
+        minute=0,
+        id="tennis_daily_refresh",
+        replace_existing=True,
+        misfire_grace_time=3600,
     )
 
     sched.start()
@@ -269,3 +281,77 @@ async def _job_tennis_retrain() -> None:
         _log.info("[scheduler] ← tennis_retrain done")
     except Exception as exc:
         _log.exception("[scheduler] tennis_retrain raised: %s", exc)
+
+
+async def _job_tennis_daily_refresh() -> None:
+    """Daily: re-download current ATP season CSV, retrain if new matches found."""
+    _log.info("[scheduler] → tennis_daily_refresh starting")
+
+    def _refresh() -> None:
+        import os as _os
+        import shutil
+        from datetime import datetime as _dt
+        from pathlib import Path
+        from src.ingest.tennis_atp import download_atp_season, build_atp_dataset
+        from src.models.tennis_elo import TennisEloModel
+        from src.models.tennis_markov import TennisMarkovModel
+
+        data_dir = Path(_os.environ.get("DATA_DIR", "data"))
+        model_dir = Path(_os.environ.get("MODEL_DIR", data_dir / "models"))
+        cache_dir = data_dir / "raw" / "tennis_atp"
+
+        current_year = _dt.utcnow().year
+
+        # Force-refresh current year only (cheap, ~30KB CSV)
+        fresh = download_atp_season(current_year, cache_dir, use_cache=False)
+        if fresh.empty:
+            _log.warning("[tennis_daily_refresh] No data for %d — skipping", current_year)
+            return
+
+        # Load existing model to compare match count
+        latest_pkl = model_dir / "tennis_elo_atp_latest.pkl"
+        existing_n = 0
+        if latest_pkl.exists():
+            try:
+                old_model = TennisEloModel.load(latest_pkl)
+                existing_n = old_model.params.n_matches
+            except Exception:
+                pass
+
+        # Build full dataset (other years from cache, only current year fresh)
+        years = list(range(2019, current_year + 1))
+        df = build_atp_dataset(years, cache_dir=cache_dir, use_cache=True)
+        if df.empty:
+            return
+
+        new_n = len(df)
+        if new_n <= existing_n:
+            _log.info("[tennis_daily_refresh] No new matches (%d = %d) — skip retrain", new_n, existing_n)
+            return
+
+        _log.info("[tennis_daily_refresh] %d new matches — retraining", new_n - existing_n)
+
+        model = TennisEloModel()
+        model.fit(df)
+        tag = model.params.dataset_hash
+        elo_path = model_dir / f"tennis_elo_atp_{tag}.pkl"
+        model.save(elo_path)
+        model.save_meta(model_dir / f"tennis_elo_atp_{tag}.meta.json", elo_path)
+        shutil.copy2(elo_path, model_dir / "tennis_elo_atp_latest.pkl")
+        _log.info("[tennis_daily_refresh] ELO retrained: %d players", model.params.n_players)
+
+        markov = TennisMarkovModel()
+        markov.fit(df)
+        m_tag = markov.params.dataset_hash
+        markov_path = model_dir / f"tennis_markov_atp_{m_tag}.pkl"
+        markov.save(markov_path)
+        markov.save_meta(model_dir / f"tennis_markov_atp_{m_tag}.meta.json", markov_path)
+        shutil.copy2(markov_path, model_dir / "tennis_markov_atp_latest.pkl")
+        _log.info("[tennis_daily_refresh] Markov retrained: %d players", markov.params.n_players)
+
+    loop = asyncio.get_event_loop()
+    try:
+        await loop.run_in_executor(None, _refresh)
+        _log.info("[scheduler] ← tennis_daily_refresh done")
+    except Exception as exc:
+        _log.exception("[scheduler] tennis_daily_refresh raised: %s", exc)

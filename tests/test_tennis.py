@@ -373,3 +373,80 @@ class TestTennisMarkovModel:
         p1 = model.predict_proba("Player A", "Player B", "hard")
         p2 = loaded.predict_proba("Player A", "Player B", "hard")
         assert abs(p1 - p2) < 1e-6
+
+    def test_inject_live_serve_stats(self):
+        from src.models.tennis_markov import TennisMarkovModel
+        model = TennisMarkovModel()
+        model.fit(self._make_matches())
+        # Inject live stats — Player A has stronger serve
+        live = {"Player A": {"hard": 0.72}, "Player B": {"hard": 0.60}}
+        model.inject_live_serve_stats(live)
+        # With serve advantage injected, Player A should win more
+        p_a = model.predict_proba("Player A", "Player B", "hard")
+        assert p_a > 0.5, "Player A with higher serve % should win more often"
+
+    def test_live_stats_name_fallback(self):
+        from src.models.tennis_markov import TennisMarkovModel
+        model = TennisMarkovModel()
+        model.fit(self._make_matches())
+        # Stats keyed by last name pattern should still match
+        live = {"Player A": {"hard": 0.75}, "Player B": {"hard": 0.55}}
+        model.inject_live_serve_stats(live)
+        spw = model.get_serve_prob("Player A", "hard")
+        assert spw == 0.75
+
+
+# ---------------------------------------------------------------------------
+# TennisAbstract scraper (unit — no HTTP)
+# ---------------------------------------------------------------------------
+
+class TestTennisAbstractScraper:
+    def test_parse_pct(self):
+        from src.ingest.tennis_abstract import _parse_pct
+        assert abs(_parse_pct("68.4") - 0.684) < 1e-6
+        assert abs(_parse_pct("68.4%") - 0.684) < 1e-6
+        assert abs(_parse_pct("0.684") - 0.684) < 1e-6
+        assert _parse_pct("abc") is None
+        assert _parse_pct("") is None
+
+    def test_parse_leaders_table(self):
+        from src.ingest.tennis_abstract import _parse_leaders_table
+        html = """
+        <table>
+          <tr><th>#</th><th>Player</th><th>SPW</th><th>RPW</th></tr>
+          <tr><td>1</td><td>Sinner J.</td><td>72.8%</td><td>41.2%</td></tr>
+          <tr><td>2</td><td>Alcaraz C.</td><td>69.1%</td><td>42.0%</td></tr>
+        </table>
+        """
+        result = _parse_leaders_table(html)
+        assert "Sinner J." in result
+        assert abs(result["Sinner J."] - 0.728) < 1e-6
+        assert "Alcaraz C." in result
+        assert abs(result["Alcaraz C."] - 0.691) < 1e-6
+
+    def test_get_player_serve_prob_exact(self):
+        from src.ingest.tennis_abstract import get_player_serve_prob
+        stats = {"Jannik Sinner": {"hard": 0.728, "clay": 0.712}}
+        p = get_player_serve_prob("Jannik Sinner", "hard", stats=stats)
+        assert abs(p - 0.728) < 1e-6
+
+    def test_get_player_serve_prob_lastname_fallback(self):
+        from src.ingest.tennis_abstract import get_player_serve_prob
+        stats = {"Jannik Sinner": {"hard": 0.728}}
+        # Abbreviated name "J. Sinner" → fallback by last name "Sinner"
+        p = get_player_serve_prob("J. Sinner", "hard", stats=stats)
+        assert p is not None
+        assert abs(p - 0.728) < 1e-6
+
+    def test_get_player_serve_prob_missing(self):
+        from src.ingest.tennis_abstract import get_player_serve_prob
+        p = get_player_serve_prob("Unknown Player", "hard", stats={})
+        assert p is None
+
+    def test_cache_freshness(self, tmp_path):
+        from src.ingest.tennis_abstract import _is_cache_fresh, _save_cache
+        path = tmp_path / "stats.json"
+        assert not _is_cache_fresh(path, 24)  # file doesn't exist
+        _save_cache(path, {"Sinner": {"hard": 0.72}})
+        assert _is_cache_fresh(path, 24)
+        assert not _is_cache_fresh(path, 0)  # max_age=0 → always stale

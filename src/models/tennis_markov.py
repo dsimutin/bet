@@ -260,6 +260,19 @@ class TennisMarkovModel:
 
     def get_serve_prob(self, player: str, surface: str) -> float | None:
         """Weighted average p_serve over rolling window. None if too few points."""
+        # Check live stats override first (injected from Tennis Abstract)
+        if hasattr(self, "_live_serve") and self._live_serve:
+            live = self._live_serve.get(player, {}).get(surface)
+            if live is None:
+                # Last-name fallback
+                last = player.strip().split()[-1].lower()
+                for name, surf_map in self._live_serve.items():
+                    if name.strip().split()[-1].lower() == last:
+                        live = surf_map.get(surface)
+                        break
+            if live is not None and 0.3 <= live <= 0.85:
+                return live
+
         lst = self._serve.get(player, {}).get(surface, [])
         if not lst:
             return None
@@ -267,6 +280,17 @@ class TennisMarkovModel:
         if total_n < MIN_SERVE_POINTS:
             return None
         return sum(e["p"] * e["n"] for e in lst) / total_n
+
+    def inject_live_serve_stats(
+        self, stats: dict[str, dict[str, float]]
+    ) -> None:
+        """Override serve stats with live data from Tennis Abstract.
+
+        stats: {player_name: {surface: p_serve}}
+        Called before predictions so current-season stats take priority.
+        """
+        self._live_serve = stats
+        _log.info("[markov] Injected live serve stats for %d players", len(stats))
 
     def _elo_prob(self, player1: str, player2: str, surface: str) -> float:
         r1 = self._elo_surface[surface].get(player1) or self._elo.get(player1, 1500.0)
