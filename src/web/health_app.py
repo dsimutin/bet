@@ -709,7 +709,6 @@ def trigger_tennis_scan():
     def _run():
         try:
             from pathlib import Path
-            from src.signals.tennis_signal_scan import scan_tennis_signals
             from src.cron.run_signals import _run_tennis
             model_dir = Path(os.environ.get("MODEL_DIR", "data/models"))
             signals = _run_tennis(model_dir)
@@ -718,6 +717,8 @@ def trigger_tennis_scan():
                 from src.cron.run_signals import _notify_telegram
                 from datetime import date
                 _notify_telegram(signals, date.today())
+            else:
+                _log.warning("[trigger/tennis-scan] 0 signals — check /debug/tennis-raw")
         except Exception as exc:
             _log.exception("[trigger/tennis-scan] failed: %s", exc)
 
@@ -727,3 +728,97 @@ def trigger_tennis_scan():
         "message": "Теннисный скан запущен — результаты придут в Telegram через ~30 сек",
         "ts": _utcnow(),
     }
+
+
+@app.get("/debug/tennis-raw")
+def debug_tennis_raw():
+    """Показывает сырой ответ Odds API для теннисных ключей.
+
+    Диагностика: есть ли вообще теннисные события в API.
+    curl https://your-app.onrender.com/debug/tennis-raw
+    """
+    import json as _json
+    import urllib.request as _urllib
+
+    api_key = os.environ.get("THE_ODDS_API_KEY", "")
+    if not api_key:
+        return {"error": "THE_ODDS_API_KEY not set"}
+
+    results = {}
+    sport_keys = ["tennis_atp", "tennis_wta"]
+
+    # Also check which sports are active
+    try:
+        url = f"https://api.the-odds-api.com/v4/sports?apiKey={api_key}"
+        req = _urllib.Request(url, headers={"User-Agent": "bet-analytics/1.0"})
+        with _urllib.urlopen(req, timeout=15) as resp:
+            all_sports = _json.loads(resp.read())
+        tennis_sports = [s for s in all_sports if "tennis" in s.get("key", "").lower()
+                         or "tennis" in s.get("title", "").lower()]
+        results["available_tennis_sports"] = tennis_sports
+        results["total_active_sports"] = len([s for s in all_sports if s.get("active")])
+    except Exception as exc:
+        results["sports_list_error"] = str(exc)
+
+    # Try each tennis sport key
+    for sport_key in sport_keys:
+        try:
+            url = (
+                f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds"
+                f"?apiKey={api_key}&regions=eu,uk,us&markets=h2h&oddsFormat=decimal"
+                f"&dateFormat=iso"
+            )
+            req = _urllib.Request(url, headers={"User-Agent": "bet-analytics/1.0"})
+            with _urllib.urlopen(req, timeout=15) as resp:
+                data = _json.loads(resp.read())
+            events = data if isinstance(data, list) else []
+            results[sport_key] = {
+                "n_events": len(events),
+                "first_3": [
+                    {
+                        "home": e.get("home_team"),
+                        "away": e.get("away_team"),
+                        "time": e.get("commence_time"),
+                        "title": e.get("sport_title"),
+                        "n_bookmakers": len(e.get("bookmakers", [])),
+                    }
+                    for e in events[:3]
+                ],
+            }
+        except Exception as exc:
+            results[sport_key] = {"error": str(exc)}
+
+    results["ts"] = _utcnow()
+    return results
+
+
+@app.get("/debug/odds-sports")
+def debug_odds_sports():
+    """Все активные виды спорта в Odds API для данного ключа.
+
+    curl https://your-app.onrender.com/debug/odds-sports
+    """
+    import json as _json
+    import urllib.request as _urllib
+
+    api_key = os.environ.get("THE_ODDS_API_KEY", "")
+    if not api_key:
+        return {"error": "THE_ODDS_API_KEY not set"}
+
+    try:
+        url = f"https://api.the-odds-api.com/v4/sports?apiKey={api_key}"
+        req = _urllib.Request(url, headers={"User-Agent": "bet-analytics/1.0"})
+        with _urllib.urlopen(req, timeout=15) as resp:
+            sports = _json.loads(resp.read())
+        active = [s for s in sports if s.get("active")]
+        return {
+            "total": len(sports),
+            "active": len(active),
+            "active_sports": [
+                {"key": s["key"], "title": s.get("title"), "group": s.get("group")}
+                for s in active
+            ],
+            "ts": _utcnow(),
+        }
+    except Exception as exc:
+        return {"error": str(exc), "ts": _utcnow()}
