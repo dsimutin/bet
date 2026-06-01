@@ -93,9 +93,74 @@ def main() -> None:
     except Exception as e:
         print(f"[settle] Drift check failed (non-critical): {e}", file=sys.stderr)
 
+    # Step 4: Settle tennis signals
+    _settle_tennis(ledger_path, reports_dir)
+
     elapsed = round(time.perf_counter() - t0, 1)
     print(f"[settle] Done in {elapsed}s")
     _log_run("settle-ledger", "success", elapsed, "completed")
+
+
+def _settle_tennis(ledger_path: Path, reports_dir: Path) -> None:
+    """Settle open tennis paper signals and send Telegram summary."""
+    try:
+        import json
+        from src.models.signal_ledger import SignalLedger
+        from src.models.settle_tennis_signals import (
+            settle_tennis_from_sackmann,
+            format_settlement_telegram,
+        )
+
+        cache_dir = Path(os.environ.get("DATA_DIR", "data")) / "raw" / "tennis_atp"
+        ledger = SignalLedger.load_or_create(ledger_path)
+
+        report = settle_tennis_from_sackmann(ledger, cache_dir)
+        if report.get("no_data"):
+            print("[settle] Tennis: no ATP data available")
+            return
+
+        settled = report.get("settled", 0)
+        unmatched = report.get("unmatched", 0)
+        print(f"[settle] Tennis: {settled} settled, {unmatched} still pending")
+
+        if settled > 0:
+            ledger_path.parent.mkdir(parents=True, exist_ok=True)
+            ledger.save(ledger_path)
+
+            report_path = reports_dir / f"tennis_settlement_{date.today().isoformat()}.json"
+            report_path.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
+            print(f"[settle] Tennis report → {report_path}")
+
+            # Telegram notification
+            _notify_tennis_results(report.get("results", []))
+    except Exception as e:
+        print(f"[settle] Tennis settlement failed (non-critical): {e}", file=sys.stderr)
+
+
+def _notify_tennis_results(results: list[dict]) -> None:
+    """Send settlement summary to Telegram."""
+    if not results:
+        return
+    try:
+        from src.models.settle_tennis_signals import format_settlement_telegram
+        from src.integrations.telegram_sender import TelegramConfig, TelegramSender
+
+        token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+        chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
+        if not (token and chat_id):
+            text = format_settlement_telegram(results)
+            print(f"[settle] Tennis Telegram dry-run:\n{text}")
+            return
+
+        text = format_settlement_telegram(results)
+        if not text:
+            return
+        config = TelegramConfig(bot_token=token, chat_id=chat_id, dry_run=False)
+        sender = TelegramSender(config)
+        sender.send_message(text)
+        print(f"[settle] Tennis: Telegram settlement message sent ({len(results)} results)")
+    except Exception as e:
+        print(f"[settle] Tennis Telegram notify failed: {e}", file=sys.stderr)
 
 
 def _log_run(job: str, status: str, duration_s: float, message: str, meta: dict | None = None):

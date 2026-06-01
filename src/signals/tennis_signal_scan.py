@@ -376,6 +376,7 @@ def _check_event(
                     "capper_avg_odds": (ctx.get("consensus_p1") if is_p1 else ctx.get("consensus_p2") or {}).get("avg_odds"),
                     "status": "paper",
                     "generated_at": datetime.now(timezone.utc).isoformat(),
+                    "dataset_hash": getattr(getattr(model, "params", None), "dataset_hash", "tennis_elo_v2"),
                 })
 
     return signals
