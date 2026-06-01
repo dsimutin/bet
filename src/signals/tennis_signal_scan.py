@@ -23,7 +23,14 @@ from typing import Any
 _log = logging.getLogger(__name__)
 
 _ODDS_API_BASE = "https://api.the-odds-api.com/v4"
-_TENNIS_SPORT_KEYS = ["tennis_atp", "tennis_wta"]
+# Static fallback keys — overridden at runtime by _discover_tennis_keys()
+_TENNIS_SPORT_KEYS_FALLBACK = [
+    "tennis_atp_french_open", "tennis_wta_french_open",
+    "tennis_atp_wimbledon",   "tennis_wta_wimbledon",
+    "tennis_atp_us_open",     "tennis_wta_us_open",
+    "tennis_atp_aus_open",    "tennis_wta_aus_open",
+    "tennis_atp",             "tennis_wta",
+]
 _DEFAULT_EDGE_THRESHOLD = 1.5  # minimum edge % to emit a signal
 _DEFAULT_MIN_ODDS = 1.25
 _DEFAULT_MAX_ODDS = 8.00
@@ -447,12 +454,40 @@ def _infer_best_of(event: dict[str, Any]) -> int:
     return 3
 
 
+def _discover_tennis_keys(api_key: str) -> list[str]:
+    """Fetch active sport keys from Odds API and return tennis ones.
+
+    Falls back to _TENNIS_SPORT_KEYS_FALLBACK if the API call fails.
+    """
+    url = f"{_ODDS_API_BASE}/sports?apiKey={api_key}"
+    try:
+        req = _urllib.Request(url, headers={"User-Agent": "bet-analytics/1.0"})
+        with _urllib.urlopen(req, timeout=10) as resp:
+            sports = json.loads(resp.read())
+        active_tennis = [
+            s["key"] for s in sports
+            if s.get("active") and "tennis" in s.get("key", "").lower()
+        ]
+        if active_tennis:
+            _log.info("[tennis] Discovered active tennis keys: %s", active_tennis)
+            return active_tennis
+    except Exception as exc:
+        _log.debug("[tennis] Sport discovery failed, using fallback: %s", exc)
+    return _TENNIS_SPORT_KEYS_FALLBACK
+
+
 def _fetch_atp_events(api_key: str) -> list[dict[str, Any]] | None:
-    """Fetch upcoming ATP/WTA events with h2h odds from The Odds API."""
+    """Fetch upcoming ATP/WTA events with h2h odds from The Odds API.
+
+    Dynamically discovers active tennis sport keys first so the scanner
+    always works regardless of which Grand Slam is currently running.
+    """
     all_events: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
 
-    for sport_key in _TENNIS_SPORT_KEYS:
+    sport_keys = _discover_tennis_keys(api_key)
+
+    for sport_key in sport_keys:
         url = (
             f"{_ODDS_API_BASE}/sports/{sport_key}/odds"
             f"?apiKey={api_key}&regions=eu,uk,us&markets=h2h&oddsFormat=decimal&dateFormat=iso"
@@ -466,12 +501,11 @@ def _fetch_atp_events(api_key: str) -> list[dict[str, Any]] | None:
                     eid = event.get("id", "")
                     if eid not in seen_ids:
                         seen_ids.add(eid)
-                        # Tag with sport key for surface inference
                         event["_sport_key"] = sport_key
                         all_events.append(event)
-                _log.info("[tennis] %s: %d events", sport_key, len(data) if isinstance(data, list) else 0)
+                _log.info("[tennis] %s: %d events", sport_key, len(data))
         except Exception as exc:
-            _log.warning("[tennis] Odds API error for %s: %s", sport_key, exc)
+            _log.debug("[tennis] %s: %s", sport_key, exc)
 
     return all_events if all_events else None
 

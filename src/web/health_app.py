@@ -760,6 +760,11 @@ def debug_tennis_raw():
     except Exception as exc:
         results["sports_list_error"] = str(exc)
 
+    # Try active tennis keys discovered from API
+    sport_keys = [s["key"] for s in results.get("available_tennis_sports", [])]
+    if not sport_keys:
+        sport_keys = ["tennis_atp_french_open", "tennis_wta_french_open"]
+
     # Try each tennis sport key
     for sport_key in sport_keys:
         try:
