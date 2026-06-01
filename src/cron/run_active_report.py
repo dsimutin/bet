@@ -208,7 +208,7 @@ def send_morning_digest() -> str:
         return "failed"
 
 
-def _format_morning_digest(signals: list[dict], today: date) -> str:
+def _format_morning_digest(signals: list[dict], today: date, scan_context: dict | None = None) -> str:
     """Format a clean, beginner-friendly daily betting digest."""
     day_ru = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"][today.weekday()]
     months_ru = [
@@ -218,12 +218,28 @@ def _format_morning_digest(signals: list[dict], today: date) -> str:
     date_str = f"{today.day} {months_ru[today.month]} ({day_ru})"
 
     if not signals:
+        ctx = scan_context or {}
+        tennis_events = ctx.get("tennis_events_checked", 0)
+        tennis_skip = ctx.get("tennis_skipped_no_data", 0)
+        tennis_status = ctx.get("tennis_scan_status", "")
+
+        tennis_detail = ""
+        if tennis_events > 0:
+            tennis_detail = f"\n🎾 Roland Garros: проверено {tennis_events} матчей"
+            if tennis_skip:
+                tennis_detail += f", {tennis_skip} пропущено (нет данных)"
+            tennis_detail += " — преимущества нет"
+        elif tennis_status == "skip":
+            tennis_detail = "\n🎾 Теннис: нет API ключа"
+        elif tennis_status in ("api_error", "no_upcoming_events"):
+            tennis_detail = "\n🎾 Теннис: нет активных матчей в API"
+
         return (
             f"📅 <b>Прогнозы на {date_str}</b>\n\n"
             "Сегодня подходящих ставок не найдено.\n\n"
             "Модель проверила все матчи и не нашла достаточного преимущества "
             "над букмекерами. Лучше подождать — не ставить вообще лучше, "
-            "чем ставить без преимущества.\n\n"
+            f"чем ставить без преимущества.{tennis_detail}\n\n"
             "📄 Бумажная статистика — реальных денег нет"
         )
 
@@ -494,8 +510,11 @@ def _run_tennis_scan() -> dict[str, Any]:
     model_path = MODEL_DIR / "tennis_elo_atp_latest.pkl"
     result = scan_tennis_signals(model_path=model_path, api_key=api_key)
     _log.info(
-        "[active] Tennis scan: %d signals, %d events checked (status=%s)",
-        result.get("signals_count", 0), result.get("events_checked", 0), result.get("status"),
+        "[active] Tennis scan: events=%d, skipped_no_data=%d, signals=%d, api_status=%s",
+        result.get("events_checked", 0),
+        result.get("skipped_no_data", 0),
+        result.get("signals_count", 0),
+        result.get("api_status", "?"),
     )
 
     # Save tennis signals to ledger (same as football)
@@ -621,6 +640,49 @@ def _run_settlement() -> dict[str, Any]:
     except Exception as e:
         _log.error("[active] Settlement failed: %s", e)
         errors.append(str(e))
+
+    # Settle tennis signals
+    try:
+        from src.ingest.atp_results import fetch_recent_results
+        from src.models.signal_ledger import SignalLedger as _SL2
+        _ledger2 = _SL2.load_or_create(LEDGER_PATH)
+        tennis_open = [
+            e for e in _ledger2.entries.values()
+            if e.get("sport") == "tennis" and e.get("ledger_status") == "open"
+        ]
+        if tennis_open:
+            atp_results = fetch_recent_results(days=7)
+            tennis_settled_count = 0
+            for entry in tennis_open:
+                player = entry.get("player", "")
+                commence = entry.get("commence_time", "")
+                for res in atp_results:
+                    match_date = res.get("date", "")
+                    if match_date < commence[:10]:
+                        continue
+                    winner = res.get("winner", "").lower()
+                    loser = res.get("loser", "").lower()
+                    player_lower = player.lower()
+                    if player_lower and player_lower in winner:
+                        entry["result"] = "win"
+                        entry["ledger_status"] = "settled"
+                        entry["pnl_units"] = round(float(entry.get("entry_odds", 1)) - 1, 4)
+                        entry["ledger_updated_at_utc"] = datetime.now(timezone.utc).isoformat()
+                        tennis_settled_count += 1
+                        break
+                    elif player_lower and player_lower in loser:
+                        entry["result"] = "loss"
+                        entry["ledger_status"] = "settled"
+                        entry["pnl_units"] = -1.0
+                        entry["ledger_updated_at_utc"] = datetime.now(timezone.utc).isoformat()
+                        tennis_settled_count += 1
+                        break
+            if tennis_settled_count:
+                _ledger2.save(LEDGER_PATH)
+                result["settled_count"] = result.get("settled_count", 0) + tennis_settled_count
+                _log.info("[settlement] Tennis: settled %d bets", tennis_settled_count)
+    except Exception as e:
+        _log.warning("[settlement] Tennis settlement failed: %s", e)
 
     try:
         detector = CUSUMDriftDetector(threshold=0.15, drift_window=14, min_window=10)

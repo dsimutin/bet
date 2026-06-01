@@ -16,6 +16,7 @@ Buttons (callback_data):
     how_it_works — explanation
     history      — last 10 settled bets
     refresh      — run fresh scan
+    debug_tennis — tennis diagnostics
 """
 
 from __future__ import annotations
@@ -103,6 +104,8 @@ def _handle_callback(cb: dict) -> None:
         _action_refresh(chat_id)
     elif data == "calibration":
         _action_calibration(chat_id)
+    elif data == "debug_tennis":
+        _action_debug_tennis(chat_id)
     elif data == "main_menu":
         _send_main_menu(chat_id, "")
 
@@ -134,6 +137,7 @@ def _send_main_menu(chat_id: str, first_name: str) -> None:
                 {"text": "ℹ️ Как это работает", "callback_data": "how_it_works"},
             ],
             [{"text": "🎯 Калибровка модели", "callback_data": "calibration"}],
+            [{"text": "🔍 Диагностика", "callback_data": "debug_tennis"}],
         ]
     }
     _send(chat_id, text, reply_markup=keyboard)
@@ -167,8 +171,17 @@ def _action_picks_today(chat_id: str) -> None:
         tennis = tennis_result.get("all_signals", [])
         all_sigs = football + tennis
 
+        tennis_events = tennis_result.get("events_checked", 0)
+        tennis_skipped = tennis_result.get("skipped_no_data", 0)
+        tennis_status = tennis_result.get("status", "")
+        scan_context = {
+            "tennis_events_checked": tennis_events,
+            "tennis_skipped_no_data": tennis_skipped,
+            "tennis_scan_status": tennis_status,
+        }
+
         try:
-            text = _format_morning_digest(all_sigs, today)
+            text = _format_morning_digest(all_sigs, today, scan_context=scan_context)
             _send(chat_id, text, reply_markup=_back_button())
         except Exception as exc:
             _log.exception("[bot] digest format failed: %s", exc)
@@ -230,6 +243,53 @@ def _action_calibration(chat_id: str) -> None:
     except Exception as exc:
         text = f"❌ Ошибка: {exc}"
     _send(chat_id, text, reply_markup=_back_button())
+
+
+def _action_debug_tennis(chat_id: str) -> None:
+    _send(chat_id, "🔍 Запускаю диагностику тенниса...")
+    import threading
+
+    def _run():
+        try:
+            from src.signals.tennis_signal_scan import scan_tennis_debug
+            api_key = os.environ.get("THE_ODDS_API_KEY", "")
+            if not api_key:
+                _send(chat_id, "❌ Нет API ключа", reply_markup=_back_button())
+                return
+            model_path = Path("data/models/tennis_elo_atp_latest.pkl")
+            debug = scan_tennis_debug(model_path, api_key)
+
+            n_events = debug.get("n_events", 0)
+            rows = debug.get("rows", [])
+            lines = [
+                f"🔍 <b>Диагностика тенниса</b>\n",
+                f"Матчей в API: {n_events}",
+                f"Игроков в модели: {debug.get('model_players', 0)}\n",
+            ]
+
+            if not rows:
+                lines.append("❌ Нет данных о матчах")
+            else:
+                lines.append("Топ матчей по |edge|:")
+                for r in rows[:8]:
+                    if r.get("skip"):
+                        lines.append(
+                            f"  ⚠️ {r['p1']} vs {r['p2']}: нет данных "
+                            f"({r.get('p1_matches', 0)}/{r.get('p2_matches', 0)} матчей)"
+                        )
+                    else:
+                        edge = r.get("edge_p1_pct")
+                        edge_str = f"{edge:+.1f}%" if edge is not None else "?"
+                        prob = r.get("model_prob_p1", 0)
+                        lines.append(
+                            f"  {r['p1']} vs {r['p2']}: prob={prob:.0%}, edge={edge_str}"
+                        )
+
+            _send(chat_id, "\n".join(lines)[:4000], reply_markup=_back_button())
+        except Exception as exc:
+            _send(chat_id, f"❌ Ошибка диагностики: {exc}", reply_markup=_back_button())
+
+    threading.Thread(target=_run, daemon=True).start()
 
 
 # ---------------------------------------------------------------------------
@@ -306,32 +366,72 @@ def _build_history_text() -> str:
         key=lambda e: e.get("ledger_updated_at_utc", ""),
         reverse=True,
     )
+    open_bets = [e for e in entries if e.get("ledger_status") == "open"]
 
-    if not settled:
-        return "🏆 <b>История ставок</b>\n\nПока нет завершённых ставок."
+    lines = ["🏆 <b>История ставок</b>\n"]
 
-    lines = ["🏆 <b>Последние ставки</b>\n"]
-    for e in settled[:10]:
-        icon = "✅" if e.get("result") == "win" else "❌"
-        sport = e.get("sport", "football")
-        sport_icon = "🎾" if sport == "tennis" else "⚽"
-        odds = e.get("entry_odds", "?")
-        pnl = e.get("pnl_units", 0) or 0
-        pnl_rub = round(pnl * 1000)
-        pnl_str = f"+{pnl_rub} ₽" if pnl_rub >= 0 else f"{pnl_rub} ₽"
+    # --- totals summary ---
+    total_pnl = sum(e.get("pnl_units", 0) or 0 for e in settled)
+    wins = sum(1 for e in settled if e.get("result") == "win")
+    win_rate = round(wins / len(settled) * 100, 1) if settled else 0
+    pnl_rub_total = round(total_pnl * 1000)
+    pnl_sign = "+" if pnl_rub_total >= 0 else ""
+    football_settled = [e for e in settled if e.get("sport", "football") != "tennis"]
+    tennis_settled = [e for e in settled if e.get("sport") == "tennis"]
+    sport_parts = []
+    if football_settled:
+        sport_parts.append(f"⚽ {len(football_settled)} футбол")
+    if tennis_settled:
+        sport_parts.append(f"🎾 {len(tennis_settled)} теннис")
+    sport_line = " | ".join(sport_parts) if sport_parts else "нет ставок"
 
-        if sport == "tennis":
+    lines.append(f"Завершено: <b>{len(settled)}</b>  ({sport_line})")
+    if settled:
+        lines.append(f"Точность: <b>{win_rate}%</b>  P&L: <b>{pnl_sign}{pnl_rub_total} ₽</b>")
+    lines.append("")
+
+    # --- open bets (show individually so tennis bets are visible) ---
+    if open_bets:
+        open_football = [e for e in open_bets if e.get("sport", "football") != "tennis"]
+        open_tennis = [e for e in open_bets if e.get("sport") == "tennis"]
+        lines.append(f"⏳ <b>Открытые ставки ({len(open_bets)})</b>")
+        for e in open_tennis:
             name = f"{e.get('player', '?')} vs {e.get('opponent', '?')}"
-        else:
+            odds = e.get("entry_odds", "?")
+            commence = e.get("commence_time", e.get("generated_at_utc", ""))[:10]
+            lines.append(f"🎾 {name} @ {odds}  <i>{commence}</i>")
+        for e in open_football[:5]:
             sel = e.get("selection_ru", e.get("selection", "?"))
             name = f"{e.get('home_team', '?')}–{e.get('away_team', '?')} [{sel}]"
+            odds = e.get("entry_odds", "?")
+            commence = e.get("commence_time", e.get("generated_at_utc", ""))[:10]
+            lines.append(f"⚽ {name} @ {odds}  <i>{commence}</i>")
+        if len(open_football) > 5:
+            lines.append(f"   ...ещё {len(open_football) - 5} футбольных")
+        lines.append("")
 
-        updated = e.get("ledger_updated_at_utc", "")[:10]
-        lines.append(f"{icon}{sport_icon} {name}\n   @ {odds} → {pnl_str}  <i>{updated}</i>")
+    # --- last 10 settled ---
+    if not settled:
+        lines.append("Пока нет завершённых ставок.")
+    else:
+        lines.append("<b>Последние завершённые</b>")
+        for e in settled[:10]:
+            icon = "✅" if e.get("result") == "win" else "❌"
+            sport = e.get("sport", "football")
+            sport_icon = "🎾" if sport == "tennis" else "⚽"
+            odds = e.get("entry_odds", "?")
+            pnl = e.get("pnl_units", 0) or 0
+            pnl_rub_e = round(pnl * 1000)
+            pnl_str = f"+{pnl_rub_e} ₽" if pnl_rub_e >= 0 else f"{pnl_rub_e} ₽"
 
-    open_count = sum(1 for e in entries if e.get("ledger_status") == "open")
-    if open_count:
-        lines.append(f"\n⏳ Ещё {open_count} ставок ждут результата")
+            if sport == "tennis":
+                name = f"{e.get('player', '?')} vs {e.get('opponent', '?')}"
+            else:
+                sel = e.get("selection_ru", e.get("selection", "?"))
+                name = f"{e.get('home_team', '?')}–{e.get('away_team', '?')} [{sel}]"
+
+            updated = e.get("ledger_updated_at_utc", "")[:10]
+            lines.append(f"{icon}{sport_icon} {name}\n   @ {odds} → {pnl_str}  <i>{updated}</i>")
 
     lines.append("\n📄 <i>Бумажная статистика</i>")
     return "\n".join(lines)

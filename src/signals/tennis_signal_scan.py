@@ -31,7 +31,7 @@ _TENNIS_SPORT_KEYS_FALLBACK = [
     "tennis_atp_aus_open",    "tennis_wta_aus_open",
     "tennis_atp",             "tennis_wta",
 ]
-_DEFAULT_EDGE_THRESHOLD = 1.5  # minimum edge % to emit a signal
+_DEFAULT_EDGE_THRESHOLD = 0.8  # minimum edge % to emit a signal
 _DEFAULT_MIN_ODDS = 1.25
 _DEFAULT_MAX_ODDS = 8.00
 _PREFERRED_BOOKS = ["pinnacle", "bet365", "draftkings", "fanduel", "betfair_ex_uk"]
@@ -120,11 +120,17 @@ def scan_tennis_signals(
 
     signals: list[dict[str, Any]] = []
     skipped_no_data = 0
+    events_no_bookmakers = 0
 
     for event in events:
         player1_raw = str(event.get("home_team", "")).strip()
         player2_raw = str(event.get("away_team", "")).strip()
         if not player1_raw or not player2_raw:
+            continue
+
+        if not event.get("bookmakers"):
+            events_no_bookmakers += 1
+            _log.info("[tennis] %s vs %s — no bookmakers in event", player1_raw, player2_raw)
             continue
 
         # Resolve abbreviated names ("N. Djokovic") to full names in model
@@ -225,8 +231,8 @@ def scan_tennis_signals(
 
     duration = time.perf_counter() - t0
     _log.info(
-        "[tennis] Scan done: %d signals, %d events, %d skipped_no_data in %.1fs",
-        len(signals), len(events), skipped_no_data, duration,
+        "[tennis] Scan done: %d signals, %d events, %d skipped_no_data, %d no_bookmakers in %.1fs",
+        len(signals), len(events), skipped_no_data, events_no_bookmakers, duration,
     )
     return {
         "sport": "tennis",
@@ -234,10 +240,13 @@ def scan_tennis_signals(
         "signals_count": len(signals),
         "events_checked": len(events),
         "skipped_no_data": skipped_no_data,
+        "events_skipped_no_model_data": skipped_no_data,
+        "events_no_bookmakers": events_no_bookmakers,
         "top_signals": sorted(signals, key=lambda s: s.get("edge_pct", 0), reverse=True)[:5],
         "all_signals": signals,
         "duration_s": duration,
         "status": "ok",
+        "api_status": "ok",
         "no_signal_reason": "" if signals else "no_edge_found",
     }
 
@@ -800,7 +809,7 @@ def _fetch_atp_events(api_key: str) -> list[dict[str, Any]] | None:
     for sport_key in sport_keys:
         url = (
             f"{_ODDS_API_BASE}/sports/{sport_key}/odds"
-            f"?apiKey={api_key}&regions=eu,uk,us&markets=h2h,spreads,totals&oddsFormat=decimal&dateFormat=iso"
+            f"?apiKey={api_key}&regions=eu,uk,us,us2,au&markets=h2h,spreads,totals&oddsFormat=decimal&dateFormat=iso"
         )
         try:
             req = _urllib.Request(url, headers={"User-Agent": "bet-analytics/1.0"})
@@ -815,24 +824,87 @@ def _fetch_atp_events(api_key: str) -> list[dict[str, Any]] | None:
                         all_events.append(event)
                 _log.info("[tennis] %s: %d events", sport_key, len(data))
         except Exception as exc:
-            _log.debug("[tennis] %s: %s", sport_key, exc)
+            import urllib.error as _urlerr
+            if isinstance(exc, _urlerr.HTTPError):
+                _log.info("[tennis] %s: HTTP %d %s", sport_key, exc.code, exc.reason)
+            else:
+                _log.info("[tennis] %s: %s", sport_key, exc)
 
     return all_events if all_events else None
 
 
 def _empty_result(reason: str) -> dict[str, Any]:
+    api_status: str
+    if reason == "api_error":
+        api_status = "error"
+    elif reason == "no_upcoming_events":
+        api_status = "no_events"
+    elif "quota" in reason.lower() or "429" in reason:
+        api_status = "quota"
+    else:
+        api_status = "ok"
     return {
         "sport": "tennis",
         "tour": "ATP",
         "signals_count": 0,
         "events_checked": 0,
         "skipped_no_data": 0,
+        "events_skipped_no_model_data": 0,
+        "events_no_bookmakers": 0,
         "top_signals": [],
         "all_signals": [],
         "duration_s": 0.0,
         "status": "skip",
+        "api_status": api_status,
         "no_signal_reason": reason,
     }
+
+
+def scan_tennis_with_debug(
+    model_path: Path,
+    api_key: str,
+    edge_threshold: float = _DEFAULT_EDGE_THRESHOLD,
+    min_odds: float = _DEFAULT_MIN_ODDS,
+    max_odds: float = _DEFAULT_MAX_ODDS,
+    markov_model_path: Path | None = None,
+) -> dict[str, Any]:
+    """Wrap scan_tennis_signals and return detailed diagnostics.
+
+    Returns all fields from scan_tennis_signals plus:
+    - ``api_status``: "ok" | "error" | "quota" | "no_events"
+    - ``events_skipped_no_model_data``: count of events where name resolution failed
+    - ``events_no_bookmakers``: count of events with bookmakers:[]
+    - ``per_player_edges``: list of per-player model-vs-market edge info (top 20)
+    """
+    result = scan_tennis_signals(
+        model_path=model_path,
+        api_key=api_key,
+        edge_threshold=edge_threshold,
+        min_odds=min_odds,
+        max_odds=max_odds,
+        markov_model_path=markov_model_path,
+    )
+
+    # Compute per-player edge diagnostics via the raw debug path
+    per_player_edges: list[dict[str, Any]] = []
+    try:
+        raw = scan_tennis_debug(model_path, api_key)
+        per_player_edges = raw.get("rows", [])[:20]
+    except Exception as exc:
+        _log.debug("[tennis] per_player_edges diagnostic failed: %s", exc)
+
+    result["per_player_edges"] = per_player_edges
+    result["diagnostic"] = True
+
+    _log.info(
+        "[tennis][debug] events=%d, skipped_no_data=%d, no_bookmakers=%d, signals=%d, api_status=%s",
+        result.get("events_checked", 0),
+        result.get("events_skipped_no_model_data", 0),
+        result.get("events_no_bookmakers", 0),
+        result.get("signals_count", 0),
+        result.get("api_status", "?"),
+    )
+    return result
 
 
 def scan_tennis_debug(model_path: Path, api_key: str) -> dict[str, Any]:
