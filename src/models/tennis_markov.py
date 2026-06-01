@@ -40,7 +40,7 @@ MIN_MATCHES_FOR_SIGNAL = 15
 
 # Blend weight: how much to trust Markov vs ELO
 # When serve data is rich, Markov dominates; otherwise fall back to ELO
-MARKOV_WEIGHT_MAX = 0.70   # when player has lots of serve data
+MARKOV_WEIGHT_MAX = 0.40   # when player has lots of serve data
 MARKOV_WEIGHT_MIN = 0.20   # when serve data is sparse
 
 
@@ -441,6 +441,10 @@ class TennisMarkovModel:
             weight = MARKOV_WEIGHT_MIN + (MARKOV_WEIGHT_MAX - MARKOV_WEIGHT_MIN) * min(
                 1.0, max(0.0, (min_n - MIN_SERVE_POINTS) / (1000 - MIN_SERVE_POINTS))
             )
+            # Discrepancy dampening: if Markov and ELO disagree by >15pp,
+            # halve the Markov weight — serve stats alone can't override strong ELO signal
+            if abs(markov_prob - elo_prob) > 0.15:
+                weight *= 0.5
             prob = weight * markov_prob + (1.0 - weight) * elo_prob
         else:
             # Fall back to ELO only
