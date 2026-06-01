@@ -46,8 +46,13 @@ def main() -> None:
     promoted = sum(1 for r in results if r.get("promoted"))
     print(f"\n[trainer] Done in {elapsed}s | {promoted}/{len(leagues)} promoted")
 
-    _log_run("daily-trainer", "success" if promoted > 0 else "no_promotion",
-             elapsed, f"{promoted} leagues promoted", {"results": results})
+    _log_run(
+        "daily-trainer",
+        "success" if promoted > 0 else "no_promotion",
+        elapsed,
+        f"{promoted} leagues promoted",
+        {"results": results},
+    )
 
 
 def _train_league(
@@ -69,9 +74,7 @@ def _train_league(
         print(f"[trainer] {league}: no data — skipping")
         return {"league": league, "status": "skip", "reason": "no data"}
 
-    csv_path = loader.save_combined(
-        result.dataframe, staging_dir, f"{league}_latest.csv"
-    )
+    csv_path = loader.save_combined(result.dataframe, staging_dir, f"{league}_latest.csv")
     print(f"[trainer] {league}: {len(result.dataframe)} matches → {csv_path}")
 
     registry = ModelRegistry(model_dir)
@@ -82,6 +85,7 @@ def _train_league(
     )
 
     import pandas as pd
+
     df = pd.read_csv(csv_path, encoding="latin-1")
     # DailyTrainer.run(league, cutoff_date) — pass df via run_on_dataframe
     # to avoid the trainer re-scanning staging for a file it might not find.
@@ -105,11 +109,14 @@ def _train_league(
 def _log_model_meta(result: dict) -> None:
     try:
         from src.infrastructure.render_db import get_db
-        get_db().log_model_version({
-            **result,
-            "triggered_by": "daily-trainer-render",
-            "created_at_utc": datetime.now(timezone.utc).isoformat(),
-        })
+
+        get_db().log_model_version(
+            {
+                **result,
+                "triggered_by": "daily-trainer-render",
+                "created_at_utc": datetime.now(timezone.utc).isoformat(),
+            }
+        )
     except Exception:
         pass
 
@@ -117,6 +124,7 @@ def _log_model_meta(result: dict) -> None:
 def _log_run(job: str, status: str, duration_s: float, message: str, meta: dict | None = None):
     try:
         from src.infrastructure.render_db import get_db
+
         get_db().log_cron_run(job, status, duration_s, message, meta)
     except Exception:
         pass

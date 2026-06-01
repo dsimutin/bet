@@ -14,12 +14,38 @@ from src.features.elo_ratings import EloRatingSystem
 
 @pytest.fixture()
 def simple_history() -> pd.DataFrame:
-    return pd.DataFrame([
-        {"Date": "01/01/2024", "HomeTeam": "Arsenal",  "AwayTeam": "Chelsea",    "FTHG": 2, "FTAG": 1},
-        {"Date": "08/01/2024", "HomeTeam": "Chelsea",  "AwayTeam": "Arsenal",    "FTHG": 0, "FTAG": 3},
-        {"Date": "15/01/2024", "HomeTeam": "Arsenal",  "AwayTeam": "Liverpool",  "FTHG": 1, "FTAG": 1},
-        {"Date": "22/01/2024", "HomeTeam": "Liverpool","AwayTeam": "Chelsea",    "FTHG": 2, "FTAG": 0},
-    ])
+    return pd.DataFrame(
+        [
+            {
+                "Date": "01/01/2024",
+                "HomeTeam": "Arsenal",
+                "AwayTeam": "Chelsea",
+                "FTHG": 2,
+                "FTAG": 1,
+            },
+            {
+                "Date": "08/01/2024",
+                "HomeTeam": "Chelsea",
+                "AwayTeam": "Arsenal",
+                "FTHG": 0,
+                "FTAG": 3,
+            },
+            {
+                "Date": "15/01/2024",
+                "HomeTeam": "Arsenal",
+                "AwayTeam": "Liverpool",
+                "FTHG": 1,
+                "FTAG": 1,
+            },
+            {
+                "Date": "22/01/2024",
+                "HomeTeam": "Liverpool",
+                "AwayTeam": "Chelsea",
+                "FTHG": 2,
+                "FTAG": 0,
+            },
+        ]
+    )
 
 
 class TestEloBasics:
@@ -64,9 +90,9 @@ class TestAntiLeakage:
         assert elo_cut._n_matches == 2
 
     def test_empty_result_when_all_future(self):
-        df = pd.DataFrame([
-            {"Date": "01/06/2026", "HomeTeam": "A", "AwayTeam": "B", "FTHG": 1, "FTAG": 0}
-        ])
+        df = pd.DataFrame(
+            [{"Date": "01/06/2026", "HomeTeam": "A", "AwayTeam": "B", "FTHG": 1, "FTAG": 0}]
+        )
         elo = EloRatingSystem().build_from_matches(df, cutoff_date=date(2024, 1, 1))
         assert elo._n_matches == 0
         assert elo.get("A") == 1500.0
@@ -75,10 +101,12 @@ class TestAntiLeakage:
 class TestFeatureGeneration:
     def test_add_elo_features(self, simple_history):
         elo = EloRatingSystem().build_from_matches(simple_history)
-        candidates = pd.DataFrame([
-            {"home_team": "Arsenal", "away_team": "Chelsea"},
-            {"home_team": "Liverpool", "away_team": "Arsenal"},
-        ])
+        candidates = pd.DataFrame(
+            [
+                {"home_team": "Arsenal", "away_team": "Chelsea"},
+                {"home_team": "Liverpool", "away_team": "Arsenal"},
+            ]
+        )
         result = elo.add_elo_features(candidates)
         assert "elo_home" in result.columns
         assert "elo_away" in result.columns

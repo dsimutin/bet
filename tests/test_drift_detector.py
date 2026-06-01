@@ -19,16 +19,20 @@ def _make_entries(n_wins: int, n_losses: int, base_ts: datetime | None = None) -
     for _ in range(n_wins):
         ts = (base + timedelta(hours=idx)).isoformat()
         entries[f"sig_{idx}"] = {
-            "ledger_status": "settled", "result": "win",
-            "pnl_units": 1.0, "stake_units": 1.0,
+            "ledger_status": "settled",
+            "result": "win",
+            "pnl_units": 1.0,
+            "stake_units": 1.0,
             "ledger_updated_at_utc": ts,
         }
         idx += 1
     for _ in range(n_losses):
         ts = (base + timedelta(hours=idx)).isoformat()
         entries[f"sig_{idx}"] = {
-            "ledger_status": "settled", "result": "loss",
-            "pnl_units": -1.0, "stake_units": 1.0,
+            "ledger_status": "settled",
+            "result": "loss",
+            "pnl_units": -1.0,
+            "stake_units": 1.0,
             "ledger_updated_at_utc": ts,
         }
         idx += 1
@@ -51,7 +55,8 @@ def _make_uniform_entries(n_total: int, win_every_n: int) -> dict:
         result = "win" if i % win_every_n != 0 else "loss"
         ts = (base + timedelta(hours=i)).isoformat()
         entries[f"s_{i}"] = {
-            "ledger_status": "settled", "result": result,
+            "ledger_status": "settled",
+            "result": result,
             "pnl_units": 1.0 if result == "win" else -1.0,
             "stake_units": 1.0,
             "ledger_updated_at_utc": ts,
@@ -89,16 +94,20 @@ class TestDriftDetection:
         for i in range(30):
             ts = (base_ts + timedelta(hours=i)).isoformat()
             entries[f"baseline_{i}"] = {
-                "ledger_status": "settled", "result": "win",
-                "pnl_units": 1.0, "stake_units": 1.0,
+                "ledger_status": "settled",
+                "result": "win",
+                "pnl_units": 1.0,
+                "stake_units": 1.0,
                 "ledger_updated_at_utc": ts,
             }
         # 14 losses (recent window)
         for i in range(14):
             ts = (base_ts + timedelta(hours=30 + i)).isoformat()
             entries[f"recent_{i}"] = {
-                "ledger_status": "settled", "result": "loss",
-                "pnl_units": -1.0, "stake_units": 1.0,
+                "ledger_status": "settled",
+                "result": "loss",
+                "pnl_units": -1.0,
+                "stake_units": 1.0,
                 "ledger_updated_at_utc": ts,
             }
 
@@ -117,14 +126,18 @@ class TestDriftDetection:
         base = datetime(2024, 1, 1, tzinfo=timezone.utc)
         for i in range(30):
             entries[f"w{i}"] = {
-                "ledger_status": "settled", "result": "win",
-                "pnl_units": 1.0, "stake_units": 1.0,
+                "ledger_status": "settled",
+                "result": "win",
+                "pnl_units": 1.0,
+                "stake_units": 1.0,
                 "ledger_updated_at_utc": (base + timedelta(hours=i)).isoformat(),
             }
         for i in range(14):
             entries[f"l{i}"] = {
-                "ledger_status": "settled", "result": "loss",
-                "pnl_units": -1.0, "stake_units": 1.0,
+                "ledger_status": "settled",
+                "result": "loss",
+                "pnl_units": -1.0,
+                "stake_units": 1.0,
                 "ledger_updated_at_utc": (base + timedelta(hours=30 + i)).isoformat(),
             }
         detector = CUSUMDriftDetector(drift_window=14, min_window=10, kelly_on_drift=0.5)
@@ -143,9 +156,7 @@ class TestLedgerPath:
     def test_file_based_evaluation(self, tmp_path):
         entries = _make_entries(n_wins=30, n_losses=5)
         path = tmp_path / "ledger.json"
-        path.write_text(
-            json.dumps({"entries": entries}), encoding="utf-8"
-        )
+        path.write_text(json.dumps({"entries": entries}), encoding="utf-8")
         detector = CUSUMDriftDetector(threshold=0.15, drift_window=10, min_window=5)
         report = detector.evaluate_ledger_path(path)
         assert isinstance(report, DriftReport)
@@ -175,8 +186,10 @@ class TestRollingAccuracy:
         for i in range(5):
             ts = (now - timedelta(days=30 + i)).isoformat()
             entries[f"old_{i}"] = {
-                "ledger_status": "settled", "result": "win",
-                "pnl_units": 1.0, "stake_units": 1.0,
+                "ledger_status": "settled",
+                "result": "win",
+                "pnl_units": 1.0,
+                "stake_units": 1.0,
                 "ledger_updated_at_utc": ts,
             }
         detector = CUSUMDriftDetector()

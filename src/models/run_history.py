@@ -13,7 +13,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-
 _DEFAULT_JSONL = Path(os.environ.get("REPORTS_DIR", "data/reports")) / "cron_runs.jsonl"
 
 
@@ -95,7 +94,9 @@ def read_last_run(run_type: str, path: Path | None = None) -> dict[str, Any] | N
     return None
 
 
-def runs_since(dt: datetime, run_type: str | None = None, path: Path | None = None) -> list[dict[str, Any]]:
+def runs_since(
+    dt: datetime, run_type: str | None = None, path: Path | None = None
+) -> list[dict[str, Any]]:
     """Return all runs started after *dt* (timezone-aware UTC)."""
     result = []
     for rec in read_recent(500, path=path):

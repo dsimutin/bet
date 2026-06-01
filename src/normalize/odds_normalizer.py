@@ -523,3 +523,41 @@ class OddsNormalizer:
                 results.append(record)
 
         return results
+
+
+# ---------------------------------------------------------------------------
+# Utility function for devigging pairs of odds
+# ---------------------------------------------------------------------------
+
+
+def devig_pair(odds1: float, odds2: float) -> tuple[float, float]:
+    """
+    Devig a pair of odds and return fair probabilities.
+
+    Applies multiplicative devigging to remove bookmaker margin.
+
+    Parameters
+    ----------
+    odds1 : float
+        Decimal odds for outcome 1.
+    odds2 : float
+        Decimal odds for outcome 2.
+
+    Returns
+    -------
+    tuple[float, float]
+        Fair probabilities for outcomes 1 and 2 (sum = 1.0).
+    """
+    if odds1 <= 1.0 or odds2 <= 1.0:
+        raise ValueError(f"Invalid odds: {odds1}, {odds2}")
+
+    # Compute implied probabilities
+    p1 = 1.0 / odds1
+    p2 = 1.0 / odds2
+    overround = p1 + p2
+
+    # Normalize
+    fair_p1 = p1 / overround
+    fair_p2 = p2 / overround
+
+    return fair_p1, fair_p2

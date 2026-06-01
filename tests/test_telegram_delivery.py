@@ -13,10 +13,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_http_error(code: int, body: dict) -> urllib.error.HTTPError:
     raw = json.dumps(body).encode()
@@ -43,6 +43,7 @@ def _make_ok_response(body: dict) -> MagicMock:
 # 1. Env bool parser
 # ---------------------------------------------------------------------------
 
+
 class TestEnvBoolParser:
     """_env_bool must parse true/false strings robustly."""
 
@@ -64,6 +65,7 @@ class TestEnvBoolParser:
 
     def test_scheduler_env_bool(self) -> None:
         from src.services.scheduler import _env_bool
+
         with patch.dict(os.environ, {"ACTIVE_MODE": "true"}):
             assert _env_bool("ACTIVE_MODE") is True
         with patch.dict(os.environ, {"ACTIVE_MODE": "false"}):
@@ -76,6 +78,7 @@ class TestEnvBoolParser:
 # 2. run_telegram_test CLI
 # ---------------------------------------------------------------------------
 
+
 class TestRunTelegramTest:
     """run_telegram_test exit codes and output."""
 
@@ -85,6 +88,7 @@ class TestRunTelegramTest:
             with pytest.raises(SystemExit) as exc:
                 import importlib
                 import src.cron.run_telegram_test as m
+
                 importlib.reload(m)
                 m.main()
             assert exc.value.code == 1
@@ -99,6 +103,7 @@ class TestRunTelegramTest:
                 with pytest.raises(SystemExit) as exc:
                     import importlib
                     import src.cron.run_telegram_test as m
+
                     importlib.reload(m)
                     m.main()
                 assert exc.value.code == 1
@@ -113,6 +118,7 @@ class TestRunTelegramTest:
                 with pytest.raises(SystemExit) as exc:
                     import importlib
                     import src.cron.run_telegram_test as m
+
                     importlib.reload(m)
                     m.main()
                 assert exc.value.code == 2
@@ -123,6 +129,7 @@ class TestRunTelegramTest:
                 with pytest.raises(SystemExit) as exc:
                     import importlib
                     import src.cron.run_telegram_test as m
+
                     importlib.reload(m)
                     m.main()
                 assert exc.value.code == 3
@@ -131,14 +138,19 @@ class TestRunTelegramTest:
         me_resp = _make_ok_response({"ok": True, "result": {"username": "mybot"}})
         send_resp = _make_ok_response({"ok": True, "result": {"message_id": 42}})
         responses = iter([me_resp, send_resp])
-        with patch.dict(os.environ, {
-            "TELEGRAM_BOT_TOKEN": "tok:valid",
-            "TELEGRAM_CHAT_ID": "-100123456",
-        }, clear=False):
+        with patch.dict(
+            os.environ,
+            {
+                "TELEGRAM_BOT_TOKEN": "tok:valid",
+                "TELEGRAM_CHAT_ID": "-100123456",
+            },
+            clear=False,
+        ):
             with patch("urllib.request.urlopen", side_effect=lambda *a, **kw: next(responses)):
                 with pytest.raises(SystemExit) as exc:
                     import importlib
                     import src.cron.run_telegram_test as m
+
                     importlib.reload(m)
                     m.main()
                 assert exc.value.code == 0
@@ -153,25 +165,31 @@ class TestRunTelegramTest:
         err = _make_http_error(400, {"ok": False, "description": "chat not found"})
         me_resp = _make_ok_response({"ok": True, "result": {"username": "bot"}})
         responses = iter([me_resp, err])
-        with patch.dict(os.environ, {
-            "TELEGRAM_BOT_TOKEN": "tok:123",
-            "TELEGRAM_CHAT_ID": "-1001234567890",
-        }, clear=False):
+        with patch.dict(
+            os.environ,
+            {
+                "TELEGRAM_BOT_TOKEN": "tok:123",
+                "TELEGRAM_CHAT_ID": "-1001234567890",
+            },
+            clear=False,
+        ):
             with patch("urllib.request.urlopen", side_effect=lambda *a, **kw: next(responses)):
                 with pytest.raises(SystemExit) as exc:
                     import importlib
                     import src.cron.run_telegram_test as m
+
                     importlib.reload(m)
                     m.main()
                 assert exc.value.code == 2
         out = capsys.readouterr().out
         assert "tok:123" not in out  # token not exposed
-        assert "***7890" in out      # chat id masked
+        assert "***7890" in out  # chat id masked
 
 
 # ---------------------------------------------------------------------------
 # 3. _send_status_report delivery states
 # ---------------------------------------------------------------------------
+
 
 class TestSendStatusReport:
     """_send_status_report returns 'sent'/'dry_run'/'failed'."""
@@ -179,6 +197,7 @@ class TestSendStatusReport:
     def _call(self, env: dict, urlopen_side_effect=None):
         import importlib
         import src.cron.run_active_report as m
+
         importlib.reload(m)
 
         dummy_signals = {"signals_count": 0, "candidates_checked": 0}
@@ -213,13 +232,18 @@ class TestSendStatusReport:
     def test_sent_on_success(self, tmp_path) -> None:
         resp = _make_ok_response({"ok": True, "result": {"message_id": 1}})
         # Reload module inside env context so REPORTS_DIR is picked up from env
-        with patch.dict(os.environ, {
-            "TELEGRAM_BOT_TOKEN": "tok:valid",
-            "TELEGRAM_CHAT_ID": "-1001234",
-            "REPORTS_DIR": str(tmp_path),
-        }, clear=False):
+        with patch.dict(
+            os.environ,
+            {
+                "TELEGRAM_BOT_TOKEN": "tok:valid",
+                "TELEGRAM_CHAT_ID": "-1001234",
+                "REPORTS_DIR": str(tmp_path),
+            },
+            clear=False,
+        ):
             import importlib
             import src.cron.run_active_report as m
+
             importlib.reload(m)
             dummy_signals: dict = {"signals_count": 0, "candidates_checked": 0}
             dummy_settle: dict = {"settled_count": 0, "drift_status": "OK", "kelly_multiplier": 1.0}
@@ -235,15 +259,20 @@ class TestSendStatusReport:
     def test_failed_on_401_no_retry(self, tmp_path) -> None:
         """401 Unauthorized must not be retried."""
         call_count = 0
+
         def side_effect(*a, **kw):
             nonlocal call_count
             call_count += 1
             raise _make_http_error(401, {"ok": False, "description": "Unauthorized"})
 
-        with patch.dict(os.environ, {
-            "TELEGRAM_BOT_TOKEN": "bad:token",
-            "TELEGRAM_CHAT_ID": "-1001234",
-        }, clear=False):
+        with patch.dict(
+            os.environ,
+            {
+                "TELEGRAM_BOT_TOKEN": "bad:token",
+                "TELEGRAM_CHAT_ID": "-1001234",
+            },
+            clear=False,
+        ):
             with patch("src.cron.run_active_report.REPORTS_DIR", tmp_path):
                 status = self._call(
                     {"TELEGRAM_BOT_TOKEN": "bad:token", "TELEGRAM_CHAT_ID": "-1001234"},
@@ -255,15 +284,22 @@ class TestSendStatusReport:
     def test_failed_on_400_no_retry(self, tmp_path) -> None:
         """400 Bad Request must not be retried (e.g. wrong parse_mode)."""
         call_count = 0
+
         def side_effect(*a, **kw):
             nonlocal call_count
             call_count += 1
-            raise _make_http_error(400, {"ok": False, "description": "Bad Request: parse_mode is invalid"})
+            raise _make_http_error(
+                400, {"ok": False, "description": "Bad Request: parse_mode is invalid"}
+            )
 
-        with patch.dict(os.environ, {
-            "TELEGRAM_BOT_TOKEN": "tok:x",
-            "TELEGRAM_CHAT_ID": "-1001234",
-        }, clear=False):
+        with patch.dict(
+            os.environ,
+            {
+                "TELEGRAM_BOT_TOKEN": "tok:x",
+                "TELEGRAM_CHAT_ID": "-1001234",
+            },
+            clear=False,
+        ):
             with patch("src.cron.run_active_report.REPORTS_DIR", tmp_path):
                 status = self._call(
                     {"TELEGRAM_BOT_TOKEN": "tok:x", "TELEGRAM_CHAT_ID": "-1001234"},
@@ -278,14 +314,19 @@ class TestSendStatusReport:
 
         def mock_urlopen(req, *a, **kw):
             import urllib.request as ur
+
             if hasattr(req, "data") and req.data:
                 captured_payloads.append(json.loads(req.data.decode()))
             return _make_ok_response({"ok": True, "result": {"message_id": 99}})
 
-        with patch.dict(os.environ, {
-            "TELEGRAM_BOT_TOKEN": "tok:y",
-            "TELEGRAM_CHAT_ID": "-999",
-        }, clear=False):
+        with patch.dict(
+            os.environ,
+            {
+                "TELEGRAM_BOT_TOKEN": "tok:y",
+                "TELEGRAM_CHAT_ID": "-999",
+            },
+            clear=False,
+        ):
             with patch("src.cron.run_active_report.REPORTS_DIR", tmp_path):
                 with patch("urllib.request.urlopen", side_effect=mock_urlopen):
                     self._call(
@@ -295,47 +336,59 @@ class TestSendStatusReport:
         assert captured_payloads, "No payload captured"
         payload = captured_payloads[0]
         # parse_mode must not be present OR must not be empty string
-        assert payload.get("parse_mode", "NOT_SET") != "", \
-            "parse_mode='' would cause Telegram 400 Bad Request"
+        assert (
+            payload.get("parse_mode", "NOT_SET") != ""
+        ), "parse_mode='' would cause Telegram 400 Bad Request"
 
 
 # ---------------------------------------------------------------------------
 # 4. run_active_report --force
 # ---------------------------------------------------------------------------
 
+
 class TestActiveReportForce:
     def test_force_flag_sends_report(self, tmp_path) -> None:
         """--force should call _send_status_report regardless of ACTIVE_MODE."""
         resp = _make_ok_response({"ok": True, "result": {"message_id": 5}})
-        with patch.dict(os.environ, {
-            "ACTIVE_MODE": "false",
-            "TELEGRAM_BOT_TOKEN": "tok:force",
-            "TELEGRAM_CHAT_ID": "-555",
-            "TELEGRAM_STATUS_REPORTS_ENABLED": "true",
-            "REPORTS_DIR": str(tmp_path),
-            "LEDGER_PATH": str(tmp_path / "ledger.json"),
-            "STAGING_DIR": str(tmp_path),
-            "MODEL_DIR": str(tmp_path),
-        }, clear=False):
+        with patch.dict(
+            os.environ,
+            {
+                "ACTIVE_MODE": "false",
+                "TELEGRAM_BOT_TOKEN": "tok:force",
+                "TELEGRAM_CHAT_ID": "-555",
+                "TELEGRAM_STATUS_REPORTS_ENABLED": "true",
+                "REPORTS_DIR": str(tmp_path),
+                "LEDGER_PATH": str(tmp_path / "ledger.json"),
+                "STAGING_DIR": str(tmp_path),
+                "MODEL_DIR": str(tmp_path),
+            },
+            clear=False,
+        ):
             with patch("urllib.request.urlopen", return_value=resp):
                 import importlib
                 import src.cron.run_active_report as m
+
                 importlib.reload(m)
                 # force=True should not raise
                 m.main(force=True)
 
     def test_dry_run_message_when_no_telegram(self, capsys, tmp_path) -> None:
-        with patch.dict(os.environ, {
-            "TELEGRAM_STATUS_REPORTS_ENABLED": "true",
-            "REPORTS_DIR": str(tmp_path),
-            "LEDGER_PATH": str(tmp_path / "ledger.json"),
-            "STAGING_DIR": str(tmp_path),
-            "MODEL_DIR": str(tmp_path),
-        }, clear=False):
+        with patch.dict(
+            os.environ,
+            {
+                "TELEGRAM_STATUS_REPORTS_ENABLED": "true",
+                "REPORTS_DIR": str(tmp_path),
+                "LEDGER_PATH": str(tmp_path / "ledger.json"),
+                "STAGING_DIR": str(tmp_path),
+                "MODEL_DIR": str(tmp_path),
+            },
+            clear=False,
+        ):
             os.environ.pop("TELEGRAM_BOT_TOKEN", None)
             os.environ.pop("TELEGRAM_CHAT_ID", None)
             import importlib
             import src.cron.run_active_report as m
+
             importlib.reload(m)
             m.main(force=True)
         out = capsys.readouterr().out + capsys.readouterr().err
@@ -347,26 +400,34 @@ class TestActiveReportForce:
 # 5. Scheduler states
 # ---------------------------------------------------------------------------
 
+
 class TestSchedulerStates:
     def test_scheduler_disabled_when_active_mode_false(self) -> None:
         with patch.dict(os.environ, {"ACTIVE_MODE": "false"}, clear=False):
             import importlib
             import src.services.scheduler as sched_mod
+
             importlib.reload(sched_mod)
             # start() should not raise and should not start scheduler
             import asyncio
+
             async def _check():
                 sched_mod.start()
                 # No scheduler should be running
-                return sched_mod._scheduler is None or not getattr(sched_mod._scheduler, "running", False)
+                return sched_mod._scheduler is None or not getattr(
+                    sched_mod._scheduler, "running", False
+                )
+
             result = asyncio.run(_check())
             assert result is True
 
     def test_scheduler_enabled_when_active_mode_true(self) -> None:
         import asyncio
+
         with patch.dict(os.environ, {"ACTIVE_MODE": "true"}, clear=False):
             import importlib
             import src.services.scheduler as sched_mod
+
             importlib.reload(sched_mod)
 
             async def _check():
@@ -378,19 +439,25 @@ class TestSchedulerStates:
 
             running, n_jobs = asyncio.run(_check())
             assert running is True
-            assert n_jobs == 5  # signal_scan, settlement, training_check, active_report, keep_alive
+            assert (
+                n_jobs == 8
+            )  # signal_scan, settlement, today_digest, today_digest_refresh, training_check, keep_alive, tennis_refresh, tennis_retrain
 
     def test_scheduler_logs_next_run_times(self, caplog) -> None:
         import asyncio
         import logging
+
         with patch.dict(os.environ, {"ACTIVE_MODE": "true"}, clear=False):
             import importlib
             import src.services.scheduler as sched_mod
+
             importlib.reload(sched_mod)
             with caplog.at_level(logging.INFO, logger="scheduler"):
+
                 async def _run():
                     sched_mod.start()
                     sched_mod.stop()
+
                 asyncio.run(_run())
         assert "ACTIVE SCHEDULER STARTED" in caplog.text
         assert "next_run=" in caplog.text
@@ -398,13 +465,17 @@ class TestSchedulerStates:
     def test_scheduler_logs_disabled_message(self, caplog) -> None:
         import asyncio
         import logging
+
         with patch.dict(os.environ, {"ACTIVE_MODE": "false"}, clear=False):
             import importlib
             import src.services.scheduler as sched_mod
+
             importlib.reload(sched_mod)
             with caplog.at_level(logging.INFO, logger="scheduler"):
+
                 async def _run():
                     sched_mod.start()
+
                 asyncio.run(_run())
         assert "DISABLED" in caplog.text
 
@@ -413,18 +484,24 @@ class TestSchedulerStates:
 # 6. /health/active endpoint reflects Telegram and scheduler state
 # ---------------------------------------------------------------------------
 
+
 class TestHealthActiveEndpoint:
     def _get_active(self, active_mode: str = "false", tmp_path: Path | None = None) -> dict:
-        with patch.dict(os.environ, {
-            "ACTIVE_MODE": active_mode,
-            "TELEGRAM_BOT_TOKEN": "tok:test" if active_mode == "true" else "",
-            "TELEGRAM_CHAT_ID": "-1001234" if active_mode == "true" else "",
-            "TELEGRAM_STATUS_REPORTS_ENABLED": "true",
-            "TELEGRAM_SIGNAL_ALERTS_ENABLED": "true",
-        }, clear=False):
+        with patch.dict(
+            os.environ,
+            {
+                "ACTIVE_MODE": active_mode,
+                "TELEGRAM_BOT_TOKEN": "tok:test" if active_mode == "true" else "",
+                "TELEGRAM_CHAT_ID": "-1001234" if active_mode == "true" else "",
+                "TELEGRAM_STATUS_REPORTS_ENABLED": "true",
+                "TELEGRAM_SIGNAL_ALERTS_ENABLED": "true",
+            },
+            clear=False,
+        ):
             from fastapi.testclient import TestClient
             import importlib
             import src.web.health_app as ha
+
             importlib.reload(ha)
             client = TestClient(ha.app)
             return client.get("/health/active").json()
@@ -447,6 +524,7 @@ class TestHealthActiveEndpoint:
             from fastapi.testclient import TestClient
             import importlib
             import src.web.health_app as ha
+
             importlib.reload(ha)
             client = TestClient(ha.app)
             data = client.get("/health/active").json()
@@ -454,15 +532,20 @@ class TestHealthActiveEndpoint:
 
     def test_last_delivery_status_from_file(self, tmp_path) -> None:
         status_file = tmp_path / "tg_delivery_status.json"
-        status_file.write_text(json.dumps({
-            "last_status": "sent",
-            "last_at": "2026-05-29T20:00:00+00:00",
-            "last_error": None,
-        }))
+        status_file.write_text(
+            json.dumps(
+                {
+                    "last_status": "sent",
+                    "last_at": "2026-05-29T20:00:00+00:00",
+                    "last_error": None,
+                }
+            )
+        )
         with patch("src.web.health_app.REPORTS_DIR", tmp_path):
             from fastapi.testclient import TestClient
             import importlib
             import src.web.health_app as ha
+
             importlib.reload(ha)
             client = TestClient(ha.app)
             data = client.get("/health/active").json()
@@ -472,6 +555,7 @@ class TestHealthActiveEndpoint:
 # ---------------------------------------------------------------------------
 # 7. /health/readiness degraded states
 # ---------------------------------------------------------------------------
+
 
 class TestHealthReadinessDegraded:
     def _get_readiness(self, env_overrides: dict, tmp_path: Path) -> dict:
@@ -487,17 +571,22 @@ class TestHealthReadinessDegraded:
             from fastapi.testclient import TestClient
             import importlib
             import src.web.health_app as ha
+
             importlib.reload(ha)
             client = TestClient(ha.app)
             return client.get("/health/readiness").json()
 
     def test_degraded_when_failed_telegram_delivery(self, tmp_path) -> None:
         status_file = tmp_path / "tg_delivery_status.json"
-        status_file.write_text(json.dumps({
-            "last_status": "failed",
-            "last_at": "2026-05-29T20:00:00+00:00",
-            "last_error": "http_401: Unauthorized",
-        }))
+        status_file.write_text(
+            json.dumps(
+                {
+                    "last_status": "failed",
+                    "last_at": "2026-05-29T20:00:00+00:00",
+                    "last_error": "http_401: Unauthorized",
+                }
+            )
+        )
         data = self._get_readiness({}, tmp_path)
         assert data.get("degraded") is True
         assert "telegram_delivery" in data["checks"]
@@ -505,26 +594,37 @@ class TestHealthReadinessDegraded:
 
     def test_not_degraded_when_delivery_ok(self, tmp_path) -> None:
         status_file = tmp_path / "tg_delivery_status.json"
-        status_file.write_text(json.dumps({
-            "last_status": "sent",
-            "last_at": "2026-05-29T20:00:00+00:00",
-            "last_error": None,
-        }))
+        status_file.write_text(
+            json.dumps(
+                {
+                    "last_status": "sent",
+                    "last_at": "2026-05-29T20:00:00+00:00",
+                    "last_error": None,
+                }
+            )
+        )
         data = self._get_readiness({}, tmp_path)
         # telegram_delivery check should pass
         assert data["checks"].get("telegram_delivery", {}).get("ready", True) is True
 
     def test_telegram_config_check_when_active_mode(self, tmp_path) -> None:
-        with patch.dict(os.environ, {
-            "ACTIVE_MODE": "true",
-            "TELEGRAM_STATUS_REPORTS_ENABLED": "true",
-        }, clear=False):
-            os.environ.pop("TELEGRAM_BOT_TOKEN", None)
-            os.environ.pop("TELEGRAM_CHAT_ID", None)
-            data = self._get_readiness({
+        with patch.dict(
+            os.environ,
+            {
                 "ACTIVE_MODE": "true",
                 "TELEGRAM_STATUS_REPORTS_ENABLED": "true",
-            }, tmp_path)
+            },
+            clear=False,
+        ):
+            os.environ.pop("TELEGRAM_BOT_TOKEN", None)
+            os.environ.pop("TELEGRAM_CHAT_ID", None)
+            data = self._get_readiness(
+                {
+                    "ACTIVE_MODE": "true",
+                    "TELEGRAM_STATUS_REPORTS_ENABLED": "true",
+                },
+                tmp_path,
+            )
         assert data.get("degraded") is True
         assert "telegram_config" in data["checks"]
         assert data["checks"]["telegram_config"]["ready"] is False

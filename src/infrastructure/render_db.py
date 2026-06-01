@@ -23,10 +23,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Generator
 
-
 # ──────────────────────────────────────────────────────────────────
 # Connection helpers
 # ──────────────────────────────────────────────────────────────────
+
 
 def _is_postgres() -> bool:
     return bool(os.environ.get("DATABASE_URL", "").startswith("postgres"))
@@ -39,9 +39,7 @@ def _pg_cursor() -> Generator:
         import psycopg2
         import psycopg2.extras
     except ImportError as e:
-        raise RuntimeError(
-            "psycopg2-binary not installed. Run: pip install psycopg2-binary"
-        ) from e
+        raise RuntimeError("psycopg2-binary not installed. Run: pip install psycopg2-binary") from e
 
     conn = psycopg2.connect(os.environ["DATABASE_URL"])
     try:
@@ -153,14 +151,15 @@ CREATE TABLE IF NOT EXISTS cron_run_log (
 # Database class
 # ──────────────────────────────────────────────────────────────────
 
+
 class RenderDB:
     """Thin database wrapper — PostgreSQL in prod, SQLite in dev."""
 
     def __init__(self, sqlite_path: Path | None = None) -> None:
         self._postgres = _is_postgres()
-        self._sqlite_path = sqlite_path or Path(
-            os.environ.get("DATA_DIR", "data")
-        ) / "core" / "metadata.db"
+        self._sqlite_path = (
+            sqlite_path or Path(os.environ.get("DATA_DIR", "data")) / "core" / "metadata.db"
+        )
         self._init_schema()
 
     def _init_schema(self) -> None:
@@ -180,6 +179,7 @@ class RenderDB:
         now = datetime.now(timezone.utc).isoformat()
         if self._postgres:
             import psycopg2.extras
+
             with _pg_cursor() as cur:
                 cur.execute(
                     """INSERT INTO model_versions
@@ -236,6 +236,7 @@ class RenderDB:
         now = datetime.now(timezone.utc).isoformat()
         if self._postgres:
             import psycopg2.extras
+
             with _pg_cursor() as cur:
                 cur.execute(
                     """INSERT INTO drift_reports
@@ -291,13 +292,13 @@ class RenderDB:
         now = datetime.now(timezone.utc).isoformat()
         if self._postgres:
             import psycopg2.extras
+
             with _pg_cursor() as cur:
                 cur.execute(
                     """INSERT INTO cron_run_log
                        (job_name, status, duration_s, message, meta_json, started_at)
                        VALUES (%s,%s,%s,%s,%s,%s)""",
-                    (job_name, status, duration_s, message,
-                     psycopg2.extras.Json(meta or {}), now),
+                    (job_name, status, duration_s, message, psycopg2.extras.Json(meta or {}), now),
                 )
         else:
             with _sqlite_cursor(self._sqlite_path) as cur:
@@ -305,8 +306,14 @@ class RenderDB:
                     """INSERT INTO cron_run_log
                        (job_name, status, duration_s, message, meta_json, started_at)
                        VALUES (?,?,?,?,?,?)""",
-                    (job_name, status, duration_s, message,
-                     json.dumps(meta or {}, ensure_ascii=False), now),
+                    (
+                        job_name,
+                        status,
+                        duration_s,
+                        message,
+                        json.dumps(meta or {}, ensure_ascii=False),
+                        now,
+                    ),
                 )
 
     def fetch_last_run(self, job_name: str) -> dict | None:

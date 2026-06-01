@@ -157,9 +157,7 @@ class DailyTrainer:
         train: pd.DataFrame,
         previous: DixonColesModel | None,
     ) -> DixonColesModel:
-        model = previous or DixonColesModel(
-            dc_replace(self.config, league=league)
-        )
+        model = previous or DixonColesModel(dc_replace(self.config, league=league))
         if previous is None:
             model.fit(train, warm_start=False)
         else:
@@ -179,9 +177,7 @@ class DailyTrainer:
         if len(validation_train) < self.config.min_matches or validation.empty:
             raise ValueError("Not enough pre-holdout matches for leakage-free OOS validation")
 
-        validation_model = DixonColesModel(
-            dc_replace(self.config, league=league)
-        )
+        validation_model = DixonColesModel(dc_replace(self.config, league=league))
         validation_model.fit(validation_train, warm_start=False)
 
         probs: list[tuple[float, float, float]] = []

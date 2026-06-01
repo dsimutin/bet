@@ -5,13 +5,17 @@ from __future__ import annotations
 import logging
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, Literal
+
+if TYPE_CHECKING:
+    import pandas as pd
+    from src.models.signal_ledger import SignalLedger
 
 _log = logging.getLogger(__name__)
 
 
 def settle_tennis_from_sackmann(
-    ledger: "SignalLedger",  # noqa: F821
+    ledger: SignalLedger,
     cache_dir: Path,
 ) -> dict[str, Any]:
     """Check open tennis signals against latest ATP results.
@@ -45,9 +49,7 @@ def settle_tennis_from_sackmann(
         generated_at = entry.get("generated_at", entry.get("commence_time", ""))
 
         try:
-            signal_date = datetime.fromisoformat(
-                generated_at.replace("Z", "+00:00")
-            ).date()
+            signal_date = datetime.fromisoformat(generated_at.replace("Z", "+00:00")).date()
         except Exception:
             signal_date = None
 
@@ -58,30 +60,37 @@ def settle_tennis_from_sackmann(
 
         winner = str(match_row.get("winner_name", "")).strip()
         player_won = _names_match(player, winner)
-        result = "win" if player_won else "loss"
+        result: Literal["win", "loss"] = "win" if player_won else "loss"
 
         # Closing odds: use b365w/b365l columns when available
         closing_odds = _pick_closing_odds(match_row, player_won)
         ledger.update_result(signal_id, result=result, closing_odds=closing_odds)
         settled += 1
 
-        results.append({
-            "signal_id": signal_id,
-            "player": player,
-            "opponent": opponent,
-            "result": result,
-            "entry_odds": entry.get("entry_odds"),
-            "closing_odds": closing_odds,
-            "pnl_units": ledger.get(signal_id).get("pnl_units"),
-        })
+        results.append(
+            {
+                "signal_id": signal_id,
+                "player": player,
+                "opponent": opponent,
+                "result": result,
+                "entry_odds": entry.get("entry_odds"),
+                "closing_odds": closing_odds,
+                "pnl_units": ledger.get(signal_id).get("pnl_units"),
+            }
+        )
         _log.info(
             "[tennis_settle] %s vs %s → %s (odds=%.2f)",
-            player, opponent, result, entry.get("entry_odds", 0),
+            player,
+            opponent,
+            result,
+            entry.get("entry_odds", 0),
         )
 
     _log.info(
         "[tennis_settle] Settled=%d unmatched=%d total_open_tennis=%d",
-        settled, unmatched, settled + unmatched,
+        settled,
+        unmatched,
+        settled + unmatched,
     )
     return {
         "settled": settled,
@@ -92,7 +101,7 @@ def settle_tennis_from_sackmann(
 
 
 def _find_match(
-    df: "pd.DataFrame",  # noqa: F821
+    df: pd.DataFrame,
     player: str,
     opponent: str,
     signal_date: date | None,
@@ -106,9 +115,9 @@ def _find_match(
         cutoff_start = signal_date - timedelta(days=1)
         cutoff_end = signal_date + timedelta(days=window_days)
         mask = (
-            (df["match_date"].notna()) &
-            (df["match_date"].dt.date >= cutoff_start) &
-            (df["match_date"].dt.date <= cutoff_end)
+            (df["match_date"].notna())
+            & (df["match_date"].dt.date >= cutoff_start)
+            & (df["match_date"].dt.date <= cutoff_end)
         )
         sub = df[mask]
     else:
@@ -160,18 +169,20 @@ def _pick_closing_odds(row: dict[str, Any], player_won: bool) -> float | None:
         for col in ("b365w", "psw"):
             val = row.get(col)
             try:
-                f = float(val)
-                if f > 1.0:
-                    return f
+                if val is not None:
+                    f = float(val)
+                    if f > 1.0:
+                        return f
             except (TypeError, ValueError):
                 pass
     else:
         for col in ("b365l", "psl"):
             val = row.get(col)
             try:
-                f = float(val)
-                if f > 1.0:
-                    return f
+                if val is not None:
+                    f = float(val)
+                    if f > 1.0:
+                        return f
             except (TypeError, ValueError):
                 pass
     return None
@@ -198,8 +209,7 @@ def format_settlement_telegram(results: list[dict[str, Any]]) -> str:
         else:
             pnl_str = f"−{stake_rub} ₽"
         lines.append(
-            f"{icon} <b>{r['player']}</b> vs {r['opponent']}\n"
-            f"   Ставка @ {odds} → {pnl_str}"
+            f"{icon} <b>{r['player']}</b> vs {r['opponent']}\n" f"   Ставка @ {odds} → {pnl_str}"
         )
 
     pnl_sign = "+" if total_pnl >= 0 else ""

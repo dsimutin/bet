@@ -54,6 +54,7 @@ ACTIVE_MODE = _env_bool("ACTIVE_MODE", False)
 # Lifespan: start/stop APScheduler when ACTIVE_MODE=true
 # ──────────────────────────────────────────────────────────────────
 
+
 def _log_startup_env() -> None:
     """Log env var presence at startup — safe (no secret values)."""
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
@@ -61,10 +62,14 @@ def _log_startup_env() -> None:
     masked = ("***" + chat_id[-4:]) if len(chat_id) >= 4 else ("***" if chat_id else "(empty)")
     _log.info("=== STARTUP DIAGNOSTICS ===")
     _log.info("ACTIVE_MODE=%s", os.environ.get("ACTIVE_MODE", "false"))
-    _log.info("TELEGRAM_STATUS_REPORTS_ENABLED=%s",
-              os.environ.get("TELEGRAM_STATUS_REPORTS_ENABLED", "true"))
-    _log.info("TELEGRAM_SIGNAL_ALERTS_ENABLED=%s",
-              os.environ.get("TELEGRAM_SIGNAL_ALERTS_ENABLED", "true"))
+    _log.info(
+        "TELEGRAM_STATUS_REPORTS_ENABLED=%s",
+        os.environ.get("TELEGRAM_STATUS_REPORTS_ENABLED", "true"),
+    )
+    _log.info(
+        "TELEGRAM_SIGNAL_ALERTS_ENABLED=%s",
+        os.environ.get("TELEGRAM_SIGNAL_ALERTS_ENABLED", "true"),
+    )
     _log.info("TELEGRAM_BOT_TOKEN_PRESENT=%s", bool(token))
     _log.info("TELEGRAM_BOT_TOKEN_LENGTH=%d", len(token))
     _log.info("TELEGRAM_CHAT_ID_PRESENT=%s", bool(chat_id))
@@ -80,6 +85,7 @@ def _has_production_models() -> bool:
     for f in MODEL_DIR.glob("dc_*.meta.json"):
         try:
             import json as _json
+
             meta = _json.loads(f.read_text(encoding="utf-8"))
             if meta.get("status") == "production":
                 return True
@@ -96,6 +102,7 @@ def _bootstrap_models_in_background() -> None:
         _log.info("[health_app] No production models found — running bootstrap training")
         try:
             from src.cron import run_trainer
+
             run_trainer.main()
             _log.info("[health_app] Bootstrap training complete")
         except Exception as exc:
@@ -108,16 +115,19 @@ def _bootstrap_models_in_background() -> None:
 def _send_startup_telegram(msg: str) -> None:
     """Send a plain-text message to Telegram. Fires-and-forgets; never raises."""
     import urllib.request
+
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
     chat_id = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
     if not token or not chat_id:
         return
     try:
-        payload = json.dumps({
-            "chat_id": chat_id,
-            "text": msg,
-            "disable_web_page_preview": True,
-        }).encode("utf-8")
+        payload = json.dumps(
+            {
+                "chat_id": chat_id,
+                "text": msg,
+                "disable_web_page_preview": True,
+            }
+        ).encode("utf-8")
         req = urllib.request.Request(
             f"https://api.telegram.org/bot{token}/sendMessage",
             data=payload,
@@ -136,10 +146,13 @@ async def lifespan(fastapi_app: FastAPI):
     if ACTIVE_MODE:
         # Bootstrap: train models on first deploy if none exist
         if not _has_production_models():
-            _log.info("[health_app] No production models — starting bootstrap training in background")
+            _log.info(
+                "[health_app] No production models — starting bootstrap training in background"
+            )
             _bootstrap_models_in_background()
         try:
             from src.services.scheduler import start as scheduler_start
+
             scheduler_start()
             _log.info("[health_app] Active mode scheduler started OK")
         except Exception as exc:
@@ -151,6 +164,7 @@ async def lifespan(fastapi_app: FastAPI):
     if ACTIVE_MODE:
         try:
             from src.services.scheduler import stop as scheduler_stop
+
             scheduler_stop()
         except Exception:
             pass
@@ -172,6 +186,7 @@ def _utcnow() -> str:
 # /health — liveness
 # ──────────────────────────────────────────────────────────────────
 
+
 @app.get("/health")
 def health():
     return {"status": "ok", "ts": _utcnow()}
@@ -180,6 +195,7 @@ def health():
 # ──────────────────────────────────────────────────────────────────
 # /health/ledger
 # ──────────────────────────────────────────────────────────────────
+
 
 @app.get("/health/ledger")
 def health_ledger():
@@ -218,6 +234,7 @@ def health_ledger():
 # /health/model
 # ──────────────────────────────────────────────────────────────────
 
+
 @app.get("/health/model")
 def health_model():
     meta_files = sorted(glob(str(MODEL_DIR / "dc_*.meta.json")))
@@ -254,6 +271,7 @@ def health_model():
 # /health/drift
 # ──────────────────────────────────────────────────────────────────
 
+
 @app.get("/health/drift")
 def health_drift():
     drift_path = REPORTS_DIR / "drift_report.json"
@@ -286,6 +304,7 @@ def health_drift():
 # /health/disk
 # ──────────────────────────────────────────────────────────────────
 
+
 @app.get("/health/disk")
 def health_disk():
     def _mb(p: Path) -> float:
@@ -308,6 +327,7 @@ def health_disk():
 # /health/readiness — deep readiness for signal generation
 # ──────────────────────────────────────────────────────────────────
 
+
 @app.get("/health/readiness")
 def health_readiness():
     """Check whether the system is ready to generate and deliver signals."""
@@ -315,13 +335,16 @@ def health_readiness():
 
     # 1. Production model exists
     meta_files = sorted(glob(str(MODEL_DIR / "dc_*.meta.json")))
-    prod_models = [p for p in meta_files
-                   if json.loads(Path(p).read_text())
-                   .get("status") == "production"]
+    prod_models = [
+        p for p in meta_files if json.loads(Path(p).read_text()).get("status") == "production"
+    ]
     checks["model"] = {
         "ready": bool(prod_models),
-        "detail": f"{len(prod_models)} production model(s) found" if prod_models
-                  else "No production model — run daily-trainer cron first",
+        "detail": (
+            f"{len(prod_models)} production model(s) found"
+            if prod_models
+            else "No production model — run daily-trainer cron first"
+        ),
     }
 
     # 2. Ledger exists
@@ -335,8 +358,11 @@ def health_readiness():
     staging_files = list(staging_dir.glob("*.csv")) if staging_dir.exists() else []
     checks["staging_data"] = {
         "ready": bool(staging_files),
-        "detail": f"{len(staging_files)} CSV file(s) in staging" if staging_files
-                  else "No staged data — run daily-trainer cron first",
+        "detail": (
+            f"{len(staging_files)} CSV file(s) in staging"
+            if staging_files
+            else "No staged data — run daily-trainer cron first"
+        ),
     }
 
     # 4. Telegram bot configured
@@ -344,22 +370,31 @@ def health_readiness():
     tg_chat = bool(os.environ.get("TELEGRAM_CHAT_ID"))
     checks["telegram_bot"] = {
         "ready": tg_token and tg_chat,
-        "detail": "Configured" if (tg_token and tg_chat)
-                  else "Missing TELEGRAM_BOT_TOKEN and/or TELEGRAM_CHAT_ID (dry-run mode only)",
+        "detail": (
+            "Configured"
+            if (tg_token and tg_chat)
+            else "Missing TELEGRAM_BOT_TOKEN and/or TELEGRAM_CHAT_ID (dry-run mode only)"
+        ),
     }
 
     # 5. Odds provider configured
     odds_key = bool(os.environ.get("THE_ODDS_API_KEY"))
     checks["odds_provider"] = {
         "ready": odds_key,
-        "detail": "THE_ODDS_API_KEY set" if odds_key
-                  else "No THE_ODDS_API_KEY — signals will use staged data only",
+        "detail": (
+            "THE_ODDS_API_KEY set"
+            if odds_key
+            else "No THE_ODDS_API_KEY — signals will use staged data only"
+        ),
     }
 
     # 6. Last cron run timestamps from reports
     def _last_report(pattern: str) -> str | None:
-        files = sorted((DATA_DIR / "reports").glob(pattern), reverse=True) \
-                if (DATA_DIR / "reports").exists() else []
+        files = (
+            sorted((DATA_DIR / "reports").glob(pattern), reverse=True)
+            if (DATA_DIR / "reports").exists()
+            else []
+        )
         return files[0].name if files else None
 
     checks["last_settlement"] = {
@@ -379,7 +414,11 @@ def health_readiness():
             drift_ok = not drift.get("drift_detected", False)
             checks["drift"] = {
                 "ready": drift_ok,
-                "detail": "No drift" if drift_ok else f"Drift detected — kelly={drift.get('kelly_multiplier')}",
+                "detail": (
+                    "No drift"
+                    if drift_ok
+                    else f"Drift detected — kelly={drift.get('kelly_multiplier')}"
+                ),
             }
         except Exception:
             checks["drift"] = {"ready": True, "detail": "drift_report unreadable"}
@@ -391,29 +430,39 @@ def health_readiness():
         sched_running = False
         try:
             from src.services.scheduler import get_scheduler
+
             sched_running = get_scheduler().running
         except Exception:
             pass
         checks["scheduler"] = {
             "ready": sched_running,
-            "detail": "Scheduler running" if sched_running
-                      else "ACTIVE_MODE=true but scheduler not running — check startup logs",
+            "detail": (
+                "Scheduler running"
+                if sched_running
+                else "ACTIVE_MODE=true but scheduler not running — check startup logs"
+            ),
         }
 
     # 9. Telegram config required when status reports enabled
     status_reports_on = _env_bool("TELEGRAM_STATUS_REPORTS_ENABLED", True)
     if ACTIVE_MODE and status_reports_on:
-        tg_ok = bool(os.environ.get("TELEGRAM_BOT_TOKEN")) and bool(os.environ.get("TELEGRAM_CHAT_ID"))
+        tg_ok = bool(os.environ.get("TELEGRAM_BOT_TOKEN")) and bool(
+            os.environ.get("TELEGRAM_CHAT_ID")
+        )
         checks["telegram_config"] = {
             "ready": tg_ok,
-            "detail": "Telegram configured" if tg_ok
-                      else "Status reports enabled but TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID missing",
+            "detail": (
+                "Telegram configured"
+                if tg_ok
+                else "Status reports enabled but TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID missing"
+            ),
         }
 
     # 10. Active report overdue (> 4 hours since last run)
     if ACTIVE_MODE:
         try:
             from src.models.run_history import read_last_run
+
             last = read_last_run("active_report")
             if last:
                 last_dt = datetime.fromisoformat(last["started_at"].replace("Z", "+00:00"))
@@ -421,10 +470,14 @@ def health_readiness():
                 overdue = age_h > 4.0
                 checks["active_report_freshness"] = {
                     "ready": not overdue,
-                    "detail": f"Last report {age_h:.1f}h ago" + (" — OVERDUE (>4h)" if overdue else ""),
+                    "detail": f"Last report {age_h:.1f}h ago"
+                    + (" — OVERDUE (>4h)" if overdue else ""),
                 }
             else:
-                checks["active_report_freshness"] = {"ready": True, "detail": "no report yet (ok on first run)"}
+                checks["active_report_freshness"] = {
+                    "ready": True,
+                    "detail": "no report yet (ok on first run)",
+                }
         except Exception:
             pass
 
@@ -436,9 +489,7 @@ def health_readiness():
             "detail": f"Last Telegram delivery failed: {tg_delivery.get('last_error', 'unknown')}",
         }
 
-    ready_for_signals = all(
-        checks[k]["ready"] for k in ("model", "ledger", "staging_data")
-    )
+    ready_for_signals = all(checks[k]["ready"] for k in ("model", "ledger", "staging_data"))
     degraded = not all(c.get("ready", True) for c in checks.values())
 
     return {
@@ -452,6 +503,7 @@ def health_readiness():
 # ──────────────────────────────────────────────────────────────────
 # /health/active — active monitoring status
 # ──────────────────────────────────────────────────────────────────
+
 
 def _read_tg_delivery_status() -> dict:
     """Read last Telegram delivery status from disk."""
@@ -477,6 +529,7 @@ def health_active():
     if active_enabled:
         try:
             from src.services.scheduler import get_scheduler
+
             sched = get_scheduler()
             scheduler_running = sched.running
             if scheduler_running:
@@ -498,6 +551,7 @@ def health_active():
 
     try:
         from src.models.run_history import read_recent, read_last_run
+
         records = read_recent(500)
 
         for run_type in run_types:
@@ -555,7 +609,9 @@ def health_active():
 
     # Data freshness (last staging CSV mtime)
     data_freshness: str | None = None
-    staging_csvs = sorted((DATA_DIR / "staging").glob("*.csv")) if (DATA_DIR / "staging").exists() else []
+    staging_csvs = (
+        sorted((DATA_DIR / "staging").glob("*.csv")) if (DATA_DIR / "staging").exists() else []
+    )
     if staging_csvs:
         try:
             mtime = max(f.stat().st_mtime for f in staging_csvs)
@@ -594,6 +650,7 @@ def health_active():
 # /health/all — combined (для Render dashboard / внешних мониторов)
 # ──────────────────────────────────────────────────────────────────
 
+
 @app.get("/health/all")
 def health_all():
     ledger = health_ledger()
@@ -631,6 +688,7 @@ def health_all():
 # /trigger — ручной запуск отчёта (для отладки и первого теста)
 # ──────────────────────────────────────────────────────────────────
 
+
 @app.post("/trigger")
 def trigger_report():
     """Немедленно запустить active report и отправить в Telegram.
@@ -645,6 +703,7 @@ def trigger_report():
     def _run():
         try:
             from src.cron.run_active_report import main as report_main
+
             report_main(force=True)
         except Exception as exc:
             _log.error("[trigger] report failed: %s", exc)
@@ -685,6 +744,7 @@ def debug_tennis():
 
     try:
         from src.signals.tennis_signal_scan import scan_tennis_debug
+
         result = scan_tennis_debug(model_path=model_path, api_key=api_key)
         return {
             "ts": _utcnow(),
@@ -710,12 +770,14 @@ def trigger_tennis_scan():
         try:
             from pathlib import Path
             from src.cron.run_signals import _run_tennis
+
             model_dir = Path(os.environ.get("MODEL_DIR", "data/models"))
             signals = _run_tennis(model_dir)
             _log.info("[trigger/tennis-scan] Done: %d signals", len(signals))
             if signals:
                 from src.cron.run_signals import _notify_telegram
                 from datetime import date
+
                 _notify_telegram(signals, date.today())
             else:
                 _log.warning("[trigger/tennis-scan] 0 signals — check /debug/tennis-raw")
@@ -753,8 +815,11 @@ def debug_tennis_raw():
         req = _urllib.Request(url, headers={"User-Agent": "bet-analytics/1.0"})
         with _urllib.urlopen(req, timeout=15) as resp:
             all_sports = _json.loads(resp.read())
-        tennis_sports = [s for s in all_sports if "tennis" in s.get("key", "").lower()
-                         or "tennis" in s.get("title", "").lower()]
+        tennis_sports = [
+            s
+            for s in all_sports
+            if "tennis" in s.get("key", "").lower() or "tennis" in s.get("title", "").lower()
+        ]
         results["available_tennis_sports"] = tennis_sports
         results["total_active_sports"] = len([s for s in all_sports if s.get("active")])
     except Exception as exc:
@@ -808,6 +873,7 @@ def trigger_morning_digest():
     def _run():
         try:
             from src.cron.run_active_report import send_morning_digest
+
             send_morning_digest()
         except Exception as exc:
             _log.exception("[trigger/morning-digest] failed: %s", exc)
@@ -824,12 +890,14 @@ def trigger_morning_digest():
 # Telegram bot webhook
 # ──────────────────────────────────────────────────────────────────
 
+
 @app.post("/webhook/telegram")
 async def telegram_webhook(request: Request):
     """Telegram sends all updates here. Register with /webhook/telegram/setup."""
     try:
         update = await request.json()
         import threading
+
         threading.Thread(
             target=_handle_bot_update,
             args=(update,),
@@ -843,6 +911,7 @@ async def telegram_webhook(request: Request):
 def _handle_bot_update(update: dict) -> None:
     try:
         from src.web.telegram_bot import handle_update
+
         handle_update(update)
     except Exception as exc:
         _log.exception("[webhook] handle_update failed: %s", exc)
@@ -855,6 +924,7 @@ def telegram_webhook_setup():
     curl -X POST https://your-app.onrender.com/webhook/telegram/setup
     """
     from src.web.telegram_bot import setup_webhook, get_webhook_info
+
     app_url = os.environ.get("RENDER_EXTERNAL_URL", "").strip()
     if not app_url:
         return JSONResponse(
@@ -872,6 +942,7 @@ def telegram_webhook_info():
     curl https://your-app.onrender.com/webhook/telegram/info
     """
     from src.web.telegram_bot import get_webhook_info
+
     return {"webhook_info": get_webhook_info(), "ts": _utcnow()}
 
 
@@ -898,8 +969,7 @@ def debug_odds_sports():
             "total": len(sports),
             "active": len(active),
             "active_sports": [
-                {"key": s["key"], "title": s.get("title"), "group": s.get("group")}
-                for s in active
+                {"key": s["key"], "title": s.get("title"), "group": s.get("group")} for s in active
             ],
             "ts": _utcnow(),
         }

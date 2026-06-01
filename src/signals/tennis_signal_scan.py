@@ -25,11 +25,16 @@ _log = logging.getLogger(__name__)
 _ODDS_API_BASE = "https://api.the-odds-api.com/v4"
 # Static fallback keys — overridden at runtime by _discover_tennis_keys()
 _TENNIS_SPORT_KEYS_FALLBACK = [
-    "tennis_atp_french_open", "tennis_wta_french_open",
-    "tennis_atp_wimbledon",   "tennis_wta_wimbledon",
-    "tennis_atp_us_open",     "tennis_wta_us_open",
-    "tennis_atp_aus_open",    "tennis_wta_aus_open",
-    "tennis_atp",             "tennis_wta",
+    "tennis_atp_french_open",
+    "tennis_wta_french_open",
+    "tennis_atp_wimbledon",
+    "tennis_wta_wimbledon",
+    "tennis_atp_us_open",
+    "tennis_wta_us_open",
+    "tennis_atp_aus_open",
+    "tennis_wta_aus_open",
+    "tennis_atp",
+    "tennis_wta",
 ]
 _DEFAULT_EDGE_THRESHOLD = 0.8  # minimum edge % to emit a signal
 _DEFAULT_MIN_ODDS = 1.25
@@ -43,6 +48,7 @@ _GRAND_SLAM_KEYWORDS = ["roland garros", "french open", "wimbledon", "us open", 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def scan_tennis_signals(
     model_path: Path,
@@ -66,7 +72,8 @@ def scan_tennis_signals(
         elo_model = TennisEloModel.load(model_path)
         _log.info(
             "[tennis] Loaded ELO model: %d players, %d matches",
-            elo_model.params.n_players, elo_model.params.n_matches,
+            elo_model.params.n_players,
+            elo_model.params.n_matches,
         )
     except Exception as exc:
         _log.warning("[tennis] Failed to load ELO model: %s", exc)
@@ -84,15 +91,19 @@ def scan_tennis_signals(
 
     # Build rankings-based name resolver (ATP + WTA) and rank lookup
     _name_resolver: dict[str, str] = {}
-    _rank_lookup: dict[str, int] = {}   # full_name → current rank
+    _rank_lookup: dict[str, int] = {}  # full_name → current rank
     try:
         from src.ingest.atp_rankings import build_name_resolver, get_rankings
+
         _name_resolver = build_name_resolver(top_n=300)
         for tour in ("atp", "wta"):
             for row in get_rankings(top_n=300, tour=tour):
                 _rank_lookup[row["full_name"]] = row["rank"]
-        _log.info("[tennis] Name resolver: %d entries, rank lookup: %d players",
-                  len(_name_resolver), len(_rank_lookup))
+        _log.info(
+            "[tennis] Name resolver: %d entries, rank lookup: %d players",
+            len(_name_resolver),
+            len(_rank_lookup),
+        )
     except Exception as exc:
         _log.debug("[tennis] Rankings unavailable: %s", exc)
 
@@ -100,6 +111,7 @@ def scan_tennis_signals(
     if markov_model is not None:
         try:
             from src.ingest.tennis_abstract import fetch_serve_stats
+
             live_stats = fetch_serve_stats()
             if live_stats:
                 markov_model.inject_live_serve_stats(live_stats)
@@ -149,40 +161,51 @@ def scan_tennis_signals(
                 missing.append(player1)
             if not p2_known:
                 missing.append(player2)
-            _log.debug("[tennis] Skipping %s vs %s — insufficient data: %s", player1, player2, missing)
+            _log.debug(
+                "[tennis] Skipping %s vs %s — insufficient data: %s", player1, player2, missing
+            )
             skipped_no_data += 1
             continue
 
         # Skip if either player retired recently (injury risk)
         if model.retired_recently(player1) or model.retired_recently(player2):
             injured = [p for p in [player1, player2] if model.retired_recently(p)]
-            _log.debug("[tennis] Skipping %s vs %s — recent retirement: %s", player1, player2, injured)
+            _log.debug(
+                "[tennis] Skipping %s vs %s — recent retirement: %s", player1, player2, injured
+            )
             skipped_no_data += 1
             continue
 
         # Capper consensus (passive enrichment, does not filter signals)
         from src.ingest.capper_consensus import get_capper_consensus
+
         consensus_p1 = get_capper_consensus(player1, player2)
         consensus_p2 = get_capper_consensus(player2, player1)
 
         # Markov model (primary when serve data available) + ELO (always)
-        elo_breakdown = model.predict_proba_breakdown(player1, player2, surface)
-        elo_breakdown["surface"] = surface
+        elo_breakdown_dict: dict[str, Any] = {
+            **model.predict_proba_breakdown(player1, player2, surface),
+            "surface": surface,
+        }
 
         if markov_model is not None:
             markov_bd = markov_model.predict_proba_breakdown(player1, player2, surface, best_of)
             if markov_bd["markov_prob"] is not None:
                 # Both models agree on direction → higher confidence
                 model_prob_p1 = markov_bd["prob"]
-                breakdown = {**elo_breakdown, "markov_prob": markov_bd["markov_prob"],
-                             "p1_serve": markov_bd["p1_serve"], "p2_serve": markov_bd["p2_serve"],
-                             "model_source": "markov+elo"}
+                breakdown = {
+                    **elo_breakdown_dict,
+                    "markov_prob": markov_bd["markov_prob"],
+                    "p1_serve": markov_bd["p1_serve"],
+                    "p2_serve": markov_bd["p2_serve"],
+                    "model_source": "markov+elo",
+                }
             else:
-                model_prob_p1 = elo_breakdown["final_prob"]
-                breakdown = {**elo_breakdown, "model_source": "elo_only"}
+                model_prob_p1 = elo_breakdown_dict["final_prob"]
+                breakdown = {**elo_breakdown_dict, "model_source": "elo_only"}
         else:
-            model_prob_p1 = elo_breakdown["final_prob"]
-            breakdown = {**elo_breakdown, "model_source": "elo_only"}
+            model_prob_p1 = elo_breakdown_dict["final_prob"]
+            breakdown = {**elo_breakdown_dict, "model_source": "elo_only"}
 
         # Context for signal enrichment
         context = {
@@ -232,7 +255,11 @@ def scan_tennis_signals(
     duration = time.perf_counter() - t0
     _log.info(
         "[tennis] Scan done: %d signals, %d events, %d skipped_no_data, %d no_bookmakers in %.1fs",
-        len(signals), len(events), skipped_no_data, events_no_bookmakers, duration,
+        len(signals),
+        len(events),
+        skipped_no_data,
+        events_no_bookmakers,
+        duration,
     )
     return {
         "sport": "tennis",
@@ -254,6 +281,7 @@ def scan_tennis_signals(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _deduplicate_signals(signals: list[dict]) -> list[dict]:
     """Keep one signal per (event_id, player) — the bookmaker with highest edge.
@@ -365,45 +393,55 @@ def _check_event(
                 form = ctx.get("p1_form" if is_p1 else "p2_form")
                 p_rank = ctx.get("p1_rank" if is_p1 else "p2_rank")
                 opp_rank = ctx.get("p2_rank" if is_p1 else "p1_rank")
-                signals.append({
-                    "signal_id": f"ten_{event_id[:8]}_{book_key}_{player[:4].replace(' ', '')}",
-                    "sport": "tennis",
-                    "tour": "ATP" if "atp" in event.get("_sport_key", "atp") else "WTA",
-                    "player": player,
-                    "opponent": opponent,
-                    "surface": breakdown.get("surface", "hard"),
-                    "event_id": event_id,
-                    "commence_time": commence,
-                    "bookmaker": book_key,
-                    "entry_odds": round(entry_odds, 3),
-                    "opening_odds": round(entry_odds, 3),
-                    "model_prob": round(model_prob, 4),
-                    "market_prob": round(fair_prob, 4),
-                    "edge_pct": round(edge_pct, 2),
-                    "reference_fair_odds": round(fair_model_odds, 3),
-                    # V2 breakdown
-                    "elo_prob": round(breakdown["elo_prob"] if is_p1 else 1.0 - breakdown["elo_prob"], 4),
-                    "serve_adj": round(breakdown.get("serve_adj", 0.0) * (1 if is_p1 else -1), 4),
-                    "h2h_adj": round(breakdown.get("h2h_adj", 0.0) * (1 if is_p1 else -1), 4),
-                    "days_since_last_match": days_rest,
-                    "opp_days_since_last_match": opp_days_rest,
-                    "serve_win_pct": round(serve_pct, 3) if serve_pct is not None else None,
-                    "hold_pct": round(hold_pct, 3) if hold_pct is not None else None,
-                    "recent_form": round(form, 3) if form is not None else None,
-                    "markov_prob": breakdown.get("markov_prob"),
-                    "p_serve": breakdown.get("p1_serve") if is_p1 else breakdown.get("p2_serve"),
-                    "best_of": best_of,
-                    "model_source": breakdown.get("model_source", "elo_only"),
-                    "rank": p_rank,
-                    "opp_rank": opp_rank,
-                    "capper_support": (ctx.get("consensus_p1") if is_p1 else ctx.get("consensus_p2") or {}).get("support"),
-                    "capper_tips": (ctx.get("consensus_p1") if is_p1 else ctx.get("consensus_p2") or {}).get("n_tips", 0),
-                    "capper_avg_odds": (ctx.get("consensus_p1") if is_p1 else ctx.get("consensus_p2") or {}).get("avg_odds"),
-                    "steam_move_detected": False,
-                    "status": "paper",
-                    "generated_at": datetime.now(timezone.utc).isoformat(),
-                    "dataset_hash": getattr(getattr(model, "params", None), "dataset_hash", "tennis_elo_v2"),
-                })
+                signals.append(
+                    {
+                        "signal_id": f"ten_{event_id[:8]}_{book_key}_{player[:4].replace(' ', '')}",
+                        "sport": "tennis",
+                        "tour": "ATP" if "atp" in event.get("_sport_key", "atp") else "WTA",
+                        "player": player,
+                        "opponent": opponent,
+                        "surface": breakdown.get("surface", "hard"),
+                        "event_id": event_id,
+                        "commence_time": commence,
+                        "bookmaker": book_key,
+                        "entry_odds": round(entry_odds, 3),
+                        "opening_odds": round(entry_odds, 3),
+                        "model_prob": round(model_prob, 4),
+                        "market_prob": round(fair_prob, 4),
+                        "edge_pct": round(edge_pct, 2),
+                        "reference_fair_odds": round(fair_model_odds, 3),
+                        # V2 breakdown
+                        "elo_prob": round(
+                            breakdown["elo_prob"] if is_p1 else 1.0 - breakdown["elo_prob"], 4
+                        ),
+                        "serve_adj": round(
+                            breakdown.get("serve_adj", 0.0) * (1 if is_p1 else -1), 4
+                        ),
+                        "h2h_adj": round(breakdown.get("h2h_adj", 0.0) * (1 if is_p1 else -1), 4),
+                        "days_since_last_match": days_rest,
+                        "opp_days_since_last_match": opp_days_rest,
+                        "serve_win_pct": round(serve_pct, 3) if serve_pct is not None else None,
+                        "hold_pct": round(hold_pct, 3) if hold_pct is not None else None,
+                        "recent_form": round(form, 3) if form is not None else None,
+                        "markov_prob": breakdown.get("markov_prob"),
+                        "p_serve": (
+                            breakdown.get("p1_serve") if is_p1 else breakdown.get("p2_serve")
+                        ),
+                        "best_of": best_of,
+                        "model_source": breakdown.get("model_source", "elo_only"),
+                        "rank": p_rank,
+                        "opp_rank": opp_rank,
+                        "capper_support": (ctx.get("consensus_p1") if is_p1 else ctx.get("consensus_p2") or {}).get("support"),  # type: ignore[union-attr]
+                        "capper_tips": (ctx.get("consensus_p1") if is_p1 else ctx.get("consensus_p2") or {}).get("n_tips", 0),  # type: ignore[union-attr]
+                        "capper_avg_odds": (ctx.get("consensus_p1") if is_p1 else ctx.get("consensus_p2") or {}).get("avg_odds"),  # type: ignore[union-attr]
+                        "steam_move_detected": False,
+                        "status": "paper",
+                        "generated_at": datetime.now(timezone.utc).isoformat(),
+                        "dataset_hash": getattr(
+                            getattr(model, "params", None), "dataset_hash", "tennis_elo_v2"
+                        ),
+                    }
+                )
 
     return signals
 
@@ -441,10 +479,16 @@ def _generate_alt_market_signals(
         # Determine surface + best_of from event title
         surface = _infer_surface_from_event(event)
         sport_key = event.get("_sport_key", "")
-        best_of = 5 if any(k in sport_key for k in ("french_open", "wimbledon", "us_open", "aus_open")) else 3
+        best_of = (
+            5
+            if any(k in sport_key for k in ("french_open", "wimbledon", "us_open", "aus_open"))
+            else 3
+        )
 
-        if not (markov_model.has_enough_data(player1, min_matches=5) and
-                markov_model.has_enough_data(player2, min_matches=5)):
+        if not (
+            markov_model.has_enough_data(player1, min_matches=5)
+            and markov_model.has_enough_data(player2, min_matches=5)
+        ):
             continue
 
         for bookmaker in event.get("bookmakers", []):
@@ -453,17 +497,43 @@ def _generate_alt_market_signals(
                 mkt_key = market.get("key", "")
                 if mkt_key == "spreads":
                     _process_spreads(
-                        market, player1, player2, player1_raw, player2_raw,
-                        event_id, commence, surface, best_of, book_key,
-                        sport_key, markov_model, edge_threshold, min_odds, max_odds,
-                        dataset_hash, signals,
+                        market,
+                        player1,
+                        player2,
+                        player1_raw,
+                        player2_raw,
+                        event_id,
+                        commence,
+                        surface,
+                        best_of,
+                        book_key,
+                        sport_key,
+                        markov_model,
+                        edge_threshold,
+                        min_odds,
+                        max_odds,
+                        dataset_hash,
+                        signals,
                     )
                 elif mkt_key == "totals":
                     _process_totals(
-                        market, player1, player2, player1_raw, player2_raw,
-                        event_id, commence, surface, best_of, book_key,
-                        sport_key, markov_model, edge_threshold, min_odds, max_odds,
-                        dataset_hash, signals,
+                        market,
+                        player1,
+                        player2,
+                        player1_raw,
+                        player2_raw,
+                        event_id,
+                        commence,
+                        surface,
+                        best_of,
+                        book_key,
+                        sport_key,
+                        markov_model,
+                        edge_threshold,
+                        min_odds,
+                        max_odds,
+                        dataset_hash,
+                        signals,
                     )
 
     return signals
@@ -484,15 +554,27 @@ def _infer_surface_from_event(event: dict[str, Any]) -> str:
 
 
 def _process_spreads(
-    market: dict, player1: str, player2: str,
-    player1_raw: str, player2_raw: str,
-    event_id: str, commence: str, surface: str, best_of: int,
-    book_key: str, sport_key: str, model: Any,
-    edge_threshold: float, min_odds: float, max_odds: float,
-    dataset_hash: str, signals: list,
+    market: dict,
+    player1: str,
+    player2: str,
+    player1_raw: str,
+    player2_raw: str,
+    event_id: str,
+    commence: str,
+    surface: str,
+    best_of: int,
+    book_key: str,
+    sport_key: str,
+    model: Any,
+    edge_threshold: float,
+    min_odds: float,
+    max_odds: float,
+    dataset_hash: str,
+    signals: list,
 ) -> None:
     """Analyse set handicap outcomes and add signals with edge."""
     from src.normalize.odds_normalizer import devig_pair
+
     outcomes = market.get("outcomes", [])
     if len(outcomes) < 2:
         return
@@ -524,9 +606,7 @@ def _process_spreads(
         # Model probability for covering the handicap
         try:
             # handicap from the outcome's perspective (negative = giving sets)
-            model_p = model.predict_set_handicap(
-                handicap, bet_player, bet_opp, surface, best_of
-            )
+            model_p = model.predict_set_handicap(handicap, bet_player, bet_opp, surface, best_of)
         except Exception:
             continue
 
@@ -538,44 +618,58 @@ def _process_spreads(
         hcap_str = f"+{handicap}" if handicap > 0 else str(handicap)
         tour = "ATP" if "atp" in sport_key else "WTA"
 
-        signals.append({
-            "signal_id": f"ten_hcap_{event_id[:8]}_{book_key}_{bet_player[:4].replace(' ', '')}",
-            "sport": "tennis",
-            "market": "spreads",
-            "market_ru": "Фора по сетам",
-            "tour": tour,
-            "player": bet_player,
-            "opponent": bet_opp,
-            "selection": f"{bet_player} {hcap_str}",
-            "selection_ru": f"Фора {hcap_str} сета",
-            "surface": surface,
-            "event_id": event_id,
-            "commence_time": commence,
-            "bookmaker": book_key,
-            "entry_odds": round(price, 3),
-            "model_prob": round(model_p, 4),
-            "market_prob": round(fair_p, 4),
-            "edge_pct": edge_pct,
-            "reference_fair_odds": fair_odds,
-            "best_of": best_of,
-            "handicap": handicap,
-            "steam_move_detected": False,
-            "status": "paper",
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-            "dataset_hash": dataset_hash,
-        })
+        signals.append(
+            {
+                "signal_id": f"ten_hcap_{event_id[:8]}_{book_key}_{bet_player[:4].replace(' ', '')}",
+                "sport": "tennis",
+                "market": "spreads",
+                "market_ru": "Фора по сетам",
+                "tour": tour,
+                "player": bet_player,
+                "opponent": bet_opp,
+                "selection": f"{bet_player} {hcap_str}",
+                "selection_ru": f"Фора {hcap_str} сета",
+                "surface": surface,
+                "event_id": event_id,
+                "commence_time": commence,
+                "bookmaker": book_key,
+                "entry_odds": round(price, 3),
+                "model_prob": round(model_p, 4),
+                "market_prob": round(fair_p, 4),
+                "edge_pct": edge_pct,
+                "reference_fair_odds": fair_odds,
+                "best_of": best_of,
+                "handicap": handicap,
+                "steam_move_detected": False,
+                "status": "paper",
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "dataset_hash": dataset_hash,
+            }
+        )
 
 
 def _process_totals(
-    market: dict, player1: str, player2: str,
-    player1_raw: str, player2_raw: str,
-    event_id: str, commence: str, surface: str, best_of: int,
-    book_key: str, sport_key: str, model: Any,
-    edge_threshold: float, min_odds: float, max_odds: float,
-    dataset_hash: str, signals: list,
+    market: dict,
+    player1: str,
+    player2: str,
+    player1_raw: str,
+    player2_raw: str,
+    event_id: str,
+    commence: str,
+    surface: str,
+    best_of: int,
+    book_key: str,
+    sport_key: str,
+    model: Any,
+    edge_threshold: float,
+    min_odds: float,
+    max_odds: float,
+    dataset_hash: str,
+    signals: list,
 ) -> None:
     """Analyse total games over/under and add signals with edge."""
     from src.normalize.odds_normalizer import devig_pair
+
     outcomes = market.get("outcomes", [])
     if len(outcomes) < 2:
         return
@@ -614,32 +708,34 @@ def _process_totals(
         direction_ru = "Больше" if is_over else "Меньше"
         tour = "ATP" if "atp" in sport_key else "WTA"
 
-        signals.append({
-            "signal_id": f"ten_tot_{event_id[:8]}_{book_key}_{'ov' if is_over else 'un'}{int(threshold)}",
-            "sport": "tennis",
-            "market": "totals",
-            "market_ru": "Тотал геймов",
-            "tour": tour,
-            "player": player1,
-            "opponent": player2,
-            "selection": f"{'Over' if is_over else 'Under'} {threshold}",
-            "selection_ru": f"{direction_ru} {threshold} геймов",
-            "surface": surface,
-            "event_id": event_id,
-            "commence_time": commence,
-            "bookmaker": book_key,
-            "entry_odds": round(price, 3),
-            "model_prob": round(model_p, 4),
-            "market_prob": round(fair_p, 4),
-            "edge_pct": edge_pct,
-            "reference_fair_odds": fair_odds,
-            "best_of": best_of,
-            "total_threshold": threshold,
-            "steam_move_detected": False,
-            "status": "paper",
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-            "dataset_hash": dataset_hash,
-        })
+        signals.append(
+            {
+                "signal_id": f"ten_tot_{event_id[:8]}_{book_key}_{'ov' if is_over else 'un'}{int(threshold)}",
+                "sport": "tennis",
+                "market": "totals",
+                "market_ru": "Тотал геймов",
+                "tour": tour,
+                "player": player1,
+                "opponent": player2,
+                "selection": f"{'Over' if is_over else 'Under'} {threshold}",
+                "selection_ru": f"{direction_ru} {threshold} геймов",
+                "surface": surface,
+                "event_id": event_id,
+                "commence_time": commence,
+                "bookmaker": book_key,
+                "entry_odds": round(price, 3),
+                "model_prob": round(model_p, 4),
+                "market_prob": round(fair_p, 4),
+                "edge_pct": edge_pct,
+                "reference_fair_odds": fair_odds,
+                "best_of": best_of,
+                "total_threshold": threshold,
+                "steam_move_detected": False,
+                "status": "paper",
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "dataset_hash": dataset_hash,
+            }
+        )
 
 
 def _detect_steam_move(current_odds: float, opening_odds: float) -> bool:
@@ -730,6 +826,7 @@ def _match_odds_fuzzy(
     - "Novak Djokovic" vs "N. Djokovic" (Odds API abbreviated)
     - "Carlos Alcaraz" vs "C. Alcaraz"
     """
+
     def _parts(name: str) -> tuple[str, str]:
         """Return (first_initial, last_name) both lowercased."""
         parts = name.strip().split()
@@ -757,6 +854,7 @@ def _match_odds_fuzzy(
 def _infer_surface(event: dict[str, Any]) -> str:
     """Try to infer surface from sport_title or description field in event."""
     from src.ingest.tennis_atp import infer_surface
+
     title = str(event.get("sport_title", "") or event.get("tournament", ""))
     return infer_surface(title)
 
@@ -784,8 +882,7 @@ def _discover_tennis_keys(api_key: str) -> list[str]:
         with _urllib.urlopen(req, timeout=10) as resp:
             sports = json.loads(resp.read())
         active_tennis = [
-            s["key"] for s in sports
-            if s.get("active") and "tennis" in s.get("key", "").lower()
+            s["key"] for s in sports if s.get("active") and "tennis" in s.get("key", "").lower()
         ]
         if active_tennis:
             _log.info("[tennis] Discovered active tennis keys: %s", active_tennis)
@@ -825,6 +922,7 @@ def _fetch_atp_events(api_key: str) -> list[dict[str, Any]] | None:
                 _log.info("[tennis] %s: %d events", sport_key, len(data))
         except Exception as exc:
             import urllib.error as _urlerr
+
             if isinstance(exc, _urlerr.HTTPError):
                 _log.info("[tennis] %s: HTTP %d %s", sport_key, exc.code, exc.reason)
             else:
@@ -926,6 +1024,7 @@ def scan_tennis_debug(model_path: Path, api_key: str) -> dict[str, Any]:
         try:
             markov_model = TennisMarkovModel.load(markov_path)
             from src.ingest.tennis_abstract import fetch_serve_stats
+
             live_stats = fetch_serve_stats()
             if live_stats:
                 markov_model.inject_live_serve_stats(live_stats)
@@ -949,12 +1048,16 @@ def scan_tennis_debug(model_path: Path, api_key: str) -> dict[str, Any]:
         p2_known = elo_model.has_enough_data(p2)
 
         if not p1_known or not p2_known:
-            debug_rows.append({
-                "p1": p1, "p2": p2, "surface": surface,
-                "skip": "insufficient_data",
-                "p1_matches": elo_model._match_count.get(p1, 0),
-                "p2_matches": elo_model._match_count.get(p2, 0),
-            })
+            debug_rows.append(
+                {
+                    "p1": p1,
+                    "p2": p2,
+                    "surface": surface,
+                    "skip": "insufficient_data",
+                    "p1_matches": elo_model.get_match_count(p1),
+                    "p2_matches": elo_model.get_match_count(p2),
+                }
+            )
             continue
 
         elo_bd = elo_model.predict_proba_breakdown(p1, p2, surface)
@@ -967,10 +1070,14 @@ def scan_tennis_debug(model_path: Path, api_key: str) -> dict[str, Any]:
 
         # Best odds from any bookmaker
         best_odds_p1 = max(
-            (float(o.get("price", 0))
-             for bk in event.get("bookmakers", [])
-             for mkt in bk.get("markets", []) if mkt.get("key") == "h2h"
-             for o in mkt.get("outcomes", []) if o.get("name") == p1),
+            (
+                float(o.get("price", 0))
+                for bk in event.get("bookmakers", [])
+                for mkt in bk.get("markets", [])
+                if mkt.get("key") == "h2h"
+                for o in mkt.get("outcomes", [])
+                if o.get("name") == p1
+            ),
             default=None,
         )
 
@@ -979,15 +1086,20 @@ def scan_tennis_debug(model_path: Path, api_key: str) -> dict[str, Any]:
             fair_model_odds = 1.0 / model_prob
             edge_p1 = round((best_odds_p1 / fair_model_odds - 1) * 100, 2)
 
-        debug_rows.append({
-            "p1": p1, "p2": p2, "surface": surface, "best_of": best_of,
-            "model_prob_p1": round(model_prob, 4),
-            "best_odds_p1": best_odds_p1,
-            "edge_p1_pct": edge_p1,
-            "n_bookmakers": len(event.get("bookmakers", [])),
-        })
+        debug_rows.append(
+            {
+                "p1": p1,
+                "p2": p2,
+                "surface": surface,
+                "best_of": best_of,
+                "model_prob_p1": round(model_prob, 4),
+                "best_odds_p1": best_odds_p1,
+                "edge_p1_pct": edge_p1,
+                "n_bookmakers": len(event.get("bookmakers", [])),
+            }
+        )
 
-    debug_rows.sort(key=lambda r: abs(r.get("edge_p1_pct") or 0), reverse=True)
+    debug_rows.sort(key=lambda r: abs((r.get("edge_p1_pct") or 0.0)), reverse=True)  # type: ignore[arg-type]
     return {
         "n_events": len(events),
         "model_players": elo_model.params.n_players,

@@ -62,9 +62,7 @@ class EloRatingSystem:
         r_home_base = self.ratings.get(home_team, self.initial)
         r_away_base = self.ratings.get(away_team, self.initial)
         # Apply home-advantage bonus for expected score only
-        exp_home = self.expected_score(
-            r_home_base + self.home_advantage, r_away_base
-        )
+        exp_home = self.expected_score(r_home_base + self.home_advantage, r_away_base)
         exp_away = 1.0 - exp_home
 
         if home_goals > away_goals:
@@ -87,9 +85,7 @@ class EloRatingSystem:
 
     def elo_win_prob(self, home_team: str, away_team: str) -> float:
         """Elo-implied win probability for home team (includes home advantage)."""
-        return self.expected_score(
-            self.get(home_team) + self.home_advantage, self.get(away_team)
-        )
+        return self.expected_score(self.get(home_team) + self.home_advantage, self.get(away_team))
 
     # ------------------------------------------------------------------
     # Build from history — LEAKAGE-SAFE
@@ -196,6 +192,7 @@ class EloRatingSystem:
 # ------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------
+
 
 def _prepare_matches(matches: pd.DataFrame) -> pd.DataFrame:
     df = matches.copy()

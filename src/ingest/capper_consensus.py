@@ -16,7 +16,12 @@ from pathlib import Path
 
 _log = logging.getLogger(__name__)
 
-_DEFAULT_TIPS_PATH = Path(os.environ.get("DATA_DIR", "data")) / "staging" / "free_sources" / "tennis_capper_tips.jsonl"
+_DEFAULT_TIPS_PATH = (
+    Path(os.environ.get("DATA_DIR", "data"))
+    / "staging"
+    / "free_sources"
+    / "tennis_capper_tips.jsonl"
+)
 _TIP_MAX_AGE_HOURS = 48  # ignore tips older than 48h
 
 
@@ -39,10 +44,10 @@ def get_capper_consensus(
         return {"support": None, "n_tips": 0, "avg_odds": None, "channels": []}
 
     cutoff = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
-    p1_lower = player.lower().split()[-1]   # last name
+    p1_lower = player.lower().split()[-1]  # last name
     p2_lower = opponent.lower().split()[-1]
 
-    tips_for: list[dict] = []   # tips picking player
+    tips_for: list[dict] = []  # tips picking player
     tips_against: list[dict] = []  # tips picking opponent
 
     try:

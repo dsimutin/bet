@@ -1,4 +1,5 @@
 """Telegram bot menu for unified football and tennis paper analytics."""
+
 from __future__ import annotations
 import json
 import logging
@@ -70,17 +71,26 @@ def _send_main_menu(chat_id: str, first_name: str = "") -> None:
         "закрывает результаты и корректирует уровни доверия по накопленной истории.\n\n"
         "📄 Режим paper trading. Коэффициенты меняются: перед любым самостоятельным решением проверьте линию."
     )
-    keyboard = {"inline_keyboard": [
-        [{"text": "📊 Ставки на сегодня", "callback_data": "picks_today"}, {"text": "🔄 Обновить", "callback_data": "refresh"}],
-        [{"text": "📈 Статистика", "callback_data": "stats"}, {"text": "🏆 История ставок", "callback_data": "history"}],
-        [{"text": "ℹ️ Как это работает", "callback_data": "how_it_works"}],
-        [{"text": "🔍 Диагностика тенниса", "callback_data": "debug_tennis"}],
-    ]}
+    keyboard = {
+        "inline_keyboard": [
+            [
+                {"text": "📊 Ставки на сегодня", "callback_data": "picks_today"},
+                {"text": "🔄 Обновить", "callback_data": "refresh"},
+            ],
+            [
+                {"text": "📈 Статистика", "callback_data": "stats"},
+                {"text": "🏆 История ставок", "callback_data": "history"},
+            ],
+            [{"text": "ℹ️ Как это работает", "callback_data": "how_it_works"}],
+            [{"text": "🔍 Диагностика тенниса", "callback_data": "debug_tennis"}],
+        ]
+    }
     _send(chat_id, text, keyboard)
 
 
 def _send_today(chat_id: str) -> None:
     from src.web.today_picks import build_today_text, split_message
+
     for chunk in split_message(build_today_text()):
         _send(chat_id, chunk, _back_button())
 
@@ -95,24 +105,29 @@ def send_today_digest_default_chat() -> str:
 
 def _refresh(chat_id: str) -> None:
     _send(chat_id, "🔄 Обновляю общий cached-скан футбола и тенниса. Это займёт до минуты.")
+
     def _run() -> None:
         try:
             from src.cron.run_signals import main
+
             main()
             _send_today(chat_id)
         except Exception as exc:
             _log.exception("[bot] manual refresh failed: %s", exc)
             _send(chat_id, f"❌ Обновление завершилось ошибкой: {escape(str(exc))}", _back_button())
+
     threading.Thread(target=_run, daemon=True).start()
 
 
 def _stats_text() -> str:
     from src.web.today_picks import build_stats_text
+
     return build_stats_text()
 
 
 def _history_text() -> str:
     from src.web.today_picks import build_history_text
+
     return build_history_text()
 
 
@@ -129,11 +144,15 @@ def _how_it_works() -> str:
 
 def _debug_tennis(chat_id: str) -> None:
     _send(chat_id, "🔍 Запускаю экономную диагностику тенниса...")
+
     def _run() -> None:
         try:
             from src.signals.tennis_runtime_scan import scan_tennis_h2h_runtime
+
             model_dir = Path(os.environ.get("MODEL_DIR", "data/models"))
-            result = scan_tennis_h2h_runtime(model_dir / "tennis_elo_atp_latest.pkl", os.environ.get("THE_ODDS_API_KEY", ""))
+            result = scan_tennis_h2h_runtime(
+                model_dir / "tennis_elo_atp_latest.pkl", os.environ.get("THE_ODDS_API_KEY", "")
+            )
             text = (
                 "🔍 <b>Диагностика тенниса</b>\n"
                 f"Событий проверено: {result.get('events_checked', 0)}\n"
@@ -145,6 +164,7 @@ def _debug_tennis(chat_id: str) -> None:
             _send(chat_id, text, _back_button())
         except Exception as exc:
             _send(chat_id, f"❌ Диагностика: {escape(str(exc))}", _back_button())
+
     threading.Thread(target=_run, daemon=True).start()
 
 
@@ -156,12 +176,21 @@ def _send(chat_id: str, text: str, reply_markup: dict[str, Any] | None = None) -
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
     if not token:
         return {}
-    payload: dict[str, Any] = {"chat_id": chat_id, "text": text[:4096], "parse_mode": "HTML", "disable_web_page_preview": True}
+    payload: dict[str, Any] = {
+        "chat_id": chat_id,
+        "text": text[:4096],
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True,
+    }
     if reply_markup:
         payload["reply_markup"] = reply_markup
     try:
         data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(_telegram_url(token, "sendMessage"), data=data, headers={"Content-Type": "application/json"})
+        req = urllib.request.Request(
+            _telegram_url(token, "sendMessage"),
+            data=data,
+            headers={"Content-Type": "application/json"},
+        )
         with urllib.request.urlopen(req, timeout=12) as resp:
             return json.loads(resp.read())
     except Exception as exc:
@@ -174,7 +203,11 @@ def _answer_callback(callback_id: str) -> None:
     if not token or not callback_id:
         return
     try:
-        req = urllib.request.Request(_telegram_url(token, "answerCallbackQuery"), data=json.dumps({"callback_query_id": callback_id}).encode("utf-8"), headers={"Content-Type": "application/json"})
+        req = urllib.request.Request(
+            _telegram_url(token, "answerCallbackQuery"),
+            data=json.dumps({"callback_query_id": callback_id}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+        )
         with urllib.request.urlopen(req, timeout=5):
             pass
     except Exception:
@@ -187,7 +220,11 @@ def setup_webhook(app_url: str) -> dict[str, Any]:
         return {"error": "TELEGRAM_BOT_TOKEN not set"}
     try:
         data = json.dumps({"url": f"{app_url.rstrip('/')}/webhook/telegram"}).encode("utf-8")
-        req = urllib.request.Request(_telegram_url(token, "setWebhook"), data=data, headers={"Content-Type": "application/json"})
+        req = urllib.request.Request(
+            _telegram_url(token, "setWebhook"),
+            data=data,
+            headers={"Content-Type": "application/json"},
+        )
         with urllib.request.urlopen(req, timeout=10) as resp:
             return json.loads(resp.read())
     except Exception as exc:

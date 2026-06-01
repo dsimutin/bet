@@ -100,10 +100,14 @@ def main() -> None:
     )
     print("[telegram_test] Sending test message...")
     try:
-        result = _call_api(token, "sendMessage", {
-            "chat_id": chat_id,
-            "text": text,
-        })
+        result = _call_api(
+            token,
+            "sendMessage",
+            {
+                "chat_id": chat_id,
+                "text": text,
+            },
+        )
         if result.get("ok"):
             msg_id = result.get("result", {}).get("message_id", "?")
             print(f"[telegram_test] SUCCESS: message_id={msg_id}")

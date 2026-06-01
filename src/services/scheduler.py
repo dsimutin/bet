@@ -4,6 +4,7 @@ The scheduler runs inside FastAPI while the service is awake. An external GitHub
 Actions wake-up workflow pings Render shortly before important jobs. Football and
 tennis share one runtime scan, one Supabase ledger and one Odds API cache.
 """
+
 from __future__ import annotations
 import asyncio
 import logging
@@ -37,13 +38,14 @@ def get_scheduler() -> Any:
     global _scheduler
     if _scheduler is None:
         from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
         _scheduler = AsyncIOScheduler(timezone="UTC")
     return _scheduler
 
 
 def start(loop: asyncio.AbstractEventLoop | None = None) -> None:
     if not ACTIVE_MODE:
-        _log.info("[scheduler] disabled: ACTIVE_MODE=false")
+        _log.info("[scheduler] DISABLED: ACTIVE_MODE=false")
         return
     sched = get_scheduler()
     if sched.running:
@@ -51,21 +53,92 @@ def start(loop: asyncio.AbstractEventLoop | None = None) -> None:
 
     scan_hours = _hours("RUNTIME_SCAN_HOURS_UTC", "7,15")
     settlement_hours = _hours("SETTLEMENT_HOURS_UTC", "7,15,22")
-    keep_alive_hours = _hours("KEEP_ALIVE_HOURS_UTC", "6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22")
+    keep_alive_hours = _hours(
+        "KEEP_ALIVE_HOURS_UTC", "6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22"
+    )
 
-    sched.add_job(_job_signal_scan, "cron", hour=scan_hours, minute=0, id="signal_scan", replace_existing=True, misfire_grace_time=900)
-    sched.add_job(_job_settlement, "cron", hour=settlement_hours, minute=30, id="settlement", replace_existing=True, misfire_grace_time=1800)
-    sched.add_job(_job_today_digest, "cron", hour=7, minute=10, id="today_digest", replace_existing=True, misfire_grace_time=900)
-    sched.add_job(_job_today_digest, "cron", hour=15, minute=10, id="today_digest_refresh", replace_existing=True, misfire_grace_time=900)
-    sched.add_job(_job_training_check, "cron", hour=6, minute=40, id="training_check", replace_existing=True, misfire_grace_time=1800)
-    sched.add_job(_job_keep_alive, "cron", hour=keep_alive_hours, minute="*/14", id="keep_alive", replace_existing=True)
-    sched.add_job(_job_tennis_refresh, "cron", hour=6, minute=15, id="tennis_refresh", replace_existing=True, misfire_grace_time=1800)
-    sched.add_job(_job_tennis_retrain, "cron", day_of_week="mon", hour=6, minute=20, id="tennis_retrain", replace_existing=True, misfire_grace_time=3600)
+    sched.add_job(
+        _job_signal_scan,
+        "cron",
+        hour=scan_hours,
+        minute=0,
+        id="signal_scan",
+        replace_existing=True,
+        misfire_grace_time=900,
+    )
+    sched.add_job(
+        _job_settlement,
+        "cron",
+        hour=settlement_hours,
+        minute=30,
+        id="settlement",
+        replace_existing=True,
+        misfire_grace_time=1800,
+    )
+    sched.add_job(
+        _job_today_digest,
+        "cron",
+        hour=7,
+        minute=10,
+        id="today_digest",
+        replace_existing=True,
+        misfire_grace_time=900,
+    )
+    sched.add_job(
+        _job_today_digest,
+        "cron",
+        hour=15,
+        minute=10,
+        id="today_digest_refresh",
+        replace_existing=True,
+        misfire_grace_time=900,
+    )
+    sched.add_job(
+        _job_training_check,
+        "cron",
+        hour=6,
+        minute=40,
+        id="training_check",
+        replace_existing=True,
+        misfire_grace_time=1800,
+    )
+    sched.add_job(
+        _job_keep_alive,
+        "cron",
+        hour=keep_alive_hours,
+        minute="*/14",
+        id="keep_alive",
+        replace_existing=True,
+    )
+    sched.add_job(
+        _job_tennis_refresh,
+        "cron",
+        hour=6,
+        minute=15,
+        id="tennis_refresh",
+        replace_existing=True,
+        misfire_grace_time=1800,
+    )
+    sched.add_job(
+        _job_tennis_retrain,
+        "cron",
+        day_of_week="mon",
+        hour=6,
+        minute=20,
+        id="tennis_retrain",
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
 
     sched.start()
-    _log.info("[scheduler] started with %d jobs | scan_hours=%s | settlement_hours=%s", len(sched.get_jobs()), scan_hours, settlement_hours)
+    _log.info(
+        "[scheduler] ACTIVE SCHEDULER STARTED with %d jobs | scan_hours=%s | settlement_hours=%s",
+        len(sched.get_jobs()),
+        scan_hours,
+        settlement_hours,
+    )
     for job in sched.get_jobs():
-        _log.info("[scheduler] %-20s next=%s", job.id, job.next_run_time)
+        _log.info("[scheduler] %-20s next_run=%s", job.id, job.next_run_time)
 
 
 def stop() -> None:
@@ -84,16 +157,19 @@ async def _run_in_executor(fn: Callable[[], Any], job_name: str) -> None:
 
 async def _job_signal_scan() -> None:
     from src.cron.run_signals import main
+
     await _run_in_executor(main, "signal_scan")
 
 
 async def _job_settlement() -> None:
     from src.cron.run_settle import main
+
     await _run_in_executor(main, "settlement")
 
 
 async def _job_today_digest() -> None:
     from src.web.telegram_bot import send_today_digest_default_chat
+
     await _run_in_executor(send_today_digest_default_chat, "today_digest")
 
 
@@ -101,10 +177,12 @@ async def _job_training_check() -> None:
     def _run() -> None:
         try:
             from src.cron.run_active_report import _run_training_check
+
             result = _run_training_check()
             _log.info("[scheduler] training check: %s", result)
         except Exception as exc:
             _log.warning("[scheduler] football training check skipped: %s", exc)
+
     await _run_in_executor(_run, "training_check")
 
 
@@ -113,15 +191,20 @@ async def _job_tennis_refresh() -> None:
         from datetime import datetime
         from pathlib import Path
         from src.ingest.tennis_atp import download_atp_season
+
         data_dir = Path(os.environ.get("DATA_DIR", "data"))
         cache_dir = data_dir / "raw" / "tennis_atp"
         download_atp_season(datetime.utcnow().year, cache_dir, use_cache=False)
+
     await _run_in_executor(_run, "tennis_refresh")
 
 
 async def _job_tennis_retrain() -> None:
     def _run() -> None:
-        subprocess.run([sys.executable, "-m", "src.models.train_tennis_elo", "--no-cache"], check=True)
+        subprocess.run(
+            [sys.executable, "-m", "src.models.train_tennis_elo", "--no-cache"], check=True
+        )
+
     await _run_in_executor(_run, "tennis_retrain")
 
 
@@ -129,6 +212,7 @@ async def _job_keep_alive() -> None:
     port = os.environ.get("PORT", "10000")
     try:
         import urllib.request
+
         with urllib.request.urlopen(f"http://localhost:{port}/health", timeout=5):
             pass
     except Exception:

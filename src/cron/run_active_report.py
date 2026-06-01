@@ -30,6 +30,7 @@ _log = logging.getLogger("active_report")
 # Env vars (all with safe defaults)
 # ---------------------------------------------------------------------------
 
+
 def _env_bool(key: str, default: bool = False) -> bool:
     return os.environ.get(key, str(default)).strip().lower() in ("1", "true", "yes")
 
@@ -59,6 +60,7 @@ SEASONS = os.environ.get("OPENFOOTBALL_SEASONS", "2021-22,2022-23,2023-24,2024-2
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
+
 
 def main(force: bool = False) -> None:
     started = datetime.now(timezone.utc)
@@ -104,36 +106,57 @@ def main(force: bool = False) -> None:
     except Exception as e:
         _log.error("[active] Training check failed: %s", e)
         errors.append(f"training_check: {e}")
-        training_result = {"trained": False, "training_reason": f"error: {e}",
-                           "model_status": "unknown"}
+        training_result = {
+            "trained": False,
+            "training_reason": f"error: {e}",
+            "model_status": "unknown",
+        }
 
     # Step 4: Write run history
     elapsed = time.perf_counter() - t0
     finished = datetime.now(timezone.utc)
-    _write_run_history("active_report", started, finished, elapsed,
-                       signals_result, settlement_result, training_result, errors)
+    _write_run_history(
+        "active_report",
+        started,
+        finished,
+        elapsed,
+        signals_result,
+        settlement_result,
+        training_result,
+        errors,
+    )
 
     # Step 5: Format and send report
     delivery_status = "skipped"
     if TELEGRAM_STATUS_REPORTS_ENABLED:
         try:
-            delivery_status = _send_status_report(signals_result, settlement_result, training_result, tennis_result)
+            delivery_status = _send_status_report(
+                signals_result, settlement_result, training_result, tennis_result
+            )
         except Exception as e:
             _log.error("[active] Status report send failed: %s", e)
             errors.append(f"telegram_report: {e}")
             delivery_status = "failed"
     else:
-        _log.info("[active] Telegram status reports disabled (TELEGRAM_STATUS_REPORTS_ENABLED=false)")
+        _log.info(
+            "[active] Telegram status reports disabled (TELEGRAM_STATUS_REPORTS_ENABLED=false)"
+        )
 
     status = "partial" if errors else "success"
-    _log.info("[active] Done in %.1fs | status=%s | signals=%d | settled=%d | tg=%s",
-              elapsed, status, signals_result.get("signals_count", 0),
-              settlement_result.get("settled_count", 0), delivery_status)
+    _log.info(
+        "[active] Done in %.1fs | status=%s | signals=%d | settled=%d | tg=%s",
+        elapsed,
+        status,
+        signals_result.get("signals_count", 0),
+        settlement_result.get("settled_count", 0),
+        delivery_status,
+    )
 
 
 # ---------------------------------------------------------------------------
 # Daily morning digest — "Ставки на сегодня"
 # ---------------------------------------------------------------------------
+
 
 def send_morning_digest() -> str:
     """Collect today's signals and send one friendly 'ставки на сегодня' message.
@@ -182,12 +205,15 @@ def send_morning_digest() -> str:
         return "dry_run"
 
     import urllib.request, urllib.error
-    payload = _json.dumps({
-        "chat_id": chat_id,
-        "text": text,
-        "parse_mode": "HTML",
-        "disable_web_page_preview": True,
-    }).encode("utf-8")
+
+    payload = _json.dumps(
+        {
+            "chat_id": chat_id,
+            "text": text,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True,
+        }
+    ).encode("utf-8")
 
     try:
         req = urllib.request.Request(
@@ -208,12 +234,25 @@ def send_morning_digest() -> str:
         return "failed"
 
 
-def _format_morning_digest(signals: list[dict], today: date, scan_context: dict | None = None) -> str:
+def _format_morning_digest(
+    signals: list[dict], today: date, scan_context: dict | None = None
+) -> str:
     """Format a clean, beginner-friendly daily betting digest."""
     day_ru = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"][today.weekday()]
     months_ru = [
-        "", "янв", "фев", "мар", "апр", "мая", "июн",
-        "июл", "авг", "сен", "окт", "ноя", "дек",
+        "",
+        "янв",
+        "фев",
+        "мар",
+        "апр",
+        "мая",
+        "июн",
+        "июл",
+        "авг",
+        "сен",
+        "окт",
+        "ноя",
+        "дек",
     ]
     date_str = f"{today.day} {months_ru[today.month]} ({day_ru})"
 
@@ -276,12 +315,15 @@ def _format_football_pick(sig: dict, n: int) -> str:
     payout = round(stake * float(odds)) if isinstance(odds, (int, float)) else "?"
     profit = (payout - stake) if isinstance(payout, int) else "?"
 
-    conf = "🟢 уверенно" if mp_pct != "?" and mp_pct >= 65 else "🟡 умеренно"
+    conf = "🟢 уверенно" if isinstance(mp_pct, (int, float)) and mp_pct >= 65 else "🟡 умеренно"
 
     book_names = {
-        "pinnacle": "Pinnacle", "bet365": "Bet365",
-        "betfair_ex_uk": "Betfair", "williamhill": "William Hill",
-        "draftkings": "DraftKings", "fanduel": "FanDuel",
+        "pinnacle": "Pinnacle",
+        "bet365": "Bet365",
+        "betfair_ex_uk": "Betfair",
+        "williamhill": "William Hill",
+        "draftkings": "DraftKings",
+        "fanduel": "FanDuel",
     }
     book_disp = book_names.get(book, book) if book else "лучший букмекер"
 
@@ -314,11 +356,14 @@ def _format_tennis_pick(sig: dict, n: int) -> str:
     payout = round(stake * float(odds)) if isinstance(odds, (int, float)) else "?"
     profit = (payout - stake) if isinstance(payout, int) else "?"
 
-    conf = "🟢 уверенно" if mp_pct != "?" and mp_pct >= 65 else "🟡 умеренно"
+    conf = "🟢 уверенно" if isinstance(mp_pct, (int, float)) and mp_pct >= 65 else "🟡 умеренно"
 
     book_names = {
-        "pinnacle": "Pinnacle", "bet365": "Bet365", "betfair_ex_uk": "Betfair",
-        "williamhill": "William Hill", "unibet_eu": "Unibet",
+        "pinnacle": "Pinnacle",
+        "bet365": "Bet365",
+        "betfair_ex_uk": "Betfair",
+        "williamhill": "William Hill",
+        "unibet_eu": "Unibet",
     }
     book_disp = book_names.get(book, book) if book else "лучший букмекер"
 
@@ -335,6 +380,7 @@ def _format_tennis_pick(sig: dict, n: int) -> str:
 # ---------------------------------------------------------------------------
 # Step implementations
 # ---------------------------------------------------------------------------
+
 
 def _run_signal_scan() -> dict[str, Any]:
     """Run signal scan across all configured leagues. Returns summary dict."""
@@ -396,17 +442,24 @@ def _run_signal_scan() -> dict[str, Any]:
             # Load calibration model for this league (corrects overconfident predictions)
             calibrator = None
             try:
-                calibrator = registry.load_calibrator(model.model_id)
+                if model.model_id:
+                    calibrator = registry.load_calibrator(model.model_id)
                 if calibrator:
-                    _log.info("[active] %s: calibrator loaded (temperature=%.3f)",
-                              league, calibrator.params.temperature)
+                    _log.info(
+                        "[active] %s: calibrator loaded (temperature=%.3f)",
+                        league,
+                        calibrator.params.temperature,
+                    )
             except Exception:
                 pass  # calibration is optional — proceed without it
 
             try:
                 signals = generate_signals_for_league(
-                    model=model, league=league, scan_date=today,
-                    staging_dir=STAGING_DIR, odds_api_key=api_key,
+                    model=model,
+                    league=league,
+                    scan_date=today,
+                    staging_dir=STAGING_DIR,
+                    odds_api_key=api_key,
                     calibrator=calibrator,
                 )
                 candidates_checked += 1
@@ -486,14 +539,23 @@ def _run_signal_scan() -> dict[str, Any]:
     }
 
     _write_run_history_simple(
-        "signal_scan", started, finished, elapsed,
+        "signal_scan",
+        started,
+        finished,
+        elapsed,
         status="success" if not source_errors else "partial",
-        signals_count=len(all_signals), sent_count=sent_count,
-        leagues=LEAGUES, errors=source_errors,
+        signals_count=len(all_signals),
+        sent_count=sent_count,
+        leagues=LEAGUES,
+        errors=source_errors,
     )
 
-    _log.info("[active] Signal scan: %d signals from %d leagues in %.1fs",
-              len(all_signals), candidates_checked, elapsed)
+    _log.info(
+        "[active] Signal scan: %d signals from %d leagues in %.1fs",
+        len(all_signals),
+        candidates_checked,
+        elapsed,
+    )
     return result
 
 
@@ -504,8 +566,14 @@ def _run_tennis_scan() -> dict[str, Any]:
     api_key = os.environ.get("THE_ODDS_API_KEY", "")
     if not api_key:
         _log.info("[active] Tennis scan skipped — no Odds API key")
-        return {"signals_count": 0, "status": "skip", "no_signal_reason": "no_api_key",
-                "tour": "ATP", "sport": "tennis", "all_signals": []}
+        return {
+            "signals_count": 0,
+            "status": "skip",
+            "no_signal_reason": "no_api_key",
+            "tour": "ATP",
+            "sport": "tennis",
+            "all_signals": [],
+        }
 
     model_path = MODEL_DIR / "tennis_elo_atp_latest.pkl"
     result = scan_tennis_signals(model_path=model_path, api_key=api_key)
@@ -522,6 +590,7 @@ def _run_tennis_scan() -> dict[str, Any]:
     if tennis_signals:
         try:
             from src.models.signal_ledger import SignalLedger
+
             ledger = SignalLedger.load_or_create(LEDGER_PATH)
             saved = 0
             for sig in tennis_signals:
@@ -529,8 +598,9 @@ def _run_tennis_scan() -> dict[str, Any]:
                     if ledger.add_signal(sig):
                         saved += 1
                 except Exception as e:
-                    _log.debug("[active] Tennis signal ledger skip (%s): %s",
-                               sig.get("signal_id", "?"), e)
+                    _log.debug(
+                        "[active] Tennis signal ledger skip (%s): %s", sig.get("signal_id", "?"), e
+                    )
             if saved:
                 ledger.save(LEDGER_PATH)
                 _log.info("[active] Tennis: saved %d new signals to ledger", saved)
@@ -592,9 +662,15 @@ def _run_settlement() -> dict[str, Any]:
 
     seasons = os.environ.get("OPENFOOTBALL_SEASONS", "2023-24,2024-25").split(",")
     result: dict[str, Any] = {
-        "settled_count": 0, "wins": 0, "losses": 0, "pushes": 0,
-        "pnl_units": None, "roi_pct": None, "hit_rate_pct": None,
-        "drift_status": "no_data", "kelly_multiplier": 1.0,
+        "settled_count": 0,
+        "wins": 0,
+        "losses": 0,
+        "pushes": 0,
+        "pnl_units": None,
+        "roi_pct": None,
+        "hit_rate_pct": None,
+        "drift_status": "no_data",
+        "kelly_multiplier": 1.0,
     }
     errors: list[str] = []
 
@@ -603,8 +679,14 @@ def _run_settlement() -> dict[str, Any]:
         res = loader.build(leagues=LEAGUES, seasons=seasons, use_cache=False)
         if res.dataframe.empty:
             _log.info("[active] Settlement: no results downloaded")
-            _write_run_history_simple("settlement", started, datetime.now(timezone.utc),
-                                      time.perf_counter() - t0, status="skip", settled_count=0)
+            _write_run_history_simple(
+                "settlement",
+                started,
+                datetime.now(timezone.utc),
+                time.perf_counter() - t0,
+                status="skip",
+                settled_count=0,
+            )
             return result
 
         csv_path = loader.save_combined(res.dataframe, STAGING_DIR, "latest_results.csv")
@@ -612,8 +694,14 @@ def _run_settlement() -> dict[str, Any]:
     except Exception as e:
         _log.error("[active] Settlement download failed: %s", e)
         errors.append(str(e))
-        _write_run_history_simple("settlement", started, datetime.now(timezone.utc),
-                                  time.perf_counter() - t0, status="failed", errors=errors)
+        _write_run_history_simple(
+            "settlement",
+            started,
+            datetime.now(timezone.utc),
+            time.perf_counter() - t0,
+            status="failed",
+            errors=errors,
+        )
         return result
 
     try:
@@ -631,11 +719,13 @@ def _run_settlement() -> dict[str, Any]:
         settled = report.get("settled_count", 0)
         wins = sum(1 for e in report.get("settled_signals", []) if e.get("result") == "win")
         losses = sum(1 for e in report.get("settled_signals", []) if e.get("result") == "loss")
-        result.update({
-            "settled_count": settled,
-            "wins": wins,
-            "losses": losses,
-        })
+        result.update(
+            {
+                "settled_count": settled,
+                "wins": wins,
+                "losses": losses,
+            }
+        )
         _log.info("[active] Settled %d bets (W=%d L=%d)", settled, wins, losses)
     except Exception as e:
         _log.error("[active] Settlement failed: %s", e)
@@ -645,9 +735,11 @@ def _run_settlement() -> dict[str, Any]:
     try:
         from src.ingest.atp_results import fetch_recent_results
         from src.models.signal_ledger import SignalLedger as _SL2
+
         _ledger2 = _SL2.load_or_create(LEDGER_PATH)
         tennis_open = [
-            e for e in _ledger2.entries.values()
+            e
+            for e in _ledger2.entries().values()
             if e.get("sport") == "tennis" and e.get("ledger_status") == "open"
         ]
         if tennis_open:
@@ -656,12 +748,12 @@ def _run_settlement() -> dict[str, Any]:
             for entry in tennis_open:
                 player = entry.get("player", "")
                 commence = entry.get("commence_time", "")
-                for res in atp_results:
-                    match_date = res.get("date", "")
+                for res in atp_results:  # type: ignore[assignment]
+                    match_date = res.get("date", "")  # type: ignore[attr-defined]
                     if match_date < commence[:10]:
                         continue
-                    winner = res.get("winner", "").lower()
-                    loser = res.get("loser", "").lower()
+                    winner = res.get("winner", "").lower()  # type: ignore[attr-defined]
+                    loser = res.get("loser", "").lower()  # type: ignore[attr-defined]
                     player_lower = player.lower()
                     if player_lower and player_lower in winner:
                         entry["result"] = "win"
@@ -698,9 +790,13 @@ def _run_settlement() -> dict[str, Any]:
 
     elapsed = time.perf_counter() - t0
     _write_run_history_simple(
-        "settlement", started, datetime.now(timezone.utc), elapsed,
+        "settlement",
+        started,
+        datetime.now(timezone.utc),
+        elapsed,
         status="failed" if errors else "success",
-        settled_count=result["settled_count"], errors=errors,
+        settled_count=result["settled_count"],
+        errors=errors,
     )
     return result
 
@@ -759,6 +855,7 @@ def _run_training_check() -> dict[str, Any]:
         if last_ts:
             try:
                 from src.models.run_history import runs_since
+
                 since_dt = datetime.fromisoformat(last_ts.replace("Z", "+00:00"))
                 settle_runs = runs_since(since_dt, run_type="settlement")
                 new_settled = sum(r.get("settled_count", 0) for r in settle_runs)
@@ -774,8 +871,12 @@ def _run_training_check() -> dict[str, Any]:
         _log.info("[active] Training skipped: %s", reason)
         result["training_reason"] = f"training skipped: {reason}"
         _write_run_history_simple(
-            "training_check", started, datetime.now(timezone.utc),
-            time.perf_counter() - t0, status="skip", trained=False,
+            "training_check",
+            started,
+            datetime.now(timezone.utc),
+            time.perf_counter() - t0,
+            status="skip",
+            trained=False,
             training_reason=result["training_reason"],
         )
         return result
@@ -783,7 +884,11 @@ def _run_training_check() -> dict[str, Any]:
     if FORCE_TRAINING:
         _log.info("[active] Training forced via FORCE_TRAINING=true")
     else:
-        _log.info("[active] Training triggered: %d new settled matches >= %d", new_settled, MIN_NEW_SETTLED)
+        _log.info(
+            "[active] Training triggered: %d new settled matches >= %d",
+            new_settled,
+            MIN_NEW_SETTLED,
+        )
 
     # Run training for all leagues
     from src.ingest.openfootball import OpenFootballLoader
@@ -842,7 +947,9 @@ def _run_training_check() -> dict[str, Any]:
                         f"new model promoted because Brier improved from {old_brier:.4f} to {new_brier:.4f}"
                     )
                 else:
-                    reason_parts.append("new model promoted (first model, passed absolute Brier gate)")
+                    reason_parts.append(
+                        "new model promoted (first model, passed absolute Brier gate)"
+                    )
             else:
                 if old_brier is not None and new_brier is not None:
                     reason_parts.append(
@@ -851,8 +958,12 @@ def _run_training_check() -> dict[str, Any]:
                 else:
                     reason_parts.append("new model rejected (did not beat production model)")
 
-            _log.info("[active] %s: %s | brier=%s", league,
-                      "promoted" if promoted else "candidate", new_brier)
+            _log.info(
+                "[active] %s: %s | brier=%s",
+                league,
+                "promoted" if promoted else "candidate",
+                new_brier,
+            )
 
             if promoted or not best_result:
                 best_result = {
@@ -868,13 +979,19 @@ def _run_training_check() -> dict[str, Any]:
             _log.error("[active] Training %s failed: %s", league, e)
 
     elapsed = time.perf_counter() - t0
-    result.update({
-        "trained": True,
-        **best_result,
-    })
+    result.update(
+        {
+            "trained": True,
+            **best_result,
+        }
+    )
     _write_run_history_simple(
-        "training_check", started, datetime.now(timezone.utc), elapsed,
-        status="success", trained=True,
+        "training_check",
+        started,
+        datetime.now(timezone.utc),
+        elapsed,
+        status="success",
+        trained=True,
         training_reason=best_result.get("training_reason", ""),
         leagues=LEAGUES,
     )
@@ -892,9 +1009,13 @@ def _send_signal_alerts(signals: list[dict]) -> int:
     if dry_run:
         _log.info("[active] Telegram not configured — dry-run signal alerts")
         for sig in signals[:3]:
-            _log.info("  [DRY-RUN] %s vs %s | edge=%s%% @ %s",
-                      sig.get("home_team"), sig.get("away_team"),
-                      sig.get("edge_pct"), sig.get("entry_odds"))
+            _log.info(
+                "  [DRY-RUN] %s vs %s | edge=%s%% @ %s",
+                sig.get("home_team"),
+                sig.get("away_team"),
+                sig.get("edge_pct"),
+                sig.get("entry_odds"),
+            )
         return 0
 
     config = TelegramConfig(bot_token=token, chat_id=chat_id, dry_run=False)
@@ -921,11 +1042,14 @@ def _save_tg_delivery_status(status: str, error: str | None = None) -> None:
     try:
         REPORTS_DIR.mkdir(parents=True, exist_ok=True)
         (REPORTS_DIR / "tg_delivery_status.json").write_text(
-            json.dumps({
-                "last_status": status,
-                "last_at": datetime.now(timezone.utc).isoformat(),
-                "last_error": error,
-            }, indent=2),
+            json.dumps(
+                {
+                    "last_status": status,
+                    "last_at": datetime.now(timezone.utc).isoformat(),
+                    "last_error": error,
+                },
+                indent=2,
+            ),
             encoding="utf-8",
         )
     except Exception as e:
@@ -965,19 +1089,23 @@ def _send_status_report(
         _log.info("[active] DRY RUN: Telegram config incomplete — missing: %s", ", ".join(missing))
         out = REPORTS_DIR / "active_report_dry_run.json"
         out.write_text(
-            json.dumps({"text": text, "ts": datetime.now(timezone.utc).isoformat(),
-                        "missing": missing}, indent=2),
+            json.dumps(
+                {"text": text, "ts": datetime.now(timezone.utc).isoformat(), "missing": missing},
+                indent=2,
+            ),
             encoding="utf-8",
         )
         _save_tg_delivery_status("dry_run")
         return "dry_run"
 
     # Send via raw urllib — plain text, NO parse_mode (empty string causes 400 Bad Request)
-    payload = json.dumps({
-        "chat_id": chat_id,
-        "text": text,
-        "disable_web_page_preview": True,
-    }).encode("utf-8")
+    payload = json.dumps(
+        {
+            "chat_id": chat_id,
+            "text": text,
+            "disable_web_page_preview": True,
+        }
+    ).encode("utf-8")
 
     last_error: str | None = None
     for attempt in range(3):
@@ -990,8 +1118,9 @@ def _send_status_report(
             with urllib.request.urlopen(req, timeout=15) as resp:
                 body = json.loads(resp.read())
                 if body.get("ok"):
-                    _log.info("[active] Status report sent to Telegram (chat=%s)",
-                              _mask_chat_id(chat_id))
+                    _log.info(
+                        "[active] Status report sent to Telegram (chat=%s)", _mask_chat_id(chat_id)
+                    )
                     _save_tg_delivery_status("sent")
                     return "sent"
                 else:
@@ -1014,12 +1143,12 @@ def _send_status_report(
                 _save_tg_delivery_status("failed", last_error)
                 return "failed"
             if attempt < 2:
-                time.sleep(2 ** attempt)
+                time.sleep(2**attempt)
         except OSError as e:
             last_error = f"network: {e}"
             _log.warning("[active] Telegram network error (attempt %d): %s", attempt + 1, e)
             if attempt < 2:
-                time.sleep(2 ** attempt)
+                time.sleep(2**attempt)
 
     _save_tg_delivery_status("failed", last_error)
     return "failed"
@@ -1029,6 +1158,7 @@ def _send_status_report(
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _probe_active_soccer_leagues(api_key: str) -> list[str]:
     """Query /sports to find soccer competitions that currently have events.
 
@@ -1037,6 +1167,7 @@ def _probe_active_soccer_leagues(api_key: str) -> list[str]:
     """
     try:
         import urllib.request as _urllib, json as _json
+
         req = _urllib.Request(
             f"https://api.the-odds-api.com/v4/sports?apiKey={api_key}&all=false",
             headers={"User-Agent": "bet-analytics/1.0"},
@@ -1044,7 +1175,8 @@ def _probe_active_soccer_leagues(api_key: str) -> list[str]:
         with _urllib.urlopen(req, timeout=10) as resp:
             sports = _json.loads(resp.read())
         active = [
-            s["key"] for s in sports
+            s["key"]
+            for s in sports
             if s.get("group", "").lower() == "soccer" and s.get("active", False)
         ]
         _log.info("[active] Odds API active soccer leagues: %d found — %s", len(active), active[:8])
@@ -1062,6 +1194,7 @@ def _validate_odds_api_key_in_background(
     """Quick check: verify the Odds API key is valid by fetching available sports."""
     try:
         import urllib.request as _urllib
+
         req = _urllib.Request(
             f"https://api.the-odds-api.com/v4/sports?apiKey={api_key}",
             headers={"User-Agent": "bet-analytics/1.0"},
@@ -1097,20 +1230,36 @@ def _determine_no_signal_reason(api_key: str, providers_skip: list[str]) -> str:
 
 def _empty_signals_result(reason: str) -> dict[str, Any]:
     return {
-        "sports": SPORTS, "leagues": LEAGUES,
-        "matches_count": 0, "upcoming_count": 0, "recently_finished": 0,
-        "odds_count": 0, "signals_count": 0, "candidates_checked": 0,
-        "sent_count": 0, "duplicates_skipped": 0, "top_signals": [],
-        "no_signal_reason": reason, "providers_ok": [], "providers_skip": [],
-        "source_errors": [reason], "duration_s": 0,
+        "sports": SPORTS,
+        "leagues": LEAGUES,
+        "matches_count": 0,
+        "upcoming_count": 0,
+        "recently_finished": 0,
+        "odds_count": 0,
+        "signals_count": 0,
+        "candidates_checked": 0,
+        "sent_count": 0,
+        "duplicates_skipped": 0,
+        "top_signals": [],
+        "no_signal_reason": reason,
+        "providers_ok": [],
+        "providers_skip": [],
+        "source_errors": [reason],
+        "duration_s": 0,
     }
 
 
 def _empty_settlement_result() -> dict[str, Any]:
     return {
-        "settled_count": 0, "wins": 0, "losses": 0, "pushes": 0,
-        "pnl_units": None, "roi_pct": None, "hit_rate_pct": None,
-        "drift_status": "error", "kelly_multiplier": 1.0,
+        "settled_count": 0,
+        "wins": 0,
+        "losses": 0,
+        "pushes": 0,
+        "pnl_units": None,
+        "roi_pct": None,
+        "hit_rate_pct": None,
+        "drift_status": "error",
+        "kelly_multiplier": 1.0,
     }
 
 
@@ -1124,6 +1273,7 @@ def _write_run_history_simple(
 ) -> None:
     try:
         from src.models.run_history import write_run
+
         # Allow callers to override sports/leagues via kwargs
         sports = kwargs.pop("sports", SPORTS)
         leagues = kwargs.pop("leagues", LEAGUES)
@@ -1153,6 +1303,7 @@ def _write_run_history(
 ) -> None:
     try:
         from src.models.run_history import write_run
+
         write_run(
             run_type=run_type,
             status="partial" if errors else "success",

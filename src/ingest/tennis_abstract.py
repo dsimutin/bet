@@ -35,8 +35,7 @@ _CACHE_MAX_AGE_HOURS = 24
 _REQUEST_TIMEOUT = 20
 _HEADERS = {
     "User-Agent": (
-        "Mozilla/5.0 (compatible; bet-analytics/1.0; "
-        "+https://github.com/dsimutin/bet)"
+        "Mozilla/5.0 (compatible; bet-analytics/1.0; " "+https://github.com/dsimutin/bet)"
     ),
     "Accept": "text/html,application/xhtml+xml",
 }
@@ -53,6 +52,7 @@ _SURFACE_PARAMS = {
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def fetch_serve_stats(
     cache_path: Path | None = None,
@@ -122,6 +122,7 @@ def get_player_serve_prob(
 # Fetch helpers
 # ---------------------------------------------------------------------------
 
+
 def _fetch_all_surfaces() -> dict[str, dict[str, float]]:
     """Fetch serve stats for all players across surfaces."""
     combined: dict[str, dict[str, float]] = {}
@@ -166,7 +167,7 @@ def _get_url(url: str) -> str:
                 return resp.read().decode("utf-8", errors="replace")
         except Exception as exc:
             if attempt < 2:
-                time.sleep(2 ** attempt)
+                time.sleep(2**attempt)
                 continue
             raise exc
     return ""
@@ -175,6 +176,7 @@ def _get_url(url: str) -> str:
 # ---------------------------------------------------------------------------
 # HTML parsing
 # ---------------------------------------------------------------------------
+
 
 class _TableParser(html.parser.HTMLParser):
     """Extract rows from the first <table> in the HTML."""
@@ -262,7 +264,7 @@ def _parse_leaders_table(html_content: str) -> dict[str, float]:
         return results
 
     results = {}
-    for row in rows[header_idx + 1:]:
+    for row in rows[header_idx + 1 :]:
         if not row or len(row) <= max(player_col, spw_col if spw_col >= 0 else 0):
             continue
         player_name = _clean_player_name(row[player_col])
@@ -299,6 +301,7 @@ def _parse_pct(value: str) -> float | None:
 # ---------------------------------------------------------------------------
 # Cache helpers
 # ---------------------------------------------------------------------------
+
 
 def _is_cache_fresh(path: Path, max_age_hours: int) -> bool:
     if not path.exists():

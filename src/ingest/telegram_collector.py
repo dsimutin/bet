@@ -35,10 +35,10 @@ _REQUIRED_ENV = ("TELEGRAM_API_ID", "TELEGRAM_API_HASH", "TELEGRAM_SESSION_STR")
 
 # Default tennis capper channels — override via TELEGRAM_TENNIS_CHANNELS env var
 _DEFAULT_TENNIS_CHANNELS = [
-    "@tennis_tips_free",        # 13.7k members, EN, ATP/WTA free tips
-    "@tenniswinbet_picks",      # AI-based ATP predictions, free
-    "@tennisbettingprofree",    # 4.1k members, ATP/WTA/Challenger
-    "@PredixSportOfficial",     # AI sports predictions with serve metrics
+    "@tennis_tips_free",  # 13.7k members, EN, ATP/WTA free tips
+    "@tenniswinbet_picks",  # AI-based ATP predictions, free
+    "@tennisbettingprofree",  # 4.1k members, ATP/WTA/Challenger
+    "@PredixSportOfficial",  # AI sports predictions with serve metrics
     "@tennisbettingfreetipss",  # Daily free analysis, professional traders
 ]
 
@@ -136,7 +136,10 @@ async def run_collector(
             }
             _log.info(
                 "Tennis tip from @%s: %s WIN @ %s (conf=%.2f)",
-                chat, tip.player_picked, tip.odds, tip.confidence,
+                chat,
+                tip.player_picked,
+                tip.odds,
+                tip.confidence,
             )
             with tennis_output.open("a", encoding="utf-8") as fh:
                 fh.write(json.dumps(record, ensure_ascii=False) + "\n")
@@ -157,7 +160,9 @@ async def run_collector(
             }
             _log.info(
                 "Football odds from @%s: %s vs %s",
-                chat, parsed.get("HomeTeam", "?"), parsed.get("AwayTeam", "?"),
+                chat,
+                parsed.get("HomeTeam", "?"),
+                parsed.get("AwayTeam", "?"),
             )
             with output_path.open("a", encoding="utf-8") as fh:
                 fh.write(json.dumps(record, ensure_ascii=False) + "\n")

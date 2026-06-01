@@ -14,8 +14,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 def main() -> None:
     t0 = time.perf_counter()
-    leagues = [x.strip() for x in os.environ.get("LEAGUES", "EPL,BUNDESLIGA,LALIGA,SERIEA").split(",") if x.strip()]
-    seasons = [x.strip() for x in os.environ.get("OPENFOOTBALL_SEASONS", "2023-24,2024-25").split(",") if x.strip()]
+    leagues = [
+        x.strip()
+        for x in os.environ.get("LEAGUES", "EPL,BUNDESLIGA,LALIGA,SERIEA").split(",")
+        if x.strip()
+    ]
+    seasons = [
+        x.strip()
+        for x in os.environ.get("OPENFOOTBALL_SEASONS", "2023-24,2024-25").split(",")
+        if x.strip()
+    ]
     staging_dir = Path(os.environ.get("STAGING_DIR", "data/staging"))
     ledger_path = Path(os.environ.get("LEDGER_PATH", "data/core/paper_signal_ledger.json"))
     reports_dir = Path(os.environ.get("REPORTS_DIR", "data/reports"))
@@ -65,7 +73,9 @@ def main() -> None:
         "summary": ledger.summary(),
     }
     report_path = reports_dir / f"settlement_{date.today().isoformat()}.json"
-    report_path.write_text(json.dumps(report, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
+    report_path.write_text(
+        json.dumps(report, indent=2, ensure_ascii=False, default=str), encoding="utf-8"
+    )
     print(f"[settle] Report → {report_path}")
 
     try:
@@ -74,7 +84,9 @@ def main() -> None:
         detector = CUSUMDriftDetector(threshold=0.15, drift_window=14, min_window=10)
         drift_report = detector.evaluate_ledger_path(ledger_path)
         drift_path = reports_dir / "drift_report.json"
-        drift_path.write_text(json.dumps(drift_report.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
+        drift_path.write_text(
+            json.dumps(drift_report.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8"
+        )
         print(
             f"[settle] Drift: {'DRIFT DETECTED' if drift_report.drift_detected else 'no drift'} "
             f"| kelly={drift_report.kelly_multiplier}"
@@ -83,9 +95,17 @@ def main() -> None:
         print(f"[settle] Drift check failed (non-critical): {exc}", file=sys.stderr)
 
     elapsed = round(time.perf_counter() - t0, 1)
-    total_settled = int(football_report.get("settled_count", 0)) + int(tennis_report.get("settled", 0))
+    total_settled = int(football_report.get("settled_count", 0)) + int(
+        tennis_report.get("settled", 0)
+    )
     print(f"[settle] Done in {elapsed}s | total settled={total_settled}")
-    _log_run("settle-ledger", "success", elapsed, f"settled={total_settled}", {"total_settled": total_settled})
+    _log_run(
+        "settle-ledger",
+        "success",
+        elapsed,
+        f"settled={total_settled}",
+        {"total_settled": total_settled},
+    )
 
 
 def _settle_tennis(ledger) -> dict:
@@ -105,7 +125,9 @@ def _settle_tennis(ledger) -> dict:
         return {"settled": 0, "unmatched": 0, "error": str(exc)}
 
 
-def _log_run(job: str, status: str, duration_s: float, message: str, meta: dict | None = None) -> None:
+def _log_run(
+    job: str, status: str, duration_s: float, message: str, meta: dict | None = None
+) -> None:
     try:
         from src.infrastructure.render_db import get_db
 

@@ -1,4 +1,5 @@
 """Quota-efficient football runtime scanner using shared cached h2h odds."""
+
 from __future__ import annotations
 import hashlib
 from datetime import date
@@ -51,7 +52,9 @@ def generate_football_signals_runtime(
         calibrator=calibrator,
     )
     signals = engine.generate_signals(candidates)
-    dataset_hash = "sha256:" + hashlib.sha256(candidates.to_csv(index=False).encode("utf-8")).hexdigest()
+    dataset_hash = (
+        "sha256:" + hashlib.sha256(candidates.to_csv(index=False).encode("utf-8")).hexdigest()
+    )
     for signal in signals:
         signal.setdefault("sport", "football")
         signal.setdefault("league", league)

@@ -1,4 +1,5 @@
 """Fetch recent ATP match results for signal settlement."""
+
 from __future__ import annotations
 
 import logging
@@ -36,12 +37,14 @@ def fetch_recent_results(days: int = 7) -> list[dict]:
             row = dict(zip(header, parts))
             date_str = row.get("tourney_date", "")
             if date_str >= cutoff:
-                results.append({
-                    "winner": row.get("winner_name", ""),
-                    "loser": row.get("loser_name", ""),
-                    "date": f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}",
-                    "tournament": row.get("tourney_name", ""),
-                })
+                results.append(
+                    {
+                        "winner": row.get("winner_name", ""),
+                        "loser": row.get("loser_name", ""),
+                        "date": f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}",
+                        "tournament": row.get("tourney_name", ""),
+                    }
+                )
         _log.info("[atp_results] Fetched %d recent results (days=%d)", len(results), days)
         return results
     except Exception as e:

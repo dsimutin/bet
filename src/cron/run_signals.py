@@ -1,4 +1,5 @@
 """Unified quota-efficient paper signal runtime for football and tennis."""
+
 from __future__ import annotations
 import os
 import sys
@@ -6,6 +7,7 @@ import time
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 
@@ -14,7 +16,11 @@ def main() -> None:
     model_dir = Path(os.environ.get("MODEL_DIR", "data/models"))
     ledger_path = Path(os.environ.get("LEDGER_PATH", "data/core/paper_signal_ledger.json"))
     staging_dir = Path(os.environ.get("STAGING_DIR", "data/staging"))
-    leagues = [x.strip() for x in os.environ.get("LEAGUES", "EPL,BUNDESLIGA,LALIGA,SERIEA,LIGUE1").split(",") if x.strip()]
+    leagues = [
+        x.strip()
+        for x in os.environ.get("LEAGUES", "EPL,BUNDESLIGA,LALIGA,SERIEA,LIGUE1").split(",")
+        if x.strip()
+    ]
     today = date.today()
     candidates: list[dict[str, Any]] = []
     print(f"[signals] unified scan started {datetime.now(timezone.utc).isoformat()}")
@@ -36,6 +42,7 @@ def main() -> None:
 
     from src.infrastructure.persistent_ledger import load_ledger, save_ledger
     from src.models.feedback_policy import FeedbackPolicy
+
     ledger = load_ledger(ledger_path)
     policy = FeedbackPolicy(ledger.entries())
 
@@ -71,13 +78,33 @@ def main() -> None:
     save_ledger(ledger, ledger_path)
 
     elapsed = round(time.perf_counter() - started, 1)
-    print(f"[signals] done {elapsed}s candidates={len(candidates)} priority={len(priority)} watchlist={len(watchlist)} blocked={len(blocked)} new_priority={len(new_priority)} sent={sent} failed={failed}")
-    _log_run("signal-pipeline", "success" if failed == 0 else "partial", elapsed, f"priority={len(priority)} watchlist={len(watchlist)} blocked={len(blocked)} sent={sent} failed={failed}", {"candidates": len(candidates), "priority": len(priority), "watchlist": len(watchlist), "blocked": len(blocked), "new_priority": len(new_priority), "sent": sent, "failed": failed, "dry_run": dry_run})
+    print(
+        f"[signals] done {elapsed}s candidates={len(candidates)} priority={len(priority)} watchlist={len(watchlist)} blocked={len(blocked)} new_priority={len(new_priority)} sent={sent} failed={failed}"
+    )
+    _log_run(
+        "signal-pipeline",
+        "success" if failed == 0 else "partial",
+        elapsed,
+        f"priority={len(priority)} watchlist={len(watchlist)} blocked={len(blocked)} sent={sent} failed={failed}",
+        {
+            "candidates": len(candidates),
+            "priority": len(priority),
+            "watchlist": len(watchlist),
+            "blocked": len(blocked),
+            "new_priority": len(new_priority),
+            "sent": sent,
+            "failed": failed,
+            "dry_run": dry_run,
+        },
+    )
 
 
-def _run_league(league: str, model_dir: Path, staging_dir: Path, today: date) -> list[dict[str, Any]]:
+def _run_league(
+    league: str, model_dir: Path, staging_dir: Path, today: date
+) -> list[dict[str, Any]]:
     from src.models.model_registry import ModelRegistry
     from src.signals.football_runtime_scan import generate_football_signals_runtime
+
     registry = ModelRegistry(model_dir)
     try:
         model = registry.load_latest(league, production_only=True)
@@ -85,10 +112,13 @@ def _run_league(league: str, model_dir: Path, staging_dir: Path, today: date) ->
         return []
     calibrator = None
     try:
-        calibrator = registry.load_calibrator(model.model_id)
+        if model.model_id:
+            calibrator = registry.load_calibrator(model.model_id)
     except Exception:
         pass
-    return generate_football_signals_runtime(model, league, today, staging_dir, os.environ.get("THE_ODDS_API_KEY", ""), calibrator)
+    return generate_football_signals_runtime(
+        model, league, today, staging_dir, os.environ.get("THE_ODDS_API_KEY", ""), calibrator
+    )
 
 
 def _run_tennis(model_dir: Path) -> list[dict[str, Any]]:
@@ -96,11 +126,14 @@ def _run_tennis(model_dir: Path) -> list[dict[str, Any]]:
     if not api_key:
         return []
     from src.signals.tennis_runtime_scan import scan_tennis_h2h_runtime
+
     result = scan_tennis_h2h_runtime(model_dir / "tennis_elo_atp_latest.pkl", api_key)
     return list(result.get("all_signals", []))
 
 
-def _partition_by_timestamp_policy(signals: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[tuple[dict[str, Any], str]]]:
+def _partition_by_timestamp_policy(
+    signals: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[tuple[dict[str, Any], str]]]:
     allowed: list[dict[str, Any]] = []
     blocked: list[tuple[dict[str, Any], str]] = []
     for signal in signals:
@@ -127,21 +160,30 @@ def _partition_by_timestamp_policy(signals: list[dict[str, Any]]) -> tuple[list[
 
 def _notify_priority(signals: list[dict[str, Any]], ledger) -> tuple[int, int, int]:
     from src.integrations.telegram_sender import TelegramConfig, TelegramSender
+
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
     dry_mode = not (token and chat_id)
-    sender = TelegramSender(TelegramConfig(bot_token=token or "dry-run", chat_id=chat_id or "dry-run", dry_run=dry_mode))
+    sender = TelegramSender(
+        TelegramConfig(bot_token=token or "dry-run", chat_id=chat_id or "dry-run", dry_run=dry_mode)
+    )
     sent = failed = dry_runs = 0
     for signal in signals:
         signal_id = str(signal["signal_id"])
         result = sender.send_message(_format_priority_alert(signal))
         if result.get("ok"):
             status = "dry_run" if result.get("dry_run") else "sent"
-            ledger.mark_delivery(signal_id, status, delivery_result={"ok": True, "dry_run": bool(result.get("dry_run"))})
+            ledger.mark_delivery(
+                signal_id,
+                status,
+                delivery_result={"ok": True, "dry_run": bool(result.get("dry_run"))},
+            )
             dry_runs += int(status == "dry_run")
             sent += int(status == "sent")
         else:
-            ledger.mark_delivery(signal_id, "failed", delivery_result={"ok": False, "error": result.get("error")})
+            ledger.mark_delivery(
+                signal_id, "failed", delivery_result={"ok": False, "error": result.get("error")}
+            )
             failed += 1
     return sent, failed, dry_runs
 
@@ -161,12 +203,16 @@ def _format_priority_alert(signal: dict[str, Any]) -> str:
     return f"{title}\nКоэффициент: <b>{odds}</b>\nВероятность модели: <b>{prob_text}</b>\nEdge: <b>{edge}%</b>{extras}\n\n📄 Бумажный сигнал. Проверьте линию перед любым самостоятельным решением."
 
 
-def _log_run(job: str, status: str, duration_s: float, message: str, meta: dict[str, Any] | None = None) -> None:
+def _log_run(
+    job: str, status: str, duration_s: float, message: str, meta: dict[str, Any] | None = None
+) -> None:
     try:
         from src.infrastructure.render_db import get_db
+
         get_db().log_cron_run(job, status, duration_s, message, meta)
     except Exception:
         pass
+
 
 if __name__ == "__main__":
     main()

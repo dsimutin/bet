@@ -168,7 +168,7 @@ def api_collector_status() -> dict[str, Any]:
         # Count lines and read only the last one to avoid loading the full file
         with live_path.open(encoding="utf-8") as fh:
             last_line = ""
-            for line_count, last_line in enumerate(fh, start=1):  # type: ignore[assignment]
+            for line_count, last_line in enumerate(fh, start=1):
                 pass
             else:
                 if last_line:

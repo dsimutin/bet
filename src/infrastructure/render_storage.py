@@ -83,6 +83,7 @@ class RenderStorage:
 
     def disk_usage_mb(self) -> dict[str, float]:
         """Return disk usage in MB for key directories."""
+
         def _mb(p: Path) -> float:
             if not p.exists():
                 return 0.0

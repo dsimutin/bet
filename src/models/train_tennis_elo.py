@@ -52,12 +52,15 @@ def main() -> None:
 
     _log.info(
         "Saved: %s | players=%d, matches=%d",
-        model_path.name, model.params.n_players, model.params.n_matches,
+        model_path.name,
+        model.params.n_players,
+        model.params.n_matches,
     )
 
     # Write stable pointer so the scanner always knows which file to load
     pointer_path = args.model_dir / "tennis_elo_atp_latest.pkl"
     import shutil
+
     shutil.copy2(model_path, pointer_path)
     _log.info("Latest pointer: %s", pointer_path)
 

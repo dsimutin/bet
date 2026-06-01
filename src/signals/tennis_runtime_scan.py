@@ -17,17 +17,15 @@ from src.signals import tennis_signal_scan as research_scanner
 
 def scan_tennis_h2h_runtime(model_path: Path, api_key: str) -> dict[str, Any]:
     """Run the existing ELO/Markov model against cached h2h-only live odds."""
-    original_fetch = research_scanner._fetch_atp_events
-    research_scanner._fetch_atp_events = get_tennis_h2h_events  # type: ignore[attr-defined]
+    original_fetch = research_scanner._fetch_atp_events  # type: ignore[assignment]
+    research_scanner._fetch_atp_events = get_tennis_h2h_events  # type: ignore[assignment]
     try:
         result = research_scanner.scan_tennis_signals(model_path=model_path, api_key=api_key)
     finally:
-        research_scanner._fetch_atp_events = original_fetch  # type: ignore[attr-defined]
+        research_scanner._fetch_atp_events = original_fetch  # type: ignore[assignment]
 
     h2h_signals = [
-        signal
-        for signal in result.get("all_signals", [])
-        if signal.get("market", "h2h") == "h2h"
+        signal for signal in result.get("all_signals", []) if signal.get("market", "h2h") == "h2h"
     ]
     result["all_signals"] = h2h_signals
     result["signals_count"] = len(h2h_signals)

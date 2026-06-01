@@ -22,12 +22,12 @@ def install_signal_ledger_persistence() -> None:
     if getattr(SignalLedger, "_supabase_runtime_patch_installed", False):
         return
 
-    original_load = SignalLedger.load_or_create.__func__
+    original_load_or_create = SignalLedger.load_or_create
     original_save = SignalLedger.save
 
-    @classmethod
-    def load_or_create(cls, path: Path):
-        local = original_load(cls, path)
+    def _load_or_create_patched(cls: Any, path: Path) -> Any:
+        # Call the original classmethod's underlying function
+        local = original_load_or_create.__func__(cls, path)  # type: ignore[attr-defined]
         local_entries = local.entries()
         if not supabase_ledger.is_enabled():
             return local
@@ -48,7 +48,7 @@ def install_signal_ledger_persistence() -> None:
             _log.exception("Supabase ledger load failed; falling back to local JSON")
             return local
 
-    def save(self, path: Path):
+    def _save_patched(self: Any, path: Path) -> Path:
         mirror_path = original_save(self, path)
         if supabase_ledger.is_enabled():
             try:
@@ -59,6 +59,6 @@ def install_signal_ledger_persistence() -> None:
                 _log.exception("Supabase ledger save failed; JSON mirror remains available")
         return mirror_path
 
-    SignalLedger.load_or_create = load_or_create
-    SignalLedger.save = save
-    SignalLedger._supabase_runtime_patch_installed = True
+    SignalLedger.load_or_create = classmethod(_load_or_create_patched)  # type: ignore[method-assign, assignment]
+    SignalLedger.save = _save_patched  # type: ignore[method-assign]
+    setattr(SignalLedger, "_supabase_runtime_patch_installed", True)

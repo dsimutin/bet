@@ -113,12 +113,32 @@ def _parse(content: str) -> pd.DataFrame:
         df["match_date"] = pd.NaT
 
     keep = [
-        "match_date", "tourney_name", "surface", "tourney_level", "round", "best_of",
-        "winner_name", "loser_name", "winner_rank", "loser_rank",
+        "match_date",
+        "tourney_name",
+        "surface",
+        "tourney_level",
+        "round",
+        "best_of",
+        "winner_name",
+        "loser_name",
+        "winner_rank",
+        "loser_rank",
         "score",  # needed for retirement/injury detection (RET, W/O)
         # Serve/return stats (Sackmann format)
-        "w_svpt", "w_1stIn", "w_1stWon", "w_2ndWon", "w_SvGms", "w_bpSaved", "w_bpFaced",
-        "l_svpt", "l_1stIn", "l_1stWon", "l_2ndWon", "l_SvGms", "l_bpSaved", "l_bpFaced",
+        "w_svpt",
+        "w_1stIn",
+        "w_1stWon",
+        "w_2ndWon",
+        "w_SvGms",
+        "w_bpSaved",
+        "w_bpFaced",
+        "l_svpt",
+        "l_1stIn",
+        "l_1stWon",
+        "l_2ndWon",
+        "l_SvGms",
+        "l_bpSaved",
+        "l_bpFaced",
     ]
     for col in ("b365w", "b365l", "psw", "psl"):
         if col in df.columns:

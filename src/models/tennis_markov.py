@@ -40,22 +40,23 @@ MIN_MATCHES_FOR_SIGNAL = 15
 
 # Blend weight: how much to trust Markov vs ELO
 # When serve data is rich, Markov dominates; otherwise fall back to ELO
-MARKOV_WEIGHT_MAX = 0.40   # when player has lots of serve data
-MARKOV_WEIGHT_MIN = 0.20   # when serve data is sparse
+MARKOV_WEIGHT_MAX = 0.40  # when player has lots of serve data
+MARKOV_WEIGHT_MIN = 0.20  # when serve data is sparse
 
 
 # ---------------------------------------------------------------------------
 # Core Markov math  (all @lru_cache for speed)
 # ---------------------------------------------------------------------------
 
+
 @lru_cache(maxsize=None)
 def _p_win_game(p: float) -> float:
     """P(server wins game) given p = P(server wins point on serve)."""
     q = 1.0 - p
     # Win without reaching deuce: 4-0, 4-1, 4-2
-    no_deuce = p**4 * (1.0 + 4.0*q + 10.0*q**2)
+    no_deuce = p**4 * (1.0 + 4.0 * q + 10.0 * q**2)
     # Reach deuce: C(6,3)=20 ways both reach 3-3
-    p_deuce = 20.0 * (p * q)**3
+    p_deuce = 20.0 * (p * q) ** 3
     # Win from deuce (geometric series): p² / (p² + q²)
     p_win_deuce = p**2 / (p**2 + q**2)
     return no_deuce + p_deuce * p_win_deuce
@@ -70,12 +71,9 @@ def _p_win_tiebreak(p_eff: float) -> float:
     """
     q = 1.0 - p_eff
     # Win 7-k for k = 0..5
-    total = sum(
-        math.comb(6 + k, k) * p_eff**7 * q**k
-        for k in range(6)
-    )
+    total = sum(math.comb(6 + k, k) * p_eff**7 * q**k for k in range(6))
     # Reach 6-6 sudden death: C(12,6) * (pq)^6
-    p_sd = math.comb(12, 6) * (p_eff * q)**6
+    p_sd = math.comb(12, 6) * (p_eff * q) ** 6
     p_sd_win = p_eff**2 / (p_eff**2 + q**2)
     return total + p_sd * p_sd_win
 
@@ -113,16 +111,18 @@ def _p_win_set(p_serve: float, p_return: float, a_serves_first: bool = True) -> 
             return result
 
         p_game = p_serve if a_serves else p_return
-        result = (p_game * dp(ga + 1, gb, not a_serves)
-                  + (1.0 - p_game) * dp(ga, gb + 1, not a_serves))
+        result = p_game * dp(ga + 1, gb, not a_serves) + (1.0 - p_game) * dp(
+            ga, gb + 1, not a_serves
+        )
         memo[key] = result
         return result
 
     return dp(0, 0, a_serves_first)
 
 
-def _p_win_match(p_serve: float, p_return: float,
-                 best_of: int = 3, a_serves_first: bool = True) -> float:
+def _p_win_match(
+    p_serve: float, p_return: float, best_of: int = 3, a_serves_first: bool = True
+) -> float:
     """P(player A wins match) via Markov chain.
 
     best_of: 3 (regular tour) or 5 (Grand Slams)
@@ -147,16 +147,18 @@ def _p_win_match(p_serve: float, p_return: float,
         ps = _p_win_set(p_serve, p_return, a_starts_set)
         # Who starts next set? In most tours the loser of last game serves next.
         # Approximate: alternate who serves first in each set
-        result = (ps * dp(sa + 1, sb, not a_starts_set)
-                  + (1.0 - ps) * dp(sa, sb + 1, not a_starts_set))
+        result = ps * dp(sa + 1, sb, not a_starts_set) + (1.0 - ps) * dp(
+            sa, sb + 1, not a_starts_set
+        )
         memo[key] = result
         return result
 
     return dp(0, 0, a_serves_first)
 
 
-def _set_score_probs(p_serve: float, p_return: float,
-                     a_serves_first: bool = True) -> dict[tuple[int, int], float]:
+def _set_score_probs(
+    p_serve: float, p_return: float, a_serves_first: bool = True
+) -> dict[tuple[int, int], float]:
     """P(set ends with score ga-gb) for all reachable scores.
 
     Returns dict mapping (games_a, games_b) → probability.
@@ -164,6 +166,7 @@ def _set_score_probs(p_serve: float, p_return: float,
     """
     # DP: state → probability of reaching it
     from collections import defaultdict as _dd
+
     probs: dict[tuple, float] = {(0, 0, a_serves_first): 1.0}
     result: dict[tuple[int, int], float] = _dd(float)
 
@@ -203,15 +206,15 @@ def _set_score_probs(p_serve: float, p_return: float,
     return dict(result)
 
 
-def _expected_games_per_set(p_serve: float, p_return: float,
-                             a_serves_first: bool = True) -> float:
+def _expected_games_per_set(p_serve: float, p_return: float, a_serves_first: bool = True) -> float:
     """Expected number of games in a single set."""
     dist = _set_score_probs(p_serve, p_return, a_serves_first)
     return sum((ga + gb) * prob for (ga, gb), prob in dist.items())
 
 
-def _p_win_set_with_games(p_serve: float, p_return: float,
-                           a_serves_first: bool = True) -> tuple[float, float, float]:
+def _p_win_set_with_games(
+    p_serve: float, p_return: float, a_serves_first: bool = True
+) -> tuple[float, float, float]:
     """Returns (P(A wins set), E[games | A wins], E[games | B wins])."""
     dist = _set_score_probs(p_serve, p_return, a_serves_first)
     p_a_wins = 0.0
@@ -230,9 +233,9 @@ def _p_win_set_with_games(p_serve: float, p_return: float,
     return p_a_wins, e_games_a, e_games_b
 
 
-def _set_score_match_dist(p_serve: float, p_return: float,
-                           best_of: int = 3,
-                           a_serves_first: bool = True) -> dict[tuple[int, int], float]:
+def _set_score_match_dist(
+    p_serve: float, p_return: float, best_of: int = 3, a_serves_first: bool = True
+) -> dict[tuple[int, int], float]:
     """P(match ends sa-sb sets) for each possible set score.
 
     Returns dict like {(2,0): 0.45, (2,1): 0.30, (0,2): 0.15, (1,2): 0.10}
@@ -245,9 +248,9 @@ def _set_score_match_dist(p_serve: float, p_return: float,
             return {(sa, sb): 1.0}
         if sb == sets_needed:
             return {(sa, sb): 1.0}
-        key = (sa, sb, a_starts)
+        key: tuple[int, int, bool] = (sa, sb, a_starts)
         if key in memo:
-            return {key: memo[key]}  # can't memoize dicts cleanly, use flat DP
+            return {(sa, sb): memo[key]}  # can't memoize dicts cleanly, use flat DP
 
         result: dict[tuple[int, int], float] = {}
         ps = _p_win_set(p_serve, p_return, a_starts)
@@ -263,6 +266,7 @@ def _set_score_match_dist(p_serve: float, p_return: float,
 # ---------------------------------------------------------------------------
 # Player serve stats tracker
 # ---------------------------------------------------------------------------
+
 
 def _default_list() -> list:
     return []
@@ -281,7 +285,9 @@ class TennisMarkovModel:
 
     def __init__(self) -> None:
         # Rolling serve stats: player → surface → list of {p_serve, n_points, date}
-        self._serve: dict[str, dict[str, list[dict]]] = defaultdict(lambda: defaultdict(_default_list))
+        self._serve: dict[str, dict[str, list[dict]]] = defaultdict(
+            lambda: defaultdict(_default_list)
+        )
         # ELO ratings (simple, used for blend when serve data is sparse)
         self._elo: dict[str, float] = {}
         self._elo_surface: dict[str, dict[str, float]] = {s: {} for s in SURFACES}
@@ -327,8 +333,7 @@ class TennisMarkovModel:
         _log.info("[markov] Fitted %d matches, %d players", n, len(self._match_count))
 
     def _update_serve(
-        self, player: str, surface: str, row: Any,
-        is_winner: bool, match_date: date
+        self, player: str, surface: str, row: Any, is_winner: bool, match_date: date
     ) -> None:
         prefix = "w_" if is_winner else "l_"
         svpt = _safe_int(row, f"{prefix}svpt")
@@ -337,7 +342,11 @@ class TennisMarkovModel:
         second_won = _safe_int(row, f"{prefix}2ndWon")
         if svpt is None or svpt < 10:
             return
-        p_serve = (first_won + second_won) / svpt if (first_won is not None and second_won is not None) else None
+        p_serve = (
+            (first_won + second_won) / svpt
+            if (first_won is not None and second_won is not None)
+            else None
+        )
         if p_serve is None or not (0.2 <= p_serve <= 0.95):
             return
         entry = {"p": p_serve, "n": svpt, "date": match_date}
@@ -386,9 +395,7 @@ class TennisMarkovModel:
             return None
         return sum(e["p"] * e["n"] for e in lst) / total_n
 
-    def inject_live_serve_stats(
-        self, stats: dict[str, dict[str, float]]
-    ) -> None:
+    def inject_live_serve_stats(self, stats: dict[str, dict[str, float]]) -> None:
         """Override serve stats with live data from Tennis Abstract.
 
         stats: {player_name: {surface: p_serve}}
@@ -497,19 +504,29 @@ class TennisMarkovModel:
                 return {(2, 0): p20, (2, 1): p21, (0, 2): p02, (1, 2): p12}
             else:
                 # BO5 rough approximation
-                p30 = p ** 3
-                p31 = 3 * p ** 3 * (1 - p)
-                p32 = 6 * p ** 3 * (1 - p) ** 2
+                p30 = p**3
+                p31 = 3 * p**3 * (1 - p)
+                p32 = 6 * p**3 * (1 - p) ** 2
                 q = 1 - p
-                return {(3, 0): p30, (3, 1): p31, (3, 2): p32,
-                        (0, 3): q**3, (1, 3): 3*q**3*p, (2, 3): 6*q**3*p**2}
+                return {
+                    (3, 0): p30,
+                    (3, 1): p31,
+                    (3, 2): p32,
+                    (0, 3): q**3,
+                    (1, 3): 3 * q**3 * p,
+                    (2, 3): 6 * q**3 * p**2,
+                }
         pg_s = _p_win_game(round(p1_serve, 4))
         pg_r = 1.0 - _p_win_game(round(p2_serve, 4))
         return _set_score_match_dist(pg_s, pg_r, best_of=best_of)
 
     def predict_total_games_over(
-        self, threshold: float, player1: str, player2: str,
-        surface: str = "hard", best_of: int = 3,
+        self,
+        threshold: float,
+        player1: str,
+        player2: str,
+        surface: str = "hard",
+        best_of: int = 3,
     ) -> float:
         """P(total games in match > threshold).
 
@@ -540,6 +557,7 @@ class TennisMarkovModel:
             # Better: use the variance. For now, use a soft threshold based on
             # typical set length variance (~3 games std per set)
             import math as _math
+
             std = _math.sqrt(n_sets) * 3.0  # rough std of total games
             if std < 0.5:
                 p_over += p_score * (1.0 if e_total > threshold else 0.0)
@@ -551,8 +569,12 @@ class TennisMarkovModel:
         return max(0.05, min(0.95, p_over))
 
     def predict_set_handicap(
-        self, handicap: float, player1: str, player2: str,
-        surface: str = "hard", best_of: int = 3,
+        self,
+        handicap: float,
+        player1: str,
+        player2: str,
+        surface: str = "hard",
+        best_of: int = 3,
     ) -> float:
         """P(player1 covers set handicap).
 
@@ -612,6 +634,7 @@ class TennisMarkovModel:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _safe_int(row: Any, col: str) -> int | None:
     try:

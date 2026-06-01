@@ -21,11 +21,11 @@ import pandas as pd
 class HomeAdvantageFeatures:
     home_team: str
     away_team: str
-    home_win_rate_home_games: float     # fraction of home wins in last N home games
-    away_win_rate_away_games: float     # fraction of away wins in last N away games
-    home_goals_at_home_mean: float      # avg goals scored at home
+    home_win_rate_home_games: float  # fraction of home wins in last N home games
+    away_win_rate_away_games: float  # fraction of away wins in last N away games
+    home_goals_at_home_mean: float  # avg goals scored at home
     away_goals_conceded_away_mean: float
-    home_advantage_score: float         # composite (home_wr_home - away_wr_away)
+    home_advantage_score: float  # composite (home_wr_home - away_wr_away)
 
 
 class HomeAdvantageBuilder:
@@ -36,9 +36,7 @@ class HomeAdvantageBuilder:
         self._home_records: dict[str, list[dict]] = {}
         self._away_records: dict[str, list[dict]] = {}
 
-    def build(
-        self, matches: pd.DataFrame, cutoff_date: date | None = None
-    ) -> HomeAdvantageBuilder:
+    def build(self, matches: pd.DataFrame, cutoff_date: date | None = None) -> HomeAdvantageBuilder:
         df = _prepare(matches)
         if cutoff_date is not None:
             df = df[df["match_date"] < cutoff_date]
@@ -50,12 +48,18 @@ class HomeAdvantageBuilder:
             home = str(row["home_team"])
             away = str(row["away_team"])
             hg, ag = int(row["home_goals"]), int(row["away_goals"])
-            home_rec.setdefault(home, []).append({
-                "goals_scored": hg, "win": int(hg > ag),
-            })
-            away_rec.setdefault(away, []).append({
-                "goals_conceded": hg, "win": int(ag > hg),
-            })
+            home_rec.setdefault(home, []).append(
+                {
+                    "goals_scored": hg,
+                    "win": int(hg > ag),
+                }
+            )
+            away_rec.setdefault(away, []).append(
+                {
+                    "goals_conceded": hg,
+                    "win": int(ag > hg),
+                }
+            )
 
         self._home_records = home_rec
         self._away_records = away_rec
@@ -66,9 +70,7 @@ class HomeAdvantageBuilder:
         """All home-game records per team (for debugging and inspection)."""
         return dict(self._home_records)
 
-    def features_for_match(
-        self, home_team: str, away_team: str
-    ) -> HomeAdvantageFeatures:
+    def features_for_match(self, home_team: str, away_team: str) -> HomeAdvantageFeatures:
         h_recs = self._home_records.get(home_team, [])[-self.window :]
         a_recs = self._away_records.get(away_team, [])[-self.window :]
 
@@ -97,21 +99,22 @@ class HomeAdvantageBuilder:
         rows = []
         for _, row in df.iterrows():
             feat = self.features_for_match(str(row[home_col]), str(row[away_col]))
-            rows.append({
-                "ha_home_win_rate": feat.home_win_rate_home_games,
-                "ha_away_win_rate": feat.away_win_rate_away_games,
-                "ha_home_gs_mean": feat.home_goals_at_home_mean,
-                "ha_away_gc_mean": feat.away_goals_conceded_away_mean,
-                "ha_score": feat.home_advantage_score,
-            })
-        return pd.concat(
-            [df.reset_index(drop=True), pd.DataFrame(rows)], axis=1
-        )
+            rows.append(
+                {
+                    "ha_home_win_rate": feat.home_win_rate_home_games,
+                    "ha_away_win_rate": feat.away_win_rate_away_games,
+                    "ha_home_gs_mean": feat.home_goals_at_home_mean,
+                    "ha_away_gc_mean": feat.away_goals_conceded_away_mean,
+                    "ha_score": feat.home_advantage_score,
+                }
+            )
+        return pd.concat([df.reset_index(drop=True), pd.DataFrame(rows)], axis=1)
 
 
 # ------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------
+
 
 def _safe_mean(values: list[float]) -> float:
     return sum(values) / len(values) if values else 0.0
@@ -120,10 +123,14 @@ def _safe_mean(values: list[float]) -> float:
 def _prepare(matches: pd.DataFrame) -> pd.DataFrame:
     df = matches.copy()
     remap = {
-        "Date": "match_date", "date": "match_date",
-        "HomeTeam": "home_team", "AwayTeam": "away_team",
-        "FTHG": "home_goals", "FTAG": "away_goals",
-        "goals_home_ft": "home_goals", "goals_away_ft": "away_goals",
+        "Date": "match_date",
+        "date": "match_date",
+        "HomeTeam": "home_team",
+        "AwayTeam": "away_team",
+        "FTHG": "home_goals",
+        "FTAG": "away_goals",
+        "goals_home_ft": "home_goals",
+        "goals_away_ft": "away_goals",
     }
     df = df.rename(columns={k: v for k, v in remap.items() if k in df.columns})
     required = {"match_date", "home_team", "away_team", "home_goals", "away_goals"}

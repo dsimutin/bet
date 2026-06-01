@@ -1,4 +1,5 @@
 """Detailed Telegram views for today's football and tennis paper signals."""
+
 from __future__ import annotations
 from datetime import date, datetime, timezone
 from html import escape
@@ -14,16 +15,19 @@ def build_today_text() -> str:
     entries = list(_load_entries())
     today = date.today()
     visible = [
-        item for item in entries
+        item
+        for item in entries
         if item.get("ledger_status") == "open"
         and item.get("delivery_status") != "blocked"
         and item.get("recommendation_tier", "priority") in {"priority", "watchlist"}
         and _event_day(item) == today
     ]
-    visible.sort(key=lambda item: (
-        0 if item.get("recommendation_tier") == "priority" else 1,
-        -_num(item.get("edge_pct", item.get("edge_vs_fair_pct"))),
-    ))
+    visible.sort(
+        key=lambda item: (
+            0 if item.get("recommendation_tier") == "priority" else 1,
+            -_num(item.get("edge_pct", item.get("edge_vs_fair_pct"))),
+        )
+    )
     priority = [item for item in visible if item.get("recommendation_tier") == "priority"]
     watch = [item for item in visible if item.get("recommendation_tier") == "watchlist"]
     lines = [f"📅 <b>Ставки на сегодня — {today.strftime('%d.%m.%Y')}</b>", ""]
@@ -39,22 +43,31 @@ def build_today_text() -> str:
             lines.extend(_format_pick(item, priority=True))
     if watch:
         lines.append(f"\n👀 <b>Наблюдение ({len(watch)})</b>")
-        lines.append("Edge есть, но уверенность ниже. Эти варианты бот сохраняет для обучения и показывает отдельно.")
+        lines.append(
+            "Edge есть, но уверенность ниже. Эти варианты бот сохраняет для обучения и показывает отдельно."
+        )
         for item in watch:
             lines.extend(_format_pick(item, priority=False))
-    lines.append("\n📄 Бумажные сигналы. Коэффициенты меняются: перед любым решением проверьте линию самостоятельно.")
+    lines.append(
+        "\n📄 Бумажные сигналы. Коэффициенты меняются: перед любым решением проверьте линию самостоятельно."
+    )
     return "\n".join(lines)
 
 
 def build_stats_text() -> str:
     entries = list(_load_entries())
     settled = [item for item in entries if item.get("ledger_status") == "settled"]
-    opened = [item for item in entries if item.get("ledger_status") == "open" and item.get("delivery_status") != "blocked"]
+    opened = [
+        item
+        for item in entries
+        if item.get("ledger_status") == "open" and item.get("delivery_status") != "blocked"
+    ]
     wins = [item for item in settled if item.get("result") == "win"]
     pnl = sum(_num(item.get("pnl_units")) for item in settled)
     stake = sum(_num(item.get("stake_units"), 1.0) for item in settled)
     lines = [
-        "📈 <b>Статистика бумажных сигналов</b>", "",
+        "📈 <b>Статистика бумажных сигналов</b>",
+        "",
         f"Всего записей: <b>{len(entries)}</b>",
         f"Открыто: {len(opened)} | Закрыто: {len(settled)}",
         f"Победы: {len(wins)} | Точность: {(len(wins) / len(settled) * 100 if settled else 0):.1f}%",
@@ -63,22 +76,34 @@ def build_stats_text() -> str:
     for sport, icon in (("football", "⚽"), ("tennis", "🎾")):
         rows = [item for item in settled if str(item.get("sport") or "football") == sport]
         sport_wins = sum(item.get("result") == "win" for item in rows)
-        lines.append(f"{icon} {sport}: {sport_wins}/{len(rows)}" if rows else f"{icon} {sport}: пока нет закрытых ставок")
+        lines.append(
+            f"{icon} {sport}: {sport_wins}/{len(rows)}"
+            if rows
+            else f"{icon} {sport}: пока нет закрытых ставок"
+        )
     return "\n".join(lines)
 
 
 def build_history_text(limit: int = 20) -> str:
     entries = list(_load_entries())
-    entries.sort(key=lambda item: item.get("ledger_updated_at_utc") or item.get("ledger_created_at_utc") or "", reverse=True)
+    entries.sort(
+        key=lambda item: item.get("ledger_updated_at_utc")
+        or item.get("ledger_created_at_utc")
+        or "",
+        reverse=True,
+    )
     lines = ["🏆 <b>История ставок</b>", "", "Последние записи по футболу и теннису:"]
     for item in entries[:limit]:
         sport = "🎾" if item.get("sport") == "tennis" else "⚽"
-        status = {"win": "✅", "loss": "❌", "void": "↩️"}.get(item.get("result"), "⏳")
+        result = str(item.get("result", "")) if item.get("result") else ""
+        status = {"win": "✅", "loss": "❌", "void": "↩️"}.get(result, "⏳")
         if item.get("sport") == "tennis":
             name = f"{item.get('player', '?')} vs {item.get('opponent', '?')}"
         else:
             name = f"{item.get('home_team', '?')} — {item.get('away_team', '?')} [{item.get('selection_ru', item.get('selection', '?'))}]"
-        lines.append(f"{status}{sport} {escape(str(name))} @ {item.get('entry_odds', '?')} | {escape(str(item.get('recommendation_tier', 'legacy')))}")
+        lines.append(
+            f"{status}{sport} {escape(str(name))} @ {item.get('entry_odds', '?')} | {escape(str(item.get('recommendation_tier', 'legacy')))}"
+        )
     if len(lines) == 3:
         lines.append("Пока нет записей.")
     return "\n".join(lines)
@@ -124,7 +149,13 @@ def _format_pick(item: dict[str, Any], priority: bool) -> list[str]:
             f"Справедливый коэффициент модели: {item.get('reference_fair_odds', '?')}",
             f"Размер paper-ставки: {item.get('stake_units', 1)}u",
         ]
-    lines = ["", title, f"Время: {_event_time_text(item)}", f"Коэффициент: <b>{odds}</b> | Вероятность модели: <b>{prob_text}</b>", f"Рынок после снятия маржи: {market_text} | Edge: <b>{edge}%</b>"]
+    lines = [
+        "",
+        title,
+        f"Время: {_event_time_text(item)}",
+        f"Коэффициент: <b>{odds}</b> | Вероятность модели: <b>{prob_text}</b>",
+        f"Рынок после снятия маржи: {market_text} | Edge: <b>{edge}%</b>",
+    ]
     lines.extend(f"• {fact}" for fact in facts)
     if reason:
         lines.append(f"• Статус: {reason}")
@@ -133,6 +164,7 @@ def _format_pick(item: dict[str, Any], priority: bool) -> list[str]:
 
 def _load_entries() -> list[dict[str, Any]]:
     from src.models.signal_ledger import SignalLedger
+
     return list(SignalLedger.load_or_create(LEDGER_PATH).entries().values())
 
 
@@ -154,7 +186,11 @@ def _event_time_text(item: dict[str, Any]) -> str:
     if not raw:
         return "?"
     try:
-        return datetime.fromisoformat(str(raw).replace("Z", "+00:00")).astimezone(timezone.utc).strftime("%d.%m %H:%M UTC")
+        return (
+            datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+            .astimezone(timezone.utc)
+            .strftime("%d.%m %H:%M UTC")
+        )
     except ValueError:
         return escape(str(raw))
 
@@ -162,8 +198,10 @@ def _event_time_text(item: dict[str, Any]) -> str:
 def _pct(value: Any) -> str:
     return f"{float(value):.1%}" if isinstance(value, (int, float)) else "?"
 
+
 def _signed_pct(value: Any) -> str:
     return f"{float(value):+.1%}" if isinstance(value, (int, float)) else "?"
+
 
 def _num(value: Any, default: float = 0.0) -> float:
     try:

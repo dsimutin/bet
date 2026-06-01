@@ -45,8 +45,8 @@ class MatchFormFeatures:
     away_goals_conceded_mean: float
     away_points_per_game: float
     away_win_rate: float
-    goals_diff_mean: float          # home_scored_mean − away_scored_mean
-    form_advantage: float           # home_ppg − away_ppg
+    goals_diff_mean: float  # home_scored_mean − away_scored_mean
+    form_advantage: float  # home_ppg − away_ppg
 
 
 class RollingFormBuilder:
@@ -56,9 +56,7 @@ class RollingFormBuilder:
         self.window = window
         self._team_records: dict[str, list[dict[str, Any]]] = {}
 
-    def build(
-        self, matches: pd.DataFrame, cutoff_date: date | None = None
-    ) -> RollingFormBuilder:
+    def build(self, matches: pd.DataFrame, cutoff_date: date | None = None) -> RollingFormBuilder:
         """
         Ingest historical matches, optionally capped at ``cutoff_date``.
         Call before any ``features_for_*`` method.
@@ -74,14 +72,28 @@ class RollingFormBuilder:
             away = str(row["away_team"])
             hg, ag = int(row["home_goals"]), int(row["away_goals"])
 
-            _push(records, home, {
-                "goals_scored": hg, "goals_conceded": ag,
-                "win": int(hg > ag), "draw": int(hg == ag), "loss": int(hg < ag),
-            })
-            _push(records, away, {
-                "goals_scored": ag, "goals_conceded": hg,
-                "win": int(ag > hg), "draw": int(ag == hg), "loss": int(ag < hg),
-            })
+            _push(
+                records,
+                home,
+                {
+                    "goals_scored": hg,
+                    "goals_conceded": ag,
+                    "win": int(hg > ag),
+                    "draw": int(hg == ag),
+                    "loss": int(hg < ag),
+                },
+            )
+            _push(
+                records,
+                away,
+                {
+                    "goals_scored": ag,
+                    "goals_conceded": hg,
+                    "win": int(ag > hg),
+                    "draw": int(ag == hg),
+                    "loss": int(ag < hg),
+                },
+            )
 
         self._team_records = records
         return self
@@ -96,9 +108,15 @@ class RollingFormBuilder:
         n = len(records)
         if n == 0:
             return TeamFormFeatures(
-                team=team, n_matches=0, wins=0, draws=0, losses=0,
-                goals_scored_mean=0.0, goals_conceded_mean=0.0,
-                points_per_game=0.0, win_rate=0.0,
+                team=team,
+                n_matches=0,
+                wins=0,
+                draws=0,
+                losses=0,
+                goals_scored_mean=0.0,
+                goals_conceded_mean=0.0,
+                points_per_game=0.0,
+                win_rate=0.0,
             )
         wins = sum(r["win"] for r in records)
         draws = sum(r["draw"] for r in records)
@@ -107,8 +125,11 @@ class RollingFormBuilder:
         gc_mean = sum(r["goals_conceded"] for r in records) / n
         ppg = (wins * 3 + draws) / n
         return TeamFormFeatures(
-            team=team, n_matches=n,
-            wins=wins, draws=draws, losses=losses,
+            team=team,
+            n_matches=n,
+            wins=wins,
+            draws=draws,
+            losses=losses,
             goals_scored_mean=round(gs_mean, 4),
             goals_conceded_mean=round(gc_mean, 4),
             points_per_game=round(ppg, 4),
@@ -146,36 +167,41 @@ class RollingFormBuilder:
         rows = []
         for _, row in df.iterrows():
             feat = self.features_for_match(str(row[home_col]), str(row[away_col]))
-            rows.append({
-                "form_home_wins": feat.home_wins,
-                "form_home_gs_mean": feat.home_goals_scored_mean,
-                "form_home_gc_mean": feat.home_goals_conceded_mean,
-                "form_home_ppg": feat.home_points_per_game,
-                "form_home_win_rate": feat.home_win_rate,
-                "form_away_wins": feat.away_wins,
-                "form_away_gs_mean": feat.away_goals_scored_mean,
-                "form_away_gc_mean": feat.away_goals_conceded_mean,
-                "form_away_ppg": feat.away_points_per_game,
-                "form_away_win_rate": feat.away_win_rate,
-                "form_goals_diff_mean": feat.goals_diff_mean,
-                "form_advantage": feat.form_advantage,
-            })
-        return pd.concat(
-            [df.reset_index(drop=True), pd.DataFrame(rows)], axis=1
-        )
+            rows.append(
+                {
+                    "form_home_wins": feat.home_wins,
+                    "form_home_gs_mean": feat.home_goals_scored_mean,
+                    "form_home_gc_mean": feat.home_goals_conceded_mean,
+                    "form_home_ppg": feat.home_points_per_game,
+                    "form_home_win_rate": feat.home_win_rate,
+                    "form_away_wins": feat.away_wins,
+                    "form_away_gs_mean": feat.away_goals_scored_mean,
+                    "form_away_gc_mean": feat.away_goals_conceded_mean,
+                    "form_away_ppg": feat.away_points_per_game,
+                    "form_away_win_rate": feat.away_win_rate,
+                    "form_goals_diff_mean": feat.goals_diff_mean,
+                    "form_advantage": feat.form_advantage,
+                }
+            )
+        return pd.concat([df.reset_index(drop=True), pd.DataFrame(rows)], axis=1)
 
 
 # ------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------
 
+
 def _prepare(matches: pd.DataFrame) -> pd.DataFrame:
     df = matches.copy()
     remap = {
-        "Date": "match_date", "date": "match_date",
-        "HomeTeam": "home_team", "AwayTeam": "away_team",
-        "FTHG": "home_goals", "FTAG": "away_goals",
-        "goals_home_ft": "home_goals", "goals_away_ft": "away_goals",
+        "Date": "match_date",
+        "date": "match_date",
+        "HomeTeam": "home_team",
+        "AwayTeam": "away_team",
+        "FTHG": "home_goals",
+        "FTAG": "away_goals",
+        "goals_home_ft": "home_goals",
+        "goals_away_ft": "away_goals",
     }
     df = df.rename(columns={k: v for k, v in remap.items() if k in df.columns})
     required = {"match_date", "home_team", "away_team", "home_goals", "away_goals"}

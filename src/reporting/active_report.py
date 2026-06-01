@@ -46,6 +46,7 @@ _WORLD_CUP_2026_START = datetime(2026, 6, 11, tzinfo=timezone.utc)
 # Public API
 # ---------------------------------------------------------------------------
 
+
 def format_active_report(
     signals_result: dict[str, Any],
     settlement_result: dict[str, Any],
@@ -80,7 +81,9 @@ def format_active_report(
         now_dt = datetime.now(timezone.utc)
         days_to_wc = (_WORLD_CUP_2026_START - now_dt).days
         wc_note = f"🏆 ЧМ 2026 через {days_to_wc} дн. (11 июня)!" if 0 < days_to_wc <= 30 else ""
-        active_display = [s.replace("soccer_", "").replace("_", " ").title() for s in active_soccer[:6]]
+        active_display = [
+            s.replace("soccer_", "").replace("_", " ").title() for s in active_soccer[:6]
+        ]
         parts += ["─────────────────────", "ℹ️ Все настроенные лиги в межсезонье"]
         if wc_note:
             parts.append(wc_note)
@@ -95,6 +98,7 @@ def format_active_report(
 # ---------------------------------------------------------------------------
 # Sections
 # ---------------------------------------------------------------------------
+
 
 def _section_football_by_league(signals_result: dict[str, Any]) -> list[str]:
     """Per-league signal breakdown — the main section users care about."""
@@ -113,7 +117,9 @@ def _section_football_by_league(signals_result: dict[str, Any]) -> list[str]:
     if 0 < days_to_wc <= 30:
         lines.append(f"  🏆 ЧМ 2026: старт через {days_to_wc} дн. (11 июня)")
     elif days_to_wc <= 0 and "soccer_fifa_world_cup" in active_soccer:
-        lines.append("  🏆 ЧМ 2026: идёт! Сигналы по национальным командам не поддерживаются (нет модели)")
+        lines.append(
+            "  🏆 ЧМ 2026: идёт! Сигналы по национальным командам не поддерживаются (нет модели)"
+        )
 
     if not per_league:
         leagues = signals_result.get("leagues", [])
@@ -142,7 +148,9 @@ def _section_football_by_league(signals_result: dict[str, Any]) -> list[str]:
                 else:
                     lines.append(f"  {label}: — нет фикстур (нет Odds API)")
             elif n > 0:
-                lines.append(f"  {label}: 🎯 {n} сигнал{'а' if 1 < n < 5 else 'ов' if n >= 5 else ''}")
+                lines.append(
+                    f"  {label}: 🎯 {n} сигнал{'а' if 1 < n < 5 else 'ов' if n >= 5 else ''}"
+                )
             else:
                 lines.append(f"  {label}: ✅ матчи есть, edge не найден")
 
@@ -187,7 +195,9 @@ def _section_tennis(tennis_result: dict[str, Any]) -> list[str]:
     elif status == "skip" and reason == "no_upcoming_events":
         lines.append("  ✅ нет матчей сегодня")
     elif n > 0:
-        lines.append(f"  🎯 {n} сигнал{'а' if 1 < n < 5 else 'ов' if n >= 5 else ''} из {events} матчей")
+        lines.append(
+            f"  🎯 {n} сигнал{'а' if 1 < n < 5 else 'ов' if n >= 5 else ''} из {events} матчей"
+        )
         top = tennis_result.get("top_signals", [])
         for s in top[:3]:
             player = s.get("player", "?")
@@ -300,7 +310,9 @@ def _section_training(training_result: dict[str, Any]) -> list[str]:
     if tennis_meta_path.exists():
         # Show age in days
         try:
-            age_days = (datetime.now(timezone.utc).timestamp() - tennis_meta_path.stat().st_mtime) / 86400
+            age_days = (
+                datetime.now(timezone.utc).timestamp() - tennis_meta_path.stat().st_mtime
+            ) / 86400
             lines.append(f"  🎾 ATP ELO: production (обновлена {age_days:.0f} дн. назад)")
         except Exception:
             lines.append("  🎾 ATP ELO: production")
@@ -314,8 +326,11 @@ def _section_training(training_result: dict[str, Any]) -> list[str]:
             lines.append(f"Brier: {old_brier:.4f} → {new_brier:.4f} ({direction})")
             lines.append("Решение: " + ("promoted ✅ продвинута" if promoted else "отклонена ❌"))
     else:
-        skip_reason = reason.replace("training skipped: ", "").replace(
-            "only ", "").replace("since last check, ", "")
+        skip_reason = (
+            reason.replace("training skipped: ", "")
+            .replace("only ", "")
+            .replace("since last check, ", "")
+        )
         lines.append(f"Переобучение: пропущено ({skip_reason})")
 
     if model_age_h is not None:
@@ -341,6 +356,7 @@ def _section_health(settlement_result: dict[str, Any]) -> list[str]:
     # Last cron runs
     try:
         from src.models.run_history import read_last_run
+
         for job, label in [
             ("signal_scan", "Сигналы"),
             ("settlement", "Сеттлмент"),

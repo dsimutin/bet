@@ -25,12 +25,12 @@ from urllib.request import Request, urlopen
 _log = logging.getLogger(__name__)
 
 _BASE = "https://raw.githubusercontent.com/JeffSackmann/tennis_atp/master"
-_PLAYERS_URL  = f"{_BASE}/atp_players.csv"
+_PLAYERS_URL = f"{_BASE}/atp_players.csv"
 _RANKINGS_URL = f"{_BASE}/atp_rankings_current.csv"
 
 # WTA equivalents
 _WTA_BASE = "https://raw.githubusercontent.com/JeffSackmann/tennis_wta/master"
-_WTA_PLAYERS_URL  = f"{_WTA_BASE}/wta_players.csv"
+_WTA_PLAYERS_URL = f"{_WTA_BASE}/wta_players.csv"
 _WTA_RANKINGS_URL = f"{_WTA_BASE}/wta_rankings_current.csv"
 
 _CACHE_MAX_AGE_HOURS = 12
@@ -57,10 +57,10 @@ def get_rankings(
         except Exception:
             pass
 
-    players_url  = _PLAYERS_URL  if tour == "atp" else _WTA_PLAYERS_URL
+    players_url = _PLAYERS_URL if tour == "atp" else _WTA_PLAYERS_URL
     rankings_url = _RANKINGS_URL if tour == "atp" else _WTA_RANKINGS_URL
 
-    players  = _download_players(players_url)
+    players = _download_players(players_url)
     rankings = _download_rankings(rankings_url)
 
     if not players or not rankings:
@@ -70,21 +70,26 @@ def get_rankings(
     result = []
     for entry in rankings[:top_n]:
         pid = entry["player_id"]
-        p   = players.get(pid, {})
+        p = players.get(pid, {})
         first = p.get("name_first", "")
-        last  = p.get("name_last", "")
-        result.append({
-            "rank":        entry["rank"],
-            "player_id":   pid,
-            "name_first":  first,
-            "name_last":   last,
-            "full_name":   f"{first} {last}".strip(),
-            "points":      entry["points"],
-        })
+        last = p.get("name_last", "")
+        result.append(
+            {
+                "rank": entry["rank"],
+                "player_id": pid,
+                "name_first": first,
+                "name_last": last,
+                "full_name": f"{first} {last}".strip(),
+                "points": entry["points"],
+            }
+        )
 
     cache_path.write_text(
-        json.dumps({"fetched_at": datetime.now(timezone.utc).isoformat(), "rankings": result},
-                   indent=2, ensure_ascii=False),
+        json.dumps(
+            {"fetched_at": datetime.now(timezone.utc).isoformat(), "rankings": result},
+            indent=2,
+            ensure_ascii=False,
+        ),
         encoding="utf-8",
     )
     _log.info("[atp_rankings] %s top-%d fetched", tour.upper(), len(result))
@@ -107,28 +112,28 @@ def build_name_resolver(
     for tour in ("atp", "wta"):
         rows = get_rankings(top_n=top_n, tour=tour, cache_dir=cache_dir)
         for row in rows:
-            full  = row["full_name"]
+            full = row["full_name"]
             first = row["name_first"]
-            last  = row["name_last"]
+            last = row["name_last"]
             if not full.strip():
                 continue
             # Full name passthrough
-            resolver[full]                    = full
-            resolver[full.lower()]            = full
+            resolver[full] = full
+            resolver[full.lower()] = full
             # "Last" only
             if last:
-                resolver[last]                = full
-                resolver[last.lower()]        = full
+                resolver[last] = full
+                resolver[last.lower()] = full
             # "F. Last" abbreviated
             if first and last:
                 abbrev = f"{first[0]}. {last}"
-                resolver[abbrev]              = full
-                resolver[abbrev.lower()]      = full
+                resolver[abbrev] = full
+                resolver[abbrev.lower()] = full
             # "Last, F." format (some APIs)
             if first and last:
                 alt = f"{last}, {first[0]}."
-                resolver[alt]                 = full
-                resolver[alt.lower()]         = full
+                resolver[alt] = full
+                resolver[alt.lower()] = full
 
     return resolver
 
@@ -144,16 +149,13 @@ def resolve_name(
     """
     if resolver is None:
         resolver = build_name_resolver(cache_dir=cache_dir)
-    return (
-        resolver.get(name)
-        or resolver.get(name.lower())
-        or name
-    )
+    return resolver.get(name) or resolver.get(name.lower()) or name
 
 
 # ---------------------------------------------------------------------------
 # Download helpers
 # ---------------------------------------------------------------------------
+
 
 def _download_players(url: str) -> dict[str, dict]:
     """Download atp_players.csv → {player_id: {name_first, name_last, ...}}"""
@@ -169,9 +171,9 @@ def _download_players(url: str) -> dict[str, dict]:
         if pid:
             result[pid] = {
                 "name_first": row.get("name_first", "").strip(),
-                "name_last":  row.get("name_last", "").strip(),
-                "hand":       row.get("hand", ""),
-                "ioc":        row.get("ioc", ""),
+                "name_last": row.get("name_last", "").strip(),
+                "hand": row.get("hand", ""),
+                "ioc": row.get("ioc", ""),
             }
     return result
 
@@ -198,14 +200,16 @@ def _download_rankings(url: str) -> list[dict]:
         try:
             # Sackmann uses "player" column (not "player_id")
             pid = str(row.get("player") or row.get("player_id") or "").strip()
-            result.append({
-                "rank":      int(row.get("rank", 9999)),
-                "player_id": pid,
-                "points":    int(row.get("points", 0) or 0),
-            })
+            result.append(
+                {
+                    "rank": int(row.get("rank", 9999)),
+                    "player_id": pid,
+                    "points": int(row.get("points", 0) or 0),
+                }
+            )
         except (ValueError, TypeError):
             continue
-    result.sort(key=lambda r: r["rank"])
+    result.sort(key=lambda r: r["rank"])  # type: ignore[arg-type, return-value]
     return result
 
 

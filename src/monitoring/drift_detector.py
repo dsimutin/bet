@@ -38,9 +38,7 @@ class DriftReport:
     n_recent: int
     n_baseline: int
     retrain_recommended: bool
-    generated_at_utc: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
-    )
+    generated_at_utc: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -68,7 +66,7 @@ class CUSUMDriftDetector:
         self.kelly_on_drift = kelly_on_drift
 
         # Stream API state
-        self._stream_errors: list[int] = []   # 0=correct, 1=error
+        self._stream_errors: list[int] = []  # 0=correct, 1=error
         self._stream_drift: bool = False
 
     # ------------------------------------------------------------------
@@ -148,8 +146,8 @@ class CUSUMDriftDetector:
             reason=(
                 f"accuracy dropped {baseline_acc:.2%}→{recent_acc:.2%} "
                 f"(Δ={baseline_acc - recent_acc:.2%} > threshold={self.threshold:.2%})"
-                if drift else
-                f"no_drift: baseline={baseline_acc:.2%} recent={recent_acc:.2%}"
+                if drift
+                else f"no_drift: baseline={baseline_acc:.2%} recent={recent_acc:.2%}"
             ),
             recent_accuracy=round(recent_acc, 4),
             baseline_accuracy=round(baseline_acc, 4),
@@ -264,11 +262,7 @@ class CUSUMDriftDetector:
         """Compute rolling accuracy over the last ``window_days`` calendar days."""
         entries = _settled_entries_sorted(ledger.entries())
         cutoff = datetime.now(timezone.utc) - timedelta(days=window_days)
-        recent = [
-            e
-            for e in entries
-            if _entry_ts(e) is not None and _entry_ts(e) >= cutoff
-        ]
+        recent = [e for e in entries if (ts := _entry_ts(e)) is not None and ts >= cutoff]
         if not recent:
             return {"window_days": window_days, "n_bets": 0, "accuracy": None, "roi_pct": None}
 
@@ -298,6 +292,7 @@ class CUSUMDriftDetector:
 # ------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------
+
 
 def _settled_entries_sorted(entries: dict[str, Any]) -> list[dict[str, Any]]:
     settled = [

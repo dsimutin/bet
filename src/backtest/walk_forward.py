@@ -19,10 +19,10 @@ from typing import Any
 
 import pandas as pd
 
-
 # ---------------------------------------------------------------------------
 # Result dataclasses
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class FoldResult:
@@ -59,6 +59,7 @@ class WalkForwardResult:
 # Core logic
 # ---------------------------------------------------------------------------
 
+
 def _load_matches(league: str, data_dir: Path) -> pd.DataFrame:
     """Load EPL-style CSVs from data/raw or data/staging."""
     frames = []
@@ -88,10 +89,14 @@ def _load_matches(league: str, data_dir: Path) -> pd.DataFrame:
 
     # Normalise column names
     remap = {
-        "Date": "match_date", "date": "match_date",
-        "HomeTeam": "home_team", "AwayTeam": "away_team",
-        "FTHG": "home_goals", "FTAG": "away_goals",
-        "goals_home_ft": "home_goals", "goals_away_ft": "away_goals",
+        "Date": "match_date",
+        "date": "match_date",
+        "HomeTeam": "home_team",
+        "AwayTeam": "away_team",
+        "FTHG": "home_goals",
+        "FTAG": "away_goals",
+        "goals_home_ft": "home_goals",
+        "goals_away_ft": "away_goals",
     }
     df = df.rename(columns={k: v for k, v in remap.items() if k in df.columns})
 
@@ -110,15 +115,19 @@ def _load_matches(league: str, data_dir: Path) -> pd.DataFrame:
 def _brier_log_loss(probs: list[float], outcomes: list[int]) -> tuple[float, float]:
     """Compute Brier score and log-loss from probability/outcome lists."""
     import math
+
     n = len(probs)
     if n == 0:
         return float("nan"), float("nan")
     brier = sum((p - y) ** 2 for p, y in zip(probs, outcomes)) / n
     eps = 1e-9
-    ll = -sum(
-        y * math.log(max(p, eps)) + (1 - y) * math.log(max(1 - p, eps))
-        for p, y in zip(probs, outcomes)
-    ) / n
+    ll = (
+        -sum(
+            y * math.log(max(p, eps)) + (1 - y) * math.log(max(1 - p, eps))
+            for p, y in zip(probs, outcomes)
+        )
+        / n
+    )
     return round(brier, 6), round(ll, 6)
 
 
@@ -126,11 +135,14 @@ def _fit_model(train_df: pd.DataFrame, verbose: bool) -> Any:
     """Train a DixonColesModel on train_df. Returns None on failure."""
     try:
         from src.models.dixon_coles_model import DixonColesModel, DixonColesConfig
+
         model = DixonColesModel(DixonColesConfig())
         model.fit(train_df)
         if verbose:
-            print(f"    [MODEL] Fitted on {len(train_df)} matches "
-                  f"({train_df['match_date'].min()} → {train_df['match_date'].max()})")
+            print(
+                f"    [MODEL] Fitted on {len(train_df)} matches "
+                f"({train_df['match_date'].min()} → {train_df['match_date'].max()})"
+            )
         return model
     except Exception as e:
         if verbose:
@@ -138,7 +150,9 @@ def _fit_model(train_df: pd.DataFrame, verbose: bool) -> Any:
         return None
 
 
-def _eval_model(model: Any, test_df: pd.DataFrame, verbose: bool) -> tuple[float | None, float | None]:
+def _eval_model(
+    model: Any, test_df: pd.DataFrame, verbose: bool
+) -> tuple[float | None, float | None]:
     """Evaluate model on test_df, returning (brier, log_loss)."""
     if model is None or test_df.empty:
         return None, None
@@ -203,8 +217,10 @@ def run_walk_forward(
         test_df = df[(df["match_date"] >= test_start) & (df["match_date"] <= test_end)]
 
         if verbose:
-            print(f"\n[FOLD {fold_index}] train<{test_start} | test {test_start}→{test_end} "
-                  f"({len(train_df)} train, {len(test_df)} test)")
+            print(
+                f"\n[FOLD {fold_index}] train<{test_start} | test {test_start}→{test_end} "
+                f"({len(train_df)} train, {len(test_df)} test)"
+            )
 
         fold_t0 = time.perf_counter()
         retrained = False
@@ -213,17 +229,22 @@ def run_walk_forward(
         if train_df.empty:
             if verbose:
                 print("    [SKIP] No training data before test window.")
-            folds.append(FoldResult(
-                fold_index=fold_index,
-                train_start=str(df["match_date"].min()),
-                train_end=str(test_start - timedelta(days=1)),
-                test_start=str(test_start),
-                test_end=str(test_end),
-                n_train=0, n_test=len(test_df),
-                brier=None, log_loss=None,
-                retrained=False, retrain_matches=0,
-                elapsed_s=round(time.perf_counter() - fold_t0, 3),
-            ))
+            folds.append(
+                FoldResult(
+                    fold_index=fold_index,
+                    train_start=str(df["match_date"].min()),
+                    train_end=str(test_start - timedelta(days=1)),
+                    test_start=str(test_start),
+                    test_end=str(test_end),
+                    n_train=0,
+                    n_test=len(test_df),
+                    brier=None,
+                    log_loss=None,
+                    retrained=False,
+                    retrain_matches=0,
+                    elapsed_s=round(time.perf_counter() - fold_t0, 3),
+                )
+            )
             test_start = test_end + timedelta(days=1)
             fold_index += 1
             continue
@@ -258,20 +279,22 @@ def run_walk_forward(
             model = _fit_model(train_df, verbose=verbose)
             brier, ll = _eval_model(model, test_df, verbose=verbose)
 
-        folds.append(FoldResult(
-            fold_index=fold_index,
-            train_start=str(train_df["match_date"].min()),
-            train_end=str(train_df["match_date"].max()),
-            test_start=str(test_start),
-            test_end=str(test_end),
-            n_train=len(train_df),
-            n_test=len(test_df),
-            brier=brier,
-            log_loss=ll,
-            retrained=retrained,
-            retrain_matches=retrain_count,
-            elapsed_s=round(time.perf_counter() - fold_t0, 3),
-        ))
+        folds.append(
+            FoldResult(
+                fold_index=fold_index,
+                train_start=str(train_df["match_date"].min()),
+                train_end=str(train_df["match_date"].max()),
+                test_start=str(test_start),
+                test_end=str(test_end),
+                n_train=len(train_df),
+                n_test=len(test_df),
+                brier=brier,
+                log_loss=ll,
+                retrained=retrained,
+                retrain_matches=retrain_count,
+                elapsed_s=round(time.perf_counter() - fold_t0, 3),
+            )
+        )
 
         test_start = test_end + timedelta(days=1)
         fold_index += 1
@@ -280,6 +303,7 @@ def run_walk_forward(
     valid_lls = [f.log_loss for f in folds if f.log_loss is not None]
 
     import statistics
+
     result = WalkForwardResult(
         league=league,
         start_date=str(start_date),
@@ -300,14 +324,20 @@ def run_walk_forward(
 # CLI
 # ---------------------------------------------------------------------------
 
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Walk-forward backtest with optional per-match retraining.")
+    parser = argparse.ArgumentParser(
+        description="Walk-forward backtest with optional per-match retraining."
+    )
     parser.add_argument("--league", default="EPL")
     parser.add_argument("--start-date", default="2023-08-01")
     parser.add_argument("--end-date", default="2024-05-31")
     parser.add_argument("--fold-weeks", type=int, default=4)
-    parser.add_argument("--retrain-after-each-match", action="store_true",
-                        help="Retrain model before each test match (slow but most realistic)")
+    parser.add_argument(
+        "--retrain-after-each-match",
+        action="store_true",
+        help="Retrain model before each test match (slow but most realistic)",
+    )
     parser.add_argument("--data-dir", default="data", type=Path)
     parser.add_argument("--output", default="", help="Path to write JSON results")
     parser.add_argument("--verbose", "-v", action="store_true")
@@ -332,19 +362,27 @@ def main() -> None:
     print(f"Folds:         {result.n_folds}")
     print(f"Brier mean:    {result.brier_mean:.4f}" if result.brier_mean else "Brier mean:    N/A")
     print(f"Brier std:     {result.brier_std:.4f}" if result.brier_std else "Brier std:     N/A")
-    print(f"LogLoss mean:  {result.log_loss_mean:.4f}" if result.log_loss_mean else "LogLoss mean:  N/A")
+    print(
+        f"LogLoss mean:  {result.log_loss_mean:.4f}"
+        if result.log_loss_mean
+        else "LogLoss mean:  N/A"
+    )
     print(f"Total time:    {result.total_elapsed_s:.1f}s")
     print(f"Retrain mode:  {'per-match' if result.retrain_after_each_match else 'per-fold'}")
 
     if args.verbose:
-        print(f"\n{'Fold':>4} {'Train end':<12} {'Test range':<25} {'N_test':>6} {'Brier':>8} {'LL':>8} {'Retrained':>10}")
+        print(
+            f"\n{'Fold':>4} {'Train end':<12} {'Test range':<25} {'N_test':>6} {'Brier':>8} {'LL':>8} {'Retrained':>10}"
+        )
         print("-" * 80)
         for f in result.folds:
             brier_s = f"{f.brier:.4f}" if f.brier is not None else "   N/A"
             ll_s = f"{f.log_loss:.4f}" if f.log_loss is not None else "   N/A"
             retrain_s = f"yes({f.retrain_matches})" if f.retrained else "no"
-            print(f"{f.fold_index:>4} {f.train_end:<12} {f.test_start}→{f.test_end:<12} "
-                  f"{f.n_test:>6} {brier_s:>8} {ll_s:>8} {retrain_s:>10}")
+            print(
+                f"{f.fold_index:>4} {f.train_end:<12} {f.test_start}→{f.test_end:<12} "
+                f"{f.n_test:>6} {brier_s:>8} {ll_s:>8} {retrain_s:>10}"
+            )
 
     if args.output:
         out = Path(args.output)

@@ -863,12 +863,14 @@ def generate_signals_for_league(
         if api_key:
             _log.warning(
                 "[signals] %s: Odds API fetch FAILED for %s — check key and network",
-                league, scan_date,
+                league,
+                scan_date,
             )
         else:
             _log.info(
                 "[signals] %s: no upcoming fixtures in staged data for %s",
-                league, scan_date,
+                league,
+                scan_date,
             )
         return []
 
@@ -930,7 +932,9 @@ def _fetch_odds_api_candidates(
         if conversion.skipped_events:
             _log.debug(
                 "[signals] %s: Odds API skipped %d events: %s",
-                league, len(conversion.skipped_events), conversion.skipped_events[:3],
+                league,
+                len(conversion.skipped_events),
+                conversion.skipped_events[:3],
             )
         return conversion.dataframe
 

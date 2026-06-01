@@ -85,15 +85,19 @@ class OpenFootballProvider(BaseDataProvider):
     def name(self) -> str:
         return "openfootball"
 
-    def fetch(self, leagues: list[str], seasons: list[str], **kwargs: Any) -> pd.DataFrame:
+    def fetch(self, **kwargs: Any) -> pd.DataFrame:
         from src.ingest.openfootball import OpenFootballLoader
 
+        leagues = kwargs.get("leagues", [])
+        seasons = kwargs.get("seasons", [])
         use_cache = kwargs.get("use_cache", True)
 
         loader = OpenFootballLoader()
         result = loader.build(leagues=leagues, seasons=seasons, use_cache=use_cache)
         if result.dataframe.empty:
-            _log.warning("[%s] No data returned for leagues=%s seasons=%s", self.name, leagues, seasons)
+            _log.warning(
+                "[%s] No data returned for leagues=%s seasons=%s", self.name, leagues, seasons
+            )
         else:
             _log.info("[%s] %d matches for leagues=%s", self.name, len(result.dataframe), leagues)
         return result.dataframe
@@ -111,16 +115,21 @@ class FootballDataCoUkProvider(BaseDataProvider):
     def name(self) -> str:
         return "football-data-co-uk"
 
-    def fetch(self, leagues: list[str], seasons: list[str], **kwargs: Any) -> pd.DataFrame:
-        from src.ingest.football_data_co_uk import FootballDataCoUkLoader
+    def fetch(self, **kwargs: Any) -> pd.DataFrame:
+        from src.ingest.football_data_co_uk import FootballDataLoader
 
+        leagues = kwargs.get("leagues", [])
+        seasons = kwargs.get("seasons", [])
         staging_dir = Path(kwargs.get("staging_dir", os.environ.get("STAGING_DIR", "data/staging")))
-        loader = FootballDataCoUkLoader(staging_dir=staging_dir)
+        loader = FootballDataLoader()
         frames: list[pd.DataFrame] = []
         for league in leagues:
             for season in seasons:
                 try:
-                    df = loader.load(league=league, season=season)
+                    csv_path = loader.download_season(
+                        league=league, season=season, output_dir=staging_dir
+                    )
+                    df = loader.load_and_parse(csv_path)
                     frames.append(df)
                     _log.info("[%s] %s %s: %d rows", self.name, league, season, len(df))
                 except Exception as exc:
@@ -146,11 +155,12 @@ class OddsApiProvider(BaseDataProvider):
     def enabled(self) -> bool:
         return bool(os.environ.get("THE_ODDS_API_KEY", ""))
 
-    def fetch(self, sport_keys: list[str], **kwargs: Any) -> pd.DataFrame:
+    def fetch(self, **kwargs: Any) -> pd.DataFrame:
         api_key = self._require_env("THE_ODDS_API_KEY")
         from src.ingest.odds_api import OddsAPIClient
         from src.ingest.live_odds_adapter import LiveOddsFootballDataAdapter
 
+        sport_keys = kwargs.get("sport_keys", [])
         regions = kwargs.get("regions", ["eu", "uk"])
         markets = kwargs.get("markets", ["h2h"])
         bookmaker_prefix = kwargs.get("bookmaker_prefix", "B365")
@@ -166,7 +176,9 @@ class OddsApiProvider(BaseDataProvider):
                     _log.info("[%s] %s: 0 events", self.name, sport_key)
                     continue
                 result = adapter.convert(events)
-                _log.info("[%s] %s: %d rows converted", self.name, sport_key, result.converted_events)
+                _log.info(
+                    "[%s] %s: %d rows converted", self.name, sport_key, result.converted_events
+                )
                 frames.append(result.dataframe)
             except Exception as exc:
                 _log.warning("[%s] %s: %s", self.name, sport_key, exc)
@@ -211,8 +223,11 @@ class TelegramProvider(BaseDataProvider):
                     continue
                 try:
                     import json
+
                     record = json.loads(line)
-                    parsed = parser._parse_block(record.get("text", ""), fallback_date=record.get("date", ""))
+                    parsed = parser._parse_block(
+                        record.get("text", ""), fallback_date=record.get("date", "")
+                    )
                     if parsed:
                         rows.append(parsed)
                 except Exception:
@@ -234,7 +249,8 @@ class ManualCsvProvider(BaseDataProvider):
     def name(self) -> str:
         return "manual-csv"
 
-    def fetch(self, path: str | Path, **kwargs: Any) -> pd.DataFrame:
+    def fetch(self, **kwargs: Any) -> pd.DataFrame:
+        path = kwargs.get("path", "")
         csv_path = Path(path)
         if not csv_path.exists():
             raise FileNotFoundError(f"[{self.name}] CSV not found: {csv_path}")

@@ -14,18 +14,51 @@ from src.features.home_advantage import HomeAdvantageBuilder
 
 @pytest.fixture()
 def history() -> pd.DataFrame:
-    return pd.DataFrame([
-        {"Date": "01/01/2024", "HomeTeam": "Arsenal",   "AwayTeam": "Chelsea",   "FTHG": 3, "FTAG": 0},
-        {"Date": "08/01/2024", "HomeTeam": "Chelsea",   "AwayTeam": "Liverpool", "FTHG": 1, "FTAG": 1},
-        {"Date": "15/01/2024", "HomeTeam": "Liverpool", "AwayTeam": "Arsenal",   "FTHG": 0, "FTAG": 2},
-        {"Date": "22/01/2024", "HomeTeam": "Arsenal",   "AwayTeam": "Liverpool", "FTHG": 2, "FTAG": 2},
-        {"Date": "29/01/2024", "HomeTeam": "Chelsea",   "AwayTeam": "Arsenal",   "FTHG": 1, "FTAG": 3},
-    ])
+    return pd.DataFrame(
+        [
+            {
+                "Date": "01/01/2024",
+                "HomeTeam": "Arsenal",
+                "AwayTeam": "Chelsea",
+                "FTHG": 3,
+                "FTAG": 0,
+            },
+            {
+                "Date": "08/01/2024",
+                "HomeTeam": "Chelsea",
+                "AwayTeam": "Liverpool",
+                "FTHG": 1,
+                "FTAG": 1,
+            },
+            {
+                "Date": "15/01/2024",
+                "HomeTeam": "Liverpool",
+                "AwayTeam": "Arsenal",
+                "FTHG": 0,
+                "FTAG": 2,
+            },
+            {
+                "Date": "22/01/2024",
+                "HomeTeam": "Arsenal",
+                "AwayTeam": "Liverpool",
+                "FTHG": 2,
+                "FTAG": 2,
+            },
+            {
+                "Date": "29/01/2024",
+                "HomeTeam": "Chelsea",
+                "AwayTeam": "Arsenal",
+                "FTHG": 1,
+                "FTAG": 3,
+            },
+        ]
+    )
 
 
 # ------------------------------------------------------------------ #
 # RollingFormBuilder
 # ------------------------------------------------------------------ #
+
 
 class TestRollingFormBuilder:
     def test_team_form_after_wins(self, history):
@@ -63,13 +96,18 @@ class TestRollingFormBuilder:
 
     def test_add_form_features_columns(self, history):
         builder = RollingFormBuilder(window=5).build(history)
-        candidates = pd.DataFrame([
-            {"home_team": "Arsenal", "away_team": "Chelsea"},
-        ])
+        candidates = pd.DataFrame(
+            [
+                {"home_team": "Arsenal", "away_team": "Chelsea"},
+            ]
+        )
         result = builder.add_form_features(candidates)
         expected_cols = {
-            "form_home_wins", "form_home_gs_mean", "form_home_ppg",
-            "form_away_wins", "form_advantage",
+            "form_home_wins",
+            "form_home_gs_mean",
+            "form_home_ppg",
+            "form_away_wins",
+            "form_advantage",
         }
         assert expected_cols.issubset(result.columns)
 
@@ -78,12 +116,11 @@ class TestRollingFormBuilder:
 # RestDaysBuilder
 # ------------------------------------------------------------------ #
 
+
 class TestRestDaysBuilder:
     def test_rest_days_after_matches(self, history):
         builder = RestDaysBuilder().build(history)
-        feat = builder.features_for_match(
-            "Arsenal", "Chelsea", match_date=date(2024, 2, 5)
-        )
+        feat = builder.features_for_match("Arsenal", "Chelsea", match_date=date(2024, 2, 5))
         assert feat.home_rest_days is not None
         assert feat.away_rest_days is not None
         assert feat.home_rest_days > 0
@@ -105,17 +142,17 @@ class TestRestDaysBuilder:
 
     def test_schedule_congestion(self, history):
         builder = RestDaysBuilder().build(history)
-        feat = builder.features_for_match(
-            "Arsenal", "Chelsea", match_date=date(2024, 2, 5)
-        )
+        feat = builder.features_for_match("Arsenal", "Chelsea", match_date=date(2024, 2, 5))
         # Arsenal played on Jan 22 and Jan 29 → 2 matches in 14 days before Feb 5
         assert feat.home_schedule_congestion >= 0
 
     def test_add_rest_features_columns(self, history):
         builder = RestDaysBuilder().build(history)
-        candidates = pd.DataFrame([
-            {"home_team": "Arsenal", "away_team": "Chelsea", "match_date": date(2024, 2, 5)},
-        ])
+        candidates = pd.DataFrame(
+            [
+                {"home_team": "Arsenal", "away_team": "Chelsea", "match_date": date(2024, 2, 5)},
+            ]
+        )
         result = builder.add_rest_features(candidates)
         assert "rest_home_days" in result.columns
         assert "rest_away_days" in result.columns
@@ -125,6 +162,7 @@ class TestRestDaysBuilder:
 # ------------------------------------------------------------------ #
 # HomeAdvantageBuilder
 # ------------------------------------------------------------------ #
+
 
 class TestHomeAdvantageBuilder:
     def test_home_win_rate_populated(self, history):

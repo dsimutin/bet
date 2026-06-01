@@ -22,10 +22,10 @@ import pandas as pd
 class RestDaysFeatures:
     home_team: str
     away_team: str
-    home_rest_days: int | None      # None if first known match
+    home_rest_days: int | None  # None if first known match
     away_rest_days: int | None
-    rest_days_diff: int | None      # home_rest - away_rest (positive → home rested)
-    home_schedule_congestion: int   # matches in last 14 days
+    rest_days_diff: int | None  # home_rest - away_rest (positive → home rested)
+    home_schedule_congestion: int  # matches in last 14 days
     away_schedule_congestion: int
 
 
@@ -36,9 +36,7 @@ class RestDaysBuilder:
         self._last_match: dict[str, date] = {}
         self._all_dates: dict[str, list[date]] = {}
 
-    def build(
-        self, matches: pd.DataFrame, cutoff_date: date | None = None
-    ) -> RestDaysBuilder:
+    def build(self, matches: pd.DataFrame, cutoff_date: date | None = None) -> RestDaysBuilder:
         """
         Ingest historical matches, optionally capped at ``cutoff_date``.
         Must be called before any ``features_for_match`` call.
@@ -80,7 +78,9 @@ class RestDaysBuilder:
 
         home_rest = (effective_date - home_last).days if home_last else None
         away_rest = (effective_date - away_last).days if away_last else None
-        diff = (home_rest - away_rest) if (home_rest is not None and away_rest is not None) else None
+        diff = (
+            (home_rest - away_rest) if (home_rest is not None and away_rest is not None) else None
+        )
 
         home_congestion = self._congestion(home_team, effective_date, congestion_window_days)
         away_congestion = self._congestion(away_team, effective_date, congestion_window_days)
@@ -126,16 +126,16 @@ class RestDaysBuilder:
                 match_date=match_date,
                 congestion_window_days=congestion_window_days,
             )
-            rows.append({
-                "rest_home_days": feat.home_rest_days,
-                "rest_away_days": feat.away_rest_days,
-                "rest_days_diff": feat.rest_days_diff,
-                "schedule_congestion_home": feat.home_schedule_congestion,
-                "schedule_congestion_away": feat.away_schedule_congestion,
-            })
-        return pd.concat(
-            [df.reset_index(drop=True), pd.DataFrame(rows)], axis=1
-        )
+            rows.append(
+                {
+                    "rest_home_days": feat.home_rest_days,
+                    "rest_away_days": feat.away_rest_days,
+                    "rest_days_diff": feat.rest_days_diff,
+                    "schedule_congestion_home": feat.home_schedule_congestion,
+                    "schedule_congestion_away": feat.away_schedule_congestion,
+                }
+            )
+        return pd.concat([df.reset_index(drop=True), pd.DataFrame(rows)], axis=1)
 
     # ------------------------------------------------------------------
     # Internals
@@ -151,11 +151,14 @@ class RestDaysBuilder:
 # Helpers
 # ------------------------------------------------------------------
 
+
 def _prepare(matches: pd.DataFrame) -> pd.DataFrame:
     df = matches.copy()
     remap = {
-        "Date": "match_date", "date": "match_date",
-        "HomeTeam": "home_team", "AwayTeam": "away_team",
+        "Date": "match_date",
+        "date": "match_date",
+        "HomeTeam": "home_team",
+        "AwayTeam": "away_team",
     }
     df = df.rename(columns={k: v for k, v in remap.items() if k in df.columns})
     required = {"match_date", "home_team", "away_team"}

@@ -222,10 +222,12 @@ def calibration_stats(ledger_path: Path) -> dict[str, Any]:
 # Telegram formatter
 # ---------------------------------------------------------------------------
 
+
 def _verdict(stats: dict[str, Any]) -> str:
     """Determine overall calibration bias verdict."""
     bins = [
-        b for b in stats.get("bins", [])
+        b
+        for b in stats.get("bins", [])
         if b["over_under_confidence"] is not None and b["count"] >= 5
     ]
     if not bins:
@@ -277,9 +279,7 @@ def format_calibration_telegram(stats: dict[str, Any]) -> str:
         gap_abs = abs(gap)
         icon = "✅" if gap_abs <= 0.08 else "❌"
 
-        lines.append(
-            f"{label}: прогноз {pred_pct} → реально {actual_pct} ({count} ставок) {icon}"
-        )
+        lines.append(f"{label}: прогноз {pred_pct} → реально {actual_pct} ({count} ставок) {icon}")
 
     lines.append("")
 
@@ -294,9 +294,7 @@ def format_calibration_telegram(stats: dict[str, Any]) -> str:
             brier_grade = "удовлетворительно"
         else:
             brier_grade = "плохо"
-        lines.append(
-            f"<b>Brier Score:</b> {brier:.4f} ({brier_grade}; 0.25 = случайная модель)"
-        )
+        lines.append(f"<b>Brier Score:</b> {brier:.4f} ({brier_grade}; 0.25 = случайная модель)")
 
     ll = stats.get("log_loss")
     if ll is not None:
@@ -313,9 +311,7 @@ def format_calibration_telegram(stats: dict[str, Any]) -> str:
 
     wr = stats.get("overall_win_rate")
     if wr is not None:
-        lines.append(
-            f"<b>Win rate:</b> {wr * 100:.1f}% из {total} завершённых ставок"
-        )
+        lines.append(f"<b>Win rate:</b> {wr * 100:.1f}% из {total} завершённых ставок")
 
     lines.append("")
 
@@ -332,14 +328,8 @@ def format_calibration_telegram(stats: dict[str, Any]) -> str:
             s_pnl = sdata.get("total_pnl_units")
             pnl_sign = "+" if (s_pnl or 0) >= 0 else ""
             brier_str = f", Brier {s_brier:.4f}" if s_brier is not None else ""
-            pnl_str = (
-                f", P&amp;L {pnl_sign}{s_pnl:.2f} ед."
-                if s_pnl is not None
-                else ""
-            )
-            lines.append(
-                f"  {label}: WR {s_wr * 100:.1f}% ({s_cnt} ставок){brier_str}{pnl_str}"
-            )
+            pnl_str = f", P&amp;L {pnl_sign}{s_pnl:.2f} ед." if s_pnl is not None else ""
+            lines.append(f"  {label}: WR {s_wr * 100:.1f}% ({s_cnt} ставок){brier_str}{pnl_str}")
         lines.append("")
 
     # --- Quality badge ---

@@ -132,7 +132,11 @@ class TennisEloModel:
             trained_at_utc=datetime.now(timezone.utc).isoformat(),
             dataset_hash=dataset_hash,
         )
-        _log.info("[tennis_elo] Fitted %d matches, %d players", self.params.n_matches, self.params.n_players)
+        _log.info(
+            "[tennis_elo] Fitted %d matches, %d players",
+            self.params.n_matches,
+            self.params.n_players,
+        )
 
     # ---------------------------------------------------------------------------
     # Prediction
@@ -297,8 +301,7 @@ class TennisEloModel:
 
     def get_tourney_level_winrate(self, player: str, level: str) -> float | None:
         """Win rate on specific tourney level: G=GrandSlam, M=Masters, A=250/500."""
-        entries = [e for e in self._recent_form.get(player, [])
-                   if e.get("tourney_level") == level]
+        entries = [e for e in self._recent_form.get(player, []) if e.get("tourney_level") == level]
         if len(entries) < 3:
             return None
         return sum(1 for e in entries if e["won"]) / len(entries)
@@ -350,12 +353,12 @@ class TennisEloModel:
         score = str(row.get("score", "") or "")
         is_retirement = "RET" in score.upper() or "W/O" in score.upper()
 
-        self._recent_form[winner].append({
-            "won": True, "surface": surface, "tourney_level": level, "date": match_date
-        })
-        self._recent_form[loser].append({
-            "won": False, "surface": surface, "tourney_level": level, "date": match_date
-        })
+        self._recent_form[winner].append(
+            {"won": True, "surface": surface, "tourney_level": level, "date": match_date}
+        )
+        self._recent_form[loser].append(
+            {"won": False, "surface": surface, "tourney_level": level, "date": match_date}
+        )
         # Keep only last 50 entries
         if len(self._recent_form[winner]) > 50:
             self._recent_form[winner] = self._recent_form[winner][-50:]
@@ -393,7 +396,7 @@ class TennisEloModel:
         if sv1 is None or sv2 is None:
             return 0.0
         # Difference in serve dominance, scaled conservatively
-        diff = (sv1 - sv2)  # e.g., 0.10 if p1 wins 10pp more service points
+        diff = sv1 - sv2  # e.g., 0.10 if p1 wins 10pp more service points
         return diff * 0.3  # scale down — serve stats captured partly by ELO already
 
     def _h2h_adjustment(self, player1: str, player2: str, surface: str) -> float:
@@ -461,10 +464,9 @@ class TennisEloModel:
         sm[winner] = sm.get(winner, 0) + 1
         sm[loser] = sm.get(loser, 0) + 1
 
-    def _update_serve_stats(
-        self, winner: str, loser: str, surface: str, row: Any
-    ) -> None:
+    def _update_serve_stats(self, winner: str, loser: str, surface: str, row: Any) -> None:
         """Append rolling serve/return stats for both players from one match row."""
+
         def _stat(player: str, prefix: str) -> dict:
             svpt = _safe_float(row, f"{prefix}_svpt")
             first_in = _safe_float(row, f"{prefix}_1stIn")
@@ -499,9 +501,7 @@ class TennisEloModel:
         if len(self._serve_stats[loser][surface]) > STATS_WINDOW:
             self._serve_stats[loser][surface] = self._serve_stats[loser][surface][-STATS_WINDOW:]
 
-    def _update_h2h(
-        self, winner: str, loser: str, surface: str, match_date: Any
-    ) -> None:
+    def _update_h2h(self, winner: str, loser: str, surface: str, match_date: Any) -> None:
         key = _h2h_key(winner, loser)
         if isinstance(match_date, pd.Timestamp):
             match_date = match_date.date()
