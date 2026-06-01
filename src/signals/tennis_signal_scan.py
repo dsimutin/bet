@@ -367,6 +367,7 @@ def _check_event(
                     "commence_time": commence,
                     "bookmaker": book_key,
                     "entry_odds": round(entry_odds, 3),
+                    "opening_odds": round(entry_odds, 3),
                     "model_prob": round(model_prob, 4),
                     "market_prob": round(fair_prob, 4),
                     "edge_pct": round(edge_pct, 2),
@@ -389,6 +390,7 @@ def _check_event(
                     "capper_support": (ctx.get("consensus_p1") if is_p1 else ctx.get("consensus_p2") or {}).get("support"),
                     "capper_tips": (ctx.get("consensus_p1") if is_p1 else ctx.get("consensus_p2") or {}).get("n_tips", 0),
                     "capper_avg_odds": (ctx.get("consensus_p1") if is_p1 else ctx.get("consensus_p2") or {}).get("avg_odds"),
+                    "steam_move_detected": False,
                     "status": "paper",
                     "generated_at": datetime.now(timezone.utc).isoformat(),
                     "dataset_hash": getattr(getattr(model, "params", None), "dataset_hash", "tennis_elo_v2"),
@@ -548,6 +550,7 @@ def _process_spreads(
             "reference_fair_odds": fair_odds,
             "best_of": best_of,
             "handicap": handicap,
+            "steam_move_detected": False,
             "status": "paper",
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "dataset_hash": dataset_hash,
@@ -623,10 +626,24 @@ def _process_totals(
             "reference_fair_odds": fair_odds,
             "best_of": best_of,
             "total_threshold": threshold,
+            "steam_move_detected": False,
             "status": "paper",
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "dataset_hash": dataset_hash,
         })
+
+
+def _detect_steam_move(current_odds: float, opening_odds: float) -> bool:
+    """True if line moved significantly against our signal (sharp money indicator).
+
+    If odds shortened from 2.10 → 1.75 for opponent, sharp money is on opponent.
+    We should NOT bet if the market moved significantly against our signal.
+    """
+    if not opening_odds or opening_odds <= 1.0:
+        return False
+    # Odds shortened by >10%: market moved sharply against us
+    movement = (current_odds - opening_odds) / opening_odds
+    return movement < -0.10  # odds dropped more than 10%
 
 
 def _names_similar(a: str, b: str) -> bool:

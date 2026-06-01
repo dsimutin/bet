@@ -413,6 +413,8 @@ def _run_signal_scan() -> dict[str, Any]:
             ledger = SignalLedger.load_or_create(LEDGER_PATH)
             for sig in all_signals:
                 try:
+                    if "opening_odds" not in sig:
+                        sig["opening_odds"] = sig.get("entry_odds")
                     ledger.add_signal(sig)
                 except Exception:
                     dupes_skipped += 1

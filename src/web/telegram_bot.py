@@ -101,6 +101,8 @@ def _handle_callback(cb: dict) -> None:
         _action_history(chat_id)
     elif data == "refresh":
         _action_refresh(chat_id)
+    elif data == "calibration":
+        _action_calibration(chat_id)
     elif data == "main_menu":
         _send_main_menu(chat_id, "")
 
@@ -131,6 +133,7 @@ def _send_main_menu(chat_id: str, first_name: str) -> None:
             [
                 {"text": "ℹ️ Как это работает", "callback_data": "how_it_works"},
             ],
+            [{"text": "🎯 Калибровка модели", "callback_data": "calibration"}],
         ]
     }
     _send(chat_id, text, reply_markup=keyboard)
@@ -208,6 +211,16 @@ def _action_refresh(chat_id: str) -> None:
     _action_picks_today(chat_id)
 
 
+def _action_calibration(chat_id: str) -> None:
+    try:
+        from src.models.calibration import calibration_stats, format_calibration_telegram
+        stats = calibration_stats(LEDGER_PATH)
+        text = format_calibration_telegram(stats)
+    except Exception as exc:
+        text = f"❌ Ошибка: {exc}"
+    _send(chat_id, text, reply_markup=_back_button())
+
+
 # ---------------------------------------------------------------------------
 # Text builders
 # ---------------------------------------------------------------------------
@@ -258,6 +271,16 @@ def _build_stats_text() -> str:
         lines.append("Пока нет завершённых ставок.")
 
     lines.append("\n📄 <i>Бумажная статистика — реальных денег нет</i>")
+
+    # Add calibration section if enough settled bets
+    try:
+        from src.models.calibration import calibration_stats, format_calibration_telegram
+        cal = calibration_stats(LEDGER_PATH)
+        if cal.get("total_settled", 0) >= 20:
+            lines.append("\n" + format_calibration_telegram(cal))
+    except Exception:
+        pass
+
     return "\n".join(lines)
 
 

@@ -163,6 +163,13 @@ class TennisEloModel:
 
         # Blend: ELO is primary (weight 0.75), serve adj (0.15), H2H (0.10)
         raw = elo_prob * 0.75 + (elo_prob + serve_adj) * 0.15 + (elo_prob + h2h_adj) * 0.10
+
+        # Apply schedule fatigue adjustment
+        ref_date = match_date or date.today()
+        fatigue_adj_p1 = self.get_schedule_fatigue_adj(player1, ref_date)
+        fatigue_adj_p2 = self.get_schedule_fatigue_adj(player2, ref_date)
+        raw += (fatigue_adj_p1 - fatigue_adj_p2) * 0.5
+
         # Clip to avoid extreme probabilities
         return max(0.05, min(0.95, raw))
 
@@ -171,6 +178,7 @@ class TennisEloModel:
         player1: str,
         player2: str,
         surface: str = "hard",
+        match_date: date | None = None,
     ) -> dict[str, float]:
         """Return detailed breakdown of probability components."""
         surface = surface.lower()
@@ -179,12 +187,17 @@ class TennisEloModel:
         elo_prob = self._elo_prob(player1, player2, surface)
         serve_adj = self._serve_return_adjustment(player1, player2, surface)
         h2h_adj = self._h2h_adjustment(player1, player2, surface)
-        final = self.predict_proba(player1, player2, surface)
+        final = self.predict_proba(player1, player2, surface, match_date=match_date)
+        ref_date = match_date or date.today()
+        fatigue_adj = self.get_schedule_fatigue_adj(player1, ref_date)
+        opp_fatigue_adj = self.get_schedule_fatigue_adj(player2, ref_date)
         return {
             "elo_prob": round(elo_prob, 4),
             "serve_adj": round(serve_adj, 4),
             "h2h_adj": round(h2h_adj, 4),
             "final_prob": round(final, 4),
+            "fatigue_adj": round(fatigue_adj, 4),
+            "opp_fatigue_adj": round(opp_fatigue_adj, 4),
         }
 
     def days_since_last_match(self, player: str, as_of: date | None = None) -> int | None:
@@ -194,6 +207,33 @@ class TennisEloModel:
             return None
         ref = as_of or date.today()
         return (ref - last).days
+
+    def get_matches_last_n_days(self, player: str, reference_date: date, n: int = 7) -> int:
+        """Count how many matches the player played in the last n days before reference_date."""
+        entries = self._recent_form.get(player)
+        if not entries:
+            return 0
+        cutoff = reference_date - timedelta(days=n)
+        count = 0
+        for entry in entries:
+            entry_date = entry.get("date")
+            if entry_date is not None and cutoff < entry_date < reference_date:
+                count += 1
+        return count
+
+    def get_schedule_fatigue_adj(self, player: str, reference_date: date) -> float:
+        """Return a probability adjustment for schedule fatigue: 0.0 to -0.05.
+
+        Rules:
+          - 3+ matches in last 4 days → -0.04
+          - 2 matches in last 2 days → -0.02
+          - else → 0.0
+        """
+        if self.get_matches_last_n_days(player, reference_date, n=4) >= 3:
+            return -0.04
+        if self.get_matches_last_n_days(player, reference_date, n=2) >= 2:
+            return -0.02
+        return 0.0
 
     def get_hold_rate(self, player: str, surface: str) -> float | None:
         """Return rolling hold rate on surface, or None if insufficient data."""
