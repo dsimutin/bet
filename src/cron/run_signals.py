@@ -95,12 +95,19 @@ def _run_league(league: str, model_dir: Path, staging_dir: Path, today: date) ->
         print(f"[signals] {league}: model load failed — {e}", file=sys.stderr)
         return []
 
+    calibrator = None
+    try:
+        calibrator = registry.load_calibrator(model.model_id)
+    except Exception:
+        pass
+
     return generate_signals_for_league(
         model=model,
         league=league,
         scan_date=today,
         staging_dir=staging_dir,
         odds_api_key=os.environ.get("THE_ODDS_API_KEY", ""),
+        calibrator=calibrator,
     )
 
 

@@ -377,10 +377,21 @@ def _run_signal_scan() -> dict[str, Any]:
                 per_league[league] = league_info
                 continue
 
+            # Load calibration model for this league (corrects overconfident predictions)
+            calibrator = None
+            try:
+                calibrator = registry.load_calibrator(model.model_id)
+                if calibrator:
+                    _log.info("[active] %s: calibrator loaded (temperature=%.3f)",
+                              league, calibrator.params.temperature)
+            except Exception:
+                pass  # calibration is optional — proceed without it
+
             try:
                 signals = generate_signals_for_league(
                     model=model, league=league, scan_date=today,
                     staging_dir=STAGING_DIR, odds_api_key=api_key,
+                    calibrator=calibrator,
                 )
                 candidates_checked += 1
                 league_info["signals"] = len(signals)

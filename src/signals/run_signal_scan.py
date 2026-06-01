@@ -805,8 +805,9 @@ def generate_signals_for_league(
     scan_date: date,
     staging_dir: Path | None = None,
     odds_api_key: str | None = None,
-    min_edge_pct: float = 2.0,
+    min_edge_pct: float = 3.0,
     bookmaker_prefix: str = "B365",
+    calibrator: Any | None = None,
 ) -> list[dict[str, Any]]:
     """Generate value-bet signals for one league using a production Dixon-Coles model.
 
@@ -877,6 +878,7 @@ def generate_signals_for_league(
         model=model,
         min_edge_pct=min_edge_pct,
         bookmaker_prefix=bookmaker_prefix,
+        calibrator=calibrator,
     )
 
     try:
