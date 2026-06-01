@@ -797,6 +797,85 @@ def debug_tennis_raw():
     return results
 
 
+@app.post("/trigger/morning-digest")
+def trigger_morning_digest():
+    """Немедленно запустить утренний дайджест и отправить в Telegram.
+
+    curl -X POST https://your-app.onrender.com/trigger/morning-digest
+    """
+    import threading
+
+    def _run():
+        try:
+            from src.cron.run_active_report import send_morning_digest
+            send_morning_digest()
+        except Exception as exc:
+            _log.exception("[trigger/morning-digest] failed: %s", exc)
+
+    threading.Thread(target=_run, daemon=True, name="morning-digest-trigger").start()
+    return {
+        "status": "triggered",
+        "message": "Дайджест 'Ставки на сегодня' запущен — придёт в Telegram через ~30 сек",
+        "ts": _utcnow(),
+    }
+
+
+# ──────────────────────────────────────────────────────────────────
+# Telegram bot webhook
+# ──────────────────────────────────────────────────────────────────
+
+@app.post("/webhook/telegram")
+async def telegram_webhook(request: "Request"):
+    """Telegram sends all updates here. Register with /webhook/telegram/setup."""
+    from fastapi import Request  # noqa: F811
+    try:
+        update = await request.json()
+        import threading
+        threading.Thread(
+            target=_handle_bot_update,
+            args=(update,),
+            daemon=True,
+        ).start()
+    except Exception as exc:
+        _log.error("[webhook] Failed to parse update: %s", exc)
+    return {"ok": True}
+
+
+def _handle_bot_update(update: dict) -> None:
+    try:
+        from src.web.telegram_bot import handle_update
+        handle_update(update)
+    except Exception as exc:
+        _log.exception("[webhook] handle_update failed: %s", exc)
+
+
+@app.post("/webhook/telegram/setup")
+def telegram_webhook_setup():
+    """Register webhook URL with Telegram. Run once after deploy.
+
+    curl -X POST https://your-app.onrender.com/webhook/telegram/setup
+    """
+    from src.web.telegram_bot import setup_webhook, get_webhook_info
+    app_url = os.environ.get("RENDER_EXTERNAL_URL", "").strip()
+    if not app_url:
+        return JSONResponse(
+            {"error": "RENDER_EXTERNAL_URL env var not set — set it to your Render app URL"},
+            status_code=400,
+        )
+    result = setup_webhook(app_url)
+    return {"webhook_setup": result, "current_info": get_webhook_info(), "ts": _utcnow()}
+
+
+@app.get("/webhook/telegram/info")
+def telegram_webhook_info():
+    """Check current Telegram webhook registration.
+
+    curl https://your-app.onrender.com/webhook/telegram/info
+    """
+    from src.web.telegram_bot import get_webhook_info
+    return {"webhook_info": get_webhook_info(), "ts": _utcnow()}
+
+
 @app.get("/debug/odds-sports")
 def debug_odds_sports():
     """Все активные виды спорта в Odds API для данного ключа.
