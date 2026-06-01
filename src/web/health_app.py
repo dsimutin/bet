@@ -23,7 +23,7 @@ from datetime import datetime, timedelta, timezone
 from glob import glob
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 # Configure root logger so all app INFO messages appear in Render / uvicorn logs.
@@ -825,9 +825,8 @@ def trigger_morning_digest():
 # ──────────────────────────────────────────────────────────────────
 
 @app.post("/webhook/telegram")
-async def telegram_webhook(request: "Request"):
+async def telegram_webhook(request: Request):
     """Telegram sends all updates here. Register with /webhook/telegram/setup."""
-    from fastapi import Request  # noqa: F811
     try:
         update = await request.json()
         import threading
