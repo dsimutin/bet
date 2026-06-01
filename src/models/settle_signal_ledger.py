@@ -25,15 +25,20 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_parser().parse_args()
-    ledger = SignalLedger.load_or_create(args.ledger_path)
+    from src.infrastructure.persistent_ledger import load_ledger, save_ledger
+
+    ledger = load_ledger(args.ledger_path)
     results = pd.read_csv(args.results_input, encoding="latin-1")
     report = settle_ledger_from_results(ledger, results)
-    output_path = ledger.save(args.output_path or args.ledger_path)
+    output_path = save_ledger(ledger, args.output_path or args.ledger_path)
     if args.report_path is not None:
         report_path = write_settlement_report(report, args.report_path)
         print(f"Wrote {report_path}")
     print(f"Wrote {output_path}")
-    print("Settled " f"{report['settled']} signal(s), unmatched={report['unmatched_open_signals']}")
+    print(
+        "Settled "
+        f"{report['settled_count']} signal(s), unmatched={report['unmatched_open_signals']}"
+    )
 
 
 _CLOSING_ODDS_COLS: dict[str, tuple[str, str, str]] = {
@@ -69,16 +74,21 @@ def settle_ledger_from_results(
     ledger: SignalLedger,
     results: pd.DataFrame,
 ) -> dict[str, Any]:
+    """Settle football h2h signals and return a backward-compatible report."""
     prepared_results = _prepare_results(results)
     result_by_match = {
         _match_key(row["match_date"], row["home_team"], row["away_team"]): row
         for _, row in prepared_results.iterrows()
     }
 
-    settled = 0
+    settled_signals: list[dict[str, Any]] = []
     unmatched: list[str] = []
     for signal_id, entry in ledger.entries().items():
         if entry.get("ledger_status") != "open":
+            continue
+        if entry.get("sport", "football") == "tennis":
+            continue
+        if entry.get("market_key", "h2h") != "h2h":
             continue
 
         match_key = _match_key(
@@ -95,10 +105,21 @@ def settle_ledger_from_results(
         result: Literal["win", "loss"] = "win" if entry.get("selection") == actual else "loss"
         closing_odds = _pick_closing_odds(result_row, entry.get("selection", ""))
         ledger.update_result(signal_id, result=result, closing_odds=closing_odds)
-        settled += 1
+        settled_signals.append(ledger.get(signal_id))
 
+    settled_count = len(settled_signals)
+    wins = sum(1 for item in settled_signals if item.get("result") == "win")
+    losses = sum(1 for item in settled_signals if item.get("result") == "loss")
+    voids = sum(1 for item in settled_signals if item.get("result") == "void")
     return {
-        "settled": settled,
+        # Backward compatibility for older CLI/report consumers.
+        "settled": settled_count,
+        # Canonical fields for active monitoring and retrain accounting.
+        "settled_count": settled_count,
+        "settled_signals": settled_signals,
+        "wins": wins,
+        "losses": losses,
+        "voids": voids,
         "unmatched_open_signals": len(unmatched),
         "unmatched_signal_ids": unmatched,
         "summary": ledger.summary(),
