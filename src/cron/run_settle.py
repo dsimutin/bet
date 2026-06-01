@@ -64,6 +64,13 @@ def main() -> None:
             print(f"[settle] Football settlement failed: {exc}", file=sys.stderr)
 
     tennis_report = _settle_tennis(ledger)
+
+    # Auto-expire open signals whose event passed >24h ago without a matching result.
+    # This prevents stale signals from accumulating as permanent "open" entries.
+    expired_ids = ledger.expire_stale_signals(hours_past_event=24.0)
+    if expired_ids:
+        print(f"[settle] Expired {len(expired_ids)} stale unresolved signal(s): {expired_ids}")
+
     save_ledger(ledger, ledger_path)
 
     report = {

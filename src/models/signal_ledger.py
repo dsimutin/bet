@@ -11,6 +11,7 @@ from typing import Any, Literal
 
 SignalResult = Literal["win", "loss", "void"]
 DeliveryStatus = Literal["registered", "dry_run", "sent", "failed", "blocked"]
+LedgerStatus = Literal["open", "settled", "void", "expired"]
 
 
 @dataclass(frozen=True)
@@ -144,6 +145,39 @@ class SignalLedger:
             }
         )
 
+    def expire_stale_signals(self, hours_past_event: float = 24.0) -> list[str]:
+        """Auto-expire open signals whose event already passed by more than `hours_past_event`.
+
+        Returns list of expired signal_ids. Expired signals are excluded from the
+        learning loop (FeedbackPolicy) but counted separately for data quality tracking.
+        Settlement must run first — only unresolved open signals are expired.
+        """
+        now = datetime.now(timezone.utc)
+        expired_ids: list[str] = []
+        for signal_id, entry in self._entries.items():
+            if entry.get("ledger_status") != "open":
+                continue
+            raw_event = str(
+                entry.get("event_time_utc") or entry.get("commence_time") or ""
+            ).strip()
+            if not raw_event:
+                continue
+            try:
+                event_dt = datetime.fromisoformat(raw_event.replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            hours_past = (now - event_dt).total_seconds() / 3600
+            if hours_past >= hours_past_event:
+                entry.update(
+                    {
+                        "ledger_status": "expired",
+                        "expiry_reason": f"event {raw_event} passed {hours_past:.0f}h ago without settlement",
+                        "ledger_updated_at_utc": now.isoformat(),
+                    }
+                )
+                expired_ids.append(signal_id)
+        return expired_ids
+
     def has_signal(self, signal_id: str) -> bool:
         return signal_id in self._entries
 
@@ -165,11 +199,13 @@ class SignalLedger:
             if entries
             else 0.0
         )
+        expired = [item for item in entries if item.get("ledger_status") == "expired"]
         return {
             "total_signals": len(entries),
             "open_signals": len(open_entries),
             "settled_signals": len(settled),
             "void_signals": len([item for item in entries if item.get("ledger_status") == "void"]),
+            "expired_signals": len(expired),
             "delivered_signals": len([item for item in entries if self._is_delivered_status(item)]),
             "blocked_delivery_signals": len(
                 [item for item in entries if item.get("delivery_status") == "blocked"]

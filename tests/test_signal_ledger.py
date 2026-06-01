@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 from src.models.signal_ledger import SignalLedger
 
 
-def _signal(signal_id: str = "sig_1") -> dict:
+def _signal(signal_id: str = "sig_1", event_time_utc: str | None = None) -> dict:
     return {
         "signal_id": signal_id,
         "strategy_id": "consensus_value_poisson_v1",
@@ -16,6 +18,7 @@ def _signal(signal_id: str = "sig_1") -> dict:
         "reference_fair_odds": 1.7,
         "edge_pct": 5.88,
         "timestamp_utc": "2026-05-27T12:00:00+00:00",
+        "event_time_utc": event_time_utc or "2026-12-31T15:00:00Z",
         "status": "paper",
         "dataset_hash": "sha256:abc123test",
     }
@@ -116,3 +119,54 @@ def test_signal_ledger_quality_report_allows_warmup() -> None:
     assert report["passed"] is True
     assert report["warmup"] is True
     assert report["reason"] == "warmup"
+
+
+def test_expire_stale_signals_marks_old_open_as_expired() -> None:
+    """Open signals whose event passed >24h ago should be auto-expired."""
+    past = (datetime.now(timezone.utc) - timedelta(hours=30)).isoformat()
+    ledger = SignalLedger()
+    ledger.add_signal(_signal("old_sig", event_time_utc=past))
+
+    expired = ledger.expire_stale_signals(hours_past_event=24.0)
+
+    assert "old_sig" in expired
+    assert ledger.get("old_sig")["ledger_status"] == "expired"
+    assert ledger.summary()["expired_signals"] == 1
+    assert ledger.summary()["open_signals"] == 0
+
+
+def test_expire_stale_signals_leaves_future_events_open() -> None:
+    """Signals for future events must not be expired."""
+    future = (datetime.now(timezone.utc) + timedelta(hours=6)).isoformat()
+    ledger = SignalLedger()
+    ledger.add_signal(_signal("future_sig", event_time_utc=future))
+
+    expired = ledger.expire_stale_signals(hours_past_event=24.0)
+
+    assert expired == []
+    assert ledger.get("future_sig")["ledger_status"] == "open"
+
+
+def test_expire_stale_signals_does_not_touch_settled() -> None:
+    """Already settled signals must not be re-expired."""
+    past = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
+    ledger = SignalLedger()
+    ledger.add_signal(_signal("settled_sig", event_time_utc=past))
+    ledger.update_result("settled_sig", result="win")
+
+    expired = ledger.expire_stale_signals(hours_past_event=24.0)
+
+    assert expired == []
+    assert ledger.get("settled_sig")["ledger_status"] == "settled"
+
+
+def test_expire_stale_signals_just_past_threshold_not_expired() -> None:
+    """Signal 23h past event (below 24h threshold) must stay open."""
+    recent_past = (datetime.now(timezone.utc) - timedelta(hours=23)).isoformat()
+    ledger = SignalLedger()
+    ledger.add_signal(_signal("recent_sig", event_time_utc=recent_past))
+
+    expired = ledger.expire_stale_signals(hours_past_event=24.0)
+
+    assert expired == []
+    assert ledger.get("recent_sig")["ledger_status"] == "open"

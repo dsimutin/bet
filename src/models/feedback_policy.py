@@ -106,6 +106,24 @@ class FeedbackPolicy:
             and e.get("result") in {"win", "loss"}
         ]
 
+    def expired_rate(self, sport: str) -> float:
+        """Fraction of signals (settled + expired) that expired without settlement.
+
+        High expired_rate (>20%) indicates team name mismatches or data gaps —
+        the settled sample may be biased toward easy-to-match fixtures.
+        """
+        sport_entries = [
+            e for e in self.entries.values()
+            if str(e.get("sport") or "football").lower() == sport
+        ]
+        settled_n = sum(
+            1 for e in sport_entries
+            if e.get("ledger_status") == "settled" and e.get("result") in {"win", "loss"}
+        )
+        expired_n = sum(1 for e in sport_entries if e.get("ledger_status") == "expired")
+        total = settled_n + expired_n
+        return round(expired_n / total, 4) if total > 0 else 0.0
+
     def _stats(self, sport: str, segment: str) -> dict[str, Any]:
         rows = [e for e in self._settled(sport) if _segment(_num(e.get("entry_odds"))) == segment]
         wins = sum(e.get("result") == "win" for e in rows)

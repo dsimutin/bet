@@ -44,6 +44,13 @@ def main() -> None:
     from src.models.feedback_policy import FeedbackPolicy
 
     ledger = load_ledger(ledger_path)
+
+    # Expire signals whose event passed >24h ago without settlement result.
+    # Runs before policy evaluation so stale signals don't skew segment stats.
+    expired_ids = ledger.expire_stale_signals(hours_past_event=24.0)
+    if expired_ids:
+        print(f"[signals] expired {len(expired_ids)} stale open signal(s)")
+
     policy = FeedbackPolicy(ledger.entries())
 
     verified, timestamp_blocked = _partition_by_timestamp_policy(candidates)

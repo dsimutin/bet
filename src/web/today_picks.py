@@ -14,7 +14,9 @@ LEDGER_PATH = Path(os.environ.get("LEDGER_PATH", DATA_DIR / "core" / "paper_sign
 def build_today_text() -> str:
     entries = list(_load_entries())
     today = date.today()
-    visible = [
+    now = datetime.now(timezone.utc)
+
+    today_entries = [
         item
         for item in entries
         if item.get("ledger_status") == "open"
@@ -22,16 +24,21 @@ def build_today_text() -> str:
         and item.get("recommendation_tier", "priority") in {"priority", "watchlist"}
         and _event_day(item) == today
     ]
-    visible.sort(
+
+    # Split into upcoming (not yet started) and already started
+    upcoming = [item for item in today_entries if not _event_already_started(item, now)]
+    started = [item for item in today_entries if _event_already_started(item, now)]
+
+    upcoming.sort(
         key=lambda item: (
             0 if item.get("recommendation_tier") == "priority" else 1,
             -_num(item.get("edge_pct", item.get("edge_vs_fair_pct"))),
         )
     )
-    priority = [item for item in visible if item.get("recommendation_tier") == "priority"]
-    watch = [item for item in visible if item.get("recommendation_tier") == "watchlist"]
+    priority = [item for item in upcoming if item.get("recommendation_tier") == "priority"]
+    watch = [item for item in upcoming if item.get("recommendation_tier") == "watchlist"]
     lines = [f"📅 <b>Ставки на сегодня — {today.strftime('%d.%m.%Y')}</b>", ""]
-    if not visible:
+    if not upcoming and not started:
         lines += [
             "Подходящих сигналов на сегодня пока нет.",
             "Бот не заполняет пустоту случайными ставками. Нажмите «Обновить», чтобы проверить свежую линию.",
@@ -48,9 +55,20 @@ def build_today_text() -> str:
         )
         for item in watch:
             lines.extend(_format_pick(item, priority=False))
-    lines.append(
-        "\n📄 Бумажные сигналы. Коэффициенты меняются: перед любым решением проверьте линию самостоятельно."
-    )
+    if started:
+        lines.append(f"\n⏳ <b>Уже начались ({len(started)}) — ожидаем результатов</b>")
+        for item in started:
+            sport = item.get("sport", "football")
+            if sport == "tennis":
+                match_label = escape(str(item.get("player", "?")) + " vs " + str(item.get("opponent", "?")))
+            else:
+                match_label = escape(f"{item.get('home_team', '?')} — {item.get('away_team', '?')}")
+            lines.append(f"• {match_label} | {_event_time_text(item)}")
+        lines.append("Результаты закроются автоматически после обновления данных.")
+    if upcoming or started:
+        lines.append(
+            "\n📄 Бумажные сигналы. Коэффициенты меняются: перед любым решением проверьте линию самостоятельно."
+        )
     return "\n".join(lines)
 
 
@@ -62,6 +80,7 @@ def build_stats_text() -> str:
         for item in entries
         if item.get("ledger_status") == "open" and item.get("delivery_status") != "blocked"
     ]
+    expired = [item for item in entries if item.get("ledger_status") == "expired"]
     wins = [item for item in settled if item.get("result") == "win"]
     pnl = sum(_num(item.get("pnl_units")) for item in settled)
     stake = sum(_num(item.get("stake_units"), 1.0) for item in settled)
@@ -74,8 +93,13 @@ def build_stats_text() -> str:
         f"Открыто: {len(opened)} | Закрыто: {len(settled)}",
         f"Победы: {len(wins)} | Точность: {accuracy:.1f}%",
         f"ROI: {roi:+.1f}% | P&L: {pnl:+.2f}u",
-        "",
     ]
+    if expired:
+        lines.append(
+            f"⚠️ Истекло без результата: {len(expired)} "
+            f"(данные не совпали с историей — не влияют на обучение)"
+        )
+    lines.append("")
     for sport, icon, name_ru in (("football", "⚽", "Футбол"), ("tennis", "🎾", "Теннис")):
         rows = [item for item in settled if str(item.get("sport") or "football") == sport]
         sport_wins = sum(item.get("result") == "win" for item in rows)
@@ -348,6 +372,18 @@ def _event_day(item: dict[str, Any]) -> date | None:
             return date.fromisoformat(str(raw)[:10])
         except ValueError:
             return None
+
+
+def _event_already_started(item: dict[str, Any], now: datetime) -> bool:
+    """Return True if the event start time has passed (match already underway or finished)."""
+    raw = item.get("commence_time") or item.get("event_time_utc") or ""
+    if not raw:
+        return False
+    try:
+        event_dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        return event_dt <= now
+    except ValueError:
+        return False
 
 
 def _event_time_text(item: dict[str, Any]) -> str:
