@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "saved_at_utc": "2026-06-01T12:30:22.101542+00:00",
+  "saved_at_utc": "2026-06-01T13:20:22.115847+00:00",
   "entries": {
     "oos_2024-08-17_Ars_Wol_home": {
       "signal_id": "oos_2024-08-17_Ars_Wol_home",
@@ -754,7 +754,15 @@
       "pnl_units": null,
       "clv_pct": null,
       "ledger_created_at_utc": "2026-06-01T12:30:22.101491+00:00",
-      "ledger_updated_at_utc": null
+      "ledger_updated_at_utc": null,
+      "ctx_rest_days_home": 7,
+      "ctx_rest_days_away": 3,
+      "ctx_form_str_home": "WDWLW",
+      "ctx_form_str_away": "LWWWW",
+      "ctx_fatigue_home": "none",
+      "ctx_fatigue_away": "mild",
+      "ctx_prob_adj_home": 0.01,
+      "ctx_prob_adj_away": -0.02
     },
     "5a6a4da1-2887-4fb1-96ac-6e3d4a6d0250": {
       "signal_id": "5a6a4da1-2887-4fb1-96ac-6e3d4a6d0250",
