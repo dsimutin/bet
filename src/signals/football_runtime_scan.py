@@ -55,6 +55,48 @@ def generate_football_signals_runtime(
     dataset_hash = (
         "sha256:" + hashlib.sha256(candidates.to_csv(index=False).encode("utf-8")).hexdigest()
     )
+
+    # Enrich signals with fatigue + recent form context
+    if staging_dir is not None:
+        try:
+            from src.features.match_context import apply_context_to_signal, compute_match_context
+
+            enriched = []
+            for signal in signals:
+                ctx = compute_match_context(
+                    home_team=str(signal.get("home_team", "")),
+                    away_team=str(signal.get("away_team", "")),
+                    match_date=scan_date,
+                    staging_dir=staging_dir,
+                    league=league,
+                )
+                enriched.append(apply_context_to_signal(signal, ctx))
+            signals = enriched
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning("[football_scan] context enrichment failed: %s", exc)
+
+    # Optionally enrich with injuries from API-Football (if API_FOOTBALL_KEY configured)
+    try:
+        from src.ingest.apifootball_injuries import format_injuries_for_signal, get_injuries_for_match, is_configured
+
+        if is_configured():
+            match_date_str = scan_date.isoformat()
+            for signal in signals:
+                inj = get_injuries_for_match(
+                    str(signal.get("home_team", "")),
+                    str(signal.get("away_team", "")),
+                    match_date_str,
+                    league,
+                )
+                signal["injuries"] = inj
+                inj_line = format_injuries_for_signal(inj)
+                if inj_line:
+                    signal["injuries_text"] = inj_line
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("[football_scan] injuries enrichment failed: %s", exc)
+
     for signal in signals:
         signal.setdefault("sport", "football")
         signal.setdefault("league", league)

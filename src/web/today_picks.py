@@ -219,6 +219,23 @@ _SELECTION_RU_MAP = {
 }
 
 
+def _rest_line(home: str, rest_h: Any, fatigue_h: str, away: str, rest_a: Any, fatigue_a: str) -> str:
+    if rest_h is None and rest_a is None:
+        return ""
+    _fat = {"severe": "🔴 измотан", "mild": "🟡 устал", "none": "🟢 отдохнул"}
+    h_txt = f"{_fat.get(fatigue_h, '')} {rest_h}д." if rest_h is not None else "?"
+    a_txt = f"{_fat.get(fatigue_a, '')} {rest_a}д." if rest_a is not None else "?"
+    return f"Отдых: {home} {h_txt} | {away} {a_txt}"
+
+
+def _form_line(home: str, form_h: str, away: str, form_a: str) -> str:
+    if not form_h and not form_a:
+        return ""
+    h = form_h or "?"
+    a = form_a or "?"
+    return f"Форма (посл. 5): {home} <b>{h}</b> | {away} <b>{a}</b>"
+
+
 def _football_bet_label(sel: str, sel_ru: str, home: str, away: str) -> str:
     sel_low = sel.lower().strip()
     if sel_low == "home":
@@ -272,16 +289,35 @@ def _format_pick(item: dict[str, Any], priority: bool) -> list[str]:
         bet_label = _football_bet_label(sel, sel_ru, home, away)
         title = f"{icon} ⚽ <b>{home} — {away}</b>"
         league = escape(str(item.get("league", item.get("competition", "?"))))
-        model_id = str(item.get("model_id", ""))
-        model_label = model_id.split("_")[2] if model_id.count("_") >= 2 else league
         fair_odds = item.get("reference_fair_odds", "?")
+
+        # Fatigue & form context
+        rest_h = item.get("ctx_rest_days_home")
+        rest_a = item.get("ctx_rest_days_away")
+        form_h = item.get("ctx_form_str_home", "")
+        form_a = item.get("ctx_form_str_away", "")
+        fatigue_h = item.get("ctx_fatigue_home", "none")
+        fatigue_a = item.get("ctx_fatigue_away", "none")
+        ctx_adj = item.get("context_adj")
+
+        rest_line = _rest_line(home, rest_h, fatigue_h, away, rest_a, fatigue_a)
+        form_line = _form_line(home, form_h, away, form_a)
+        adj_note = f" (скорр. контекстом {ctx_adj:+.1%})" if ctx_adj else ""
+
         facts = [
             f"Ставка: <b>{bet_label}</b>",
-            f"Лига: {league} | Dixon–Coles модель",
-            f"Данные модели: {model_label} (только история голов)",
-            f"Справедливый кэф модели: {fair_odds} | Ставка: {item.get('stake_units', 1)}u",
-            "⚠️ Модель не учитывает травмы, состав, усталость — проверьте сами",
+            f"Лига: {league} | Dixon–Coles (история голов){adj_note}",
+            f"Справедливый кэф: {fair_odds} | Ставка: {item.get('stake_units', 1)}u",
         ]
+        if rest_line:
+            facts.append(rest_line)
+        if form_line:
+            facts.append(form_line)
+        inj_text = item.get("injuries_text", "")
+        if inj_text:
+            facts.append(escape(inj_text))
+        else:
+            facts.append("⚠️ Травмы/состав: проверьте самостоятельно (Sofascore, Flashscore)")
     lines = [
         "",
         title,
