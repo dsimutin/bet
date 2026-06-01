@@ -116,6 +116,16 @@ def start(loop: asyncio.AbstractEventLoop | None = None) -> None:
         replace_existing=True,
         misfire_grace_time=600,
     )
+    # Morning digest: "ставки на сегодня" — once a day at 09:05 UTC
+    sched.add_job(
+        _job_morning_digest,
+        "cron",
+        hour=9,
+        minute=5,
+        id="morning_digest",
+        replace_existing=True,
+        misfire_grace_time=600,
+    )
     # Active report: once a day at 09:50 UTC
     sched.add_job(
         _job_active_report,
@@ -218,6 +228,13 @@ async def _job_training_check() -> None:
         _log.info("[scheduler] ← training_check done: trained=%s", result.get("trained"))
     except Exception as exc:
         _log.exception("[scheduler] training_check raised: %s", exc)
+
+
+async def _job_morning_digest() -> None:
+    _log.info("[scheduler] → morning_digest starting")
+    from src.cron.run_active_report import send_morning_digest
+    await _run_in_executor(send_morning_digest, "morning_digest")
+    _log.info("[scheduler] ← morning_digest done")
 
 
 async def _job_active_report() -> None:
