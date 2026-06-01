@@ -205,6 +205,9 @@ def scan_tennis_signals(
         )
         signals.extend(event_signals)
 
+    # Deduplicate: keep only the best bookmaker per (event, player) pair
+    signals = _deduplicate_signals(signals)
+
     duration = time.perf_counter() - t0
     _log.info(
         "[tennis] Scan done: %d signals, %d events, %d skipped_no_data in %.1fs",
@@ -227,6 +230,37 @@ def scan_tennis_signals(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _deduplicate_signals(signals: list[dict]) -> list[dict]:
+    """Keep one signal per (event_id, player) — the bookmaker with highest edge.
+
+    Also attaches alt_books list (other bookmakers with edge) to the best signal
+    so a single Telegram message can show all available lines.
+    """
+    # Group by (event_id, player)
+    groups: dict[tuple, list[dict]] = {}
+    for sig in signals:
+        key = (sig.get("event_id", ""), sig.get("player", ""))
+        groups.setdefault(key, []).append(sig)
+
+    result = []
+    for sigs in groups.values():
+        # Best = highest edge
+        best = max(sigs, key=lambda s: s.get("edge_pct", 0))
+        # Attach other bookmakers as alt_books for display
+        others = sorted(
+            [s for s in sigs if s is not best],
+            key=lambda s: s.get("edge_pct", 0),
+            reverse=True,
+        )
+        best["alt_books"] = [
+            {"bookmaker": s["bookmaker"], "odds": s["entry_odds"], "edge": s["edge_pct"]}
+            for s in others[:4]  # max 4 extras
+        ]
+        result.append(best)
+
+    return result
+
 
 def _check_event(
     event: dict[str, Any],

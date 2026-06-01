@@ -198,12 +198,21 @@ def _format_tennis_signal(sig: dict) -> str:
     src      = sig.get("model_source", "elo_only")
     src_str  = " 🧮" if "markov" in src else ""
 
+    # Alt bookmakers — compact line showing other options
+    alt_books = sig.get("alt_books", [])
+    if alt_books:
+        alts = "  ".join(f"{a['bookmaker']} {a['odds']}" for a in alt_books[:4])
+        alt_str = f"\nДругие BK: {alts}"
+    else:
+        alt_str = ""
+
     return (
         f"🎾 {tour} Сигнал — {surface}{bo_str}\n"
         f"{player}{rank_str} vs {opponent}{opp_rank_str}\n"
         f"Ставка: победа <b>{player}</b>\n"
-        f"@ <b>{odds}</b> | edge=<b>{edge}%</b> | модель={mp_str}{markov_str}{src_str}\n"
-        f"BK: {book}{serve_str}{rest_str}{form_str}{cap_str}\n"
+        f"💰 Лучшая линия: <b>{book} @ {odds}</b> | edge=<b>{edge}%</b>\n"
+        f"Модель: {mp_str}{markov_str}{src_str}{alt_str}\n"
+        f"{serve_str.lstrip(' | ')}{rest_str}{form_str}{cap_str}\n"
         f"📄 Paper trade"
     )
 
