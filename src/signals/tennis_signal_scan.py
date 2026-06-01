@@ -205,6 +205,21 @@ def scan_tennis_signals(
         )
         signals.extend(event_signals)
 
+    # Alt market signals: set handicap + total games (requires Markov model)
+    if markov_model is not None:
+        alt_signals = _generate_alt_market_signals(
+            events=events,
+            markov_model=markov_model,
+            edge_threshold=edge_threshold,
+            min_odds=min_odds,
+            max_odds=max_odds,
+            resolver=_name_resolver,
+            elo_model=model,
+        )
+        signals.extend(alt_signals)
+        if alt_signals:
+            _log.info("[tennis] Alt markets (spreads+totals): %d signals", len(alt_signals))
+
     # Deduplicate: keep only the best bookmaker per (event, player) pair
     signals = _deduplicate_signals(signals)
 
@@ -382,6 +397,249 @@ def _check_event(
     return signals
 
 
+def _generate_alt_market_signals(
+    events: list[dict[str, Any]],
+    markov_model: Any,
+    edge_threshold: float,
+    min_odds: float,
+    max_odds: float,
+    resolver: dict[str, str] | None,
+    elo_model: Any,
+) -> list[dict[str, Any]]:
+    """Generate signals for spreads (set handicap) and totals (game total) markets.
+
+    Returns list of signals, one per bookmaker/market/selection with edge > threshold.
+    """
+    if markov_model is None:
+        return []
+
+    signals: list[dict[str, Any]] = []
+    dataset_hash = getattr(getattr(markov_model, "params", None), "dataset_hash", "markov_v1")
+
+    for event in events:
+        player1_raw = str(event.get("home_team", "")).strip()
+        player2_raw = str(event.get("away_team", "")).strip()
+        if not player1_raw or not player2_raw:
+            continue
+
+        player1 = _resolve_player_name(player1_raw, elo_model, resolver)
+        player2 = _resolve_player_name(player2_raw, elo_model, resolver)
+        event_id = str(event.get("id", ""))
+        commence = event.get("commence_time", "")
+
+        # Determine surface + best_of from event title
+        surface = _infer_surface_from_event(event)
+        sport_key = event.get("_sport_key", "")
+        best_of = 5 if any(k in sport_key for k in ("french_open", "wimbledon", "us_open", "aus_open")) else 3
+
+        if not (markov_model.has_enough_data(player1, min_matches=5) and
+                markov_model.has_enough_data(player2, min_matches=5)):
+            continue
+
+        for bookmaker in event.get("bookmakers", []):
+            book_key = bookmaker.get("key", "")
+            for market in bookmaker.get("markets", []):
+                mkt_key = market.get("key", "")
+                if mkt_key == "spreads":
+                    _process_spreads(
+                        market, player1, player2, player1_raw, player2_raw,
+                        event_id, commence, surface, best_of, book_key,
+                        sport_key, markov_model, edge_threshold, min_odds, max_odds,
+                        dataset_hash, signals,
+                    )
+                elif mkt_key == "totals":
+                    _process_totals(
+                        market, player1, player2, player1_raw, player2_raw,
+                        event_id, commence, surface, best_of, book_key,
+                        sport_key, markov_model, edge_threshold, min_odds, max_odds,
+                        dataset_hash, signals,
+                    )
+
+    return signals
+
+
+def _infer_surface_from_event(event: dict[str, Any]) -> str:
+    sport_key = event.get("_sport_key", "").lower()
+    title = event.get("sport_title", "").lower()
+    if "french" in sport_key or "french" in title or "roland" in title:
+        return "clay"
+    if "wimbledon" in sport_key or "wimbledon" in title:
+        return "grass"
+    if "us_open" in sport_key or "us open" in title:
+        return "hard"
+    if "aus" in sport_key or "australian" in title:
+        return "hard"
+    return "hard"
+
+
+def _process_spreads(
+    market: dict, player1: str, player2: str,
+    player1_raw: str, player2_raw: str,
+    event_id: str, commence: str, surface: str, best_of: int,
+    book_key: str, sport_key: str, model: Any,
+    edge_threshold: float, min_odds: float, max_odds: float,
+    dataset_hash: str, signals: list,
+) -> None:
+    """Analyse set handicap outcomes and add signals with edge."""
+    from src.normalize.odds_normalizer import devig_pair
+    outcomes = market.get("outcomes", [])
+    if len(outcomes) < 2:
+        return
+
+    # outcomes: [{name: player1, point: -1.5, price: X}, {name: player2, point: +1.5, price: Y}]
+    for outcome in outcomes:
+        name = str(outcome.get("name", ""))
+        handicap = float(outcome.get("point", 0))
+        price = float(outcome.get("price", 0))
+        if price < min_odds or price > max_odds:
+            continue
+
+        # Find the paired outcome for devigging
+        paired = next((o for o in outcomes if o.get("name") != name), None)
+        if not paired:
+            continue
+        paired_price = float(paired.get("price", 0))
+
+        try:
+            fair_p, fair_q = devig_pair(price, paired_price)
+        except Exception:
+            continue
+
+        # Determine which player this is and their handicap
+        is_p1 = _names_similar(name, player1_raw) or _names_similar(name, player1)
+        bet_player = player1 if is_p1 else player2
+        bet_opp = player2 if is_p1 else player1
+
+        # Model probability for covering the handicap
+        try:
+            # handicap from the outcome's perspective (negative = giving sets)
+            model_p = model.predict_set_handicap(
+                handicap, bet_player, bet_opp, surface, best_of
+            )
+        except Exception:
+            continue
+
+        edge_pct = round((model_p - fair_p) * 100, 2)
+        if edge_pct < edge_threshold:
+            continue
+
+        fair_odds = round(1.0 / model_p, 3) if model_p > 0 else 99.0
+        hcap_str = f"+{handicap}" if handicap > 0 else str(handicap)
+        tour = "ATP" if "atp" in sport_key else "WTA"
+
+        signals.append({
+            "signal_id": f"ten_hcap_{event_id[:8]}_{book_key}_{bet_player[:4].replace(' ', '')}",
+            "sport": "tennis",
+            "market": "spreads",
+            "market_ru": "Фора по сетам",
+            "tour": tour,
+            "player": bet_player,
+            "opponent": bet_opp,
+            "selection": f"{bet_player} {hcap_str}",
+            "selection_ru": f"Фора {hcap_str} сета",
+            "surface": surface,
+            "event_id": event_id,
+            "commence_time": commence,
+            "bookmaker": book_key,
+            "entry_odds": round(price, 3),
+            "model_prob": round(model_p, 4),
+            "market_prob": round(fair_p, 4),
+            "edge_pct": edge_pct,
+            "reference_fair_odds": fair_odds,
+            "best_of": best_of,
+            "handicap": handicap,
+            "status": "paper",
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "dataset_hash": dataset_hash,
+        })
+
+
+def _process_totals(
+    market: dict, player1: str, player2: str,
+    player1_raw: str, player2_raw: str,
+    event_id: str, commence: str, surface: str, best_of: int,
+    book_key: str, sport_key: str, model: Any,
+    edge_threshold: float, min_odds: float, max_odds: float,
+    dataset_hash: str, signals: list,
+) -> None:
+    """Analyse total games over/under and add signals with edge."""
+    from src.normalize.odds_normalizer import devig_pair
+    outcomes = market.get("outcomes", [])
+    if len(outcomes) < 2:
+        return
+
+    over = next((o for o in outcomes if o.get("name", "").lower() == "over"), None)
+    under = next((o for o in outcomes if o.get("name", "").lower() == "under"), None)
+    if not over or not under:
+        return
+
+    threshold = float(over.get("point", over.get("handicap", 0)))
+    if threshold <= 0:
+        return
+
+    for outcome, is_over in ((over, True), (under, False)):
+        price = float(outcome.get("price", 0))
+        if price < 1.05 or price > 8.0:
+            continue
+        paired_price = float((under if is_over else over).get("price", 0))
+
+        try:
+            fair_p, _ = devig_pair(price, paired_price)
+        except Exception:
+            continue
+
+        try:
+            p_over = model.predict_total_games_over(threshold, player1, player2, surface, best_of)
+            model_p = p_over if is_over else (1.0 - p_over)
+        except Exception:
+            continue
+
+        edge_pct = round((model_p - fair_p) * 100, 2)
+        if edge_pct < edge_threshold:
+            continue
+
+        fair_odds = round(1.0 / model_p, 3) if model_p > 0 else 99.0
+        direction_ru = "Больше" if is_over else "Меньше"
+        tour = "ATP" if "atp" in sport_key else "WTA"
+
+        signals.append({
+            "signal_id": f"ten_tot_{event_id[:8]}_{book_key}_{'ov' if is_over else 'un'}{int(threshold)}",
+            "sport": "tennis",
+            "market": "totals",
+            "market_ru": "Тотал геймов",
+            "tour": tour,
+            "player": player1,
+            "opponent": player2,
+            "selection": f"{'Over' if is_over else 'Under'} {threshold}",
+            "selection_ru": f"{direction_ru} {threshold} геймов",
+            "surface": surface,
+            "event_id": event_id,
+            "commence_time": commence,
+            "bookmaker": book_key,
+            "entry_odds": round(price, 3),
+            "model_prob": round(model_p, 4),
+            "market_prob": round(fair_p, 4),
+            "edge_pct": edge_pct,
+            "reference_fair_odds": fair_odds,
+            "best_of": best_of,
+            "total_threshold": threshold,
+            "status": "paper",
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "dataset_hash": dataset_hash,
+        })
+
+
+def _names_similar(a: str, b: str) -> bool:
+    """Quick fuzzy check if two player name strings refer to the same person."""
+    a, b = a.lower().strip(), b.lower().strip()
+    if a == b:
+        return True
+    # Last name match
+    if a.split()[-1] == b.split()[-1] and len(a.split()[-1]) > 3:
+        return True
+    return False
+
+
 def _resolve_player_name(
     name: str,
     model: Any,
@@ -525,7 +783,7 @@ def _fetch_atp_events(api_key: str) -> list[dict[str, Any]] | None:
     for sport_key in sport_keys:
         url = (
             f"{_ODDS_API_BASE}/sports/{sport_key}/odds"
-            f"?apiKey={api_key}&regions=eu,uk,us&markets=h2h&oddsFormat=decimal&dateFormat=iso"
+            f"?apiKey={api_key}&regions=eu,uk,us&markets=h2h,spreads,totals&oddsFormat=decimal&dateFormat=iso"
         )
         try:
             req = _urllib.Request(url, headers={"User-Agent": "bet-analytics/1.0"})

@@ -153,7 +153,13 @@ def _notify_telegram(signals: list[dict], today: date) -> None:
     for sig in signals:
         try:
             if sig.get("sport") == "tennis":
-                text = _format_tennis_signal(sig)
+                market = sig.get("market", "h2h")
+                if market == "spreads":
+                    text = _format_tennis_spread_signal(sig)
+                elif market == "totals":
+                    text = _format_tennis_total_signal(sig)
+                else:
+                    text = _format_tennis_signal(sig)
                 result = sender.send_message(text)
             else:
                 result = sender.send_signal(sig)
@@ -280,6 +286,65 @@ _BOOK_NAMES = {
     "bovada":         "Bovada",
     "betus":          "BetUS",
 }
+
+
+def _format_tennis_spread_signal(sig: dict) -> str:
+    player   = sig.get("player", "?")
+    opponent = sig.get("opponent", "?")
+    odds     = sig.get("entry_odds", "?")
+    edge_pct = sig.get("edge_pct", 0)
+    mp       = sig.get("model_prob", 0)
+    book     = sig.get("bookmaker", "?")
+    handicap = sig.get("handicap", 0)
+    tour     = sig.get("tour", "ATP")
+    surf_ru  = {"clay": "грунт", "grass": "трава", "hard": "хард"}.get(
+        sig.get("surface", "hard"), sig.get("surface", "hard"))
+    book_display = _BOOK_NAMES.get(book, book)
+    hcap_str = f"+{handicap}" if handicap > 0 else str(handicap)
+    prob_pct = int(mp * 100) if isinstance(mp, float) else 0
+    stake = 1000
+    payout = round(stake * float(odds)) if isinstance(odds, (int, float)) else "?"
+    return (
+        f"🎾 <b>{tour} — Фора по сетам</b>\n"
+        f"📍 {surf_ru}\n\n"
+        f"<b>{player}</b> против {opponent}\n\n"
+        f"✅ Ставить: фора <b>{hcap_str}</b> на {player}\n\n"
+        f"Почему: модель даёт {prob_pct}% вероятности покрыть фору\n"
+        f"Преимущество над букмекером: <b>{edge_pct}%</b>\n\n"
+        f"💰 {book_display}: @ <b>{odds}</b>\n"
+        f"   Поставил 1 000 ₽ → получишь <b>{payout} ₽</b>\n\n"
+        f"📄 Бумажная ставка — реальных денег нет"
+    )
+
+
+def _format_tennis_total_signal(sig: dict) -> str:
+    player   = sig.get("player", "?")
+    opponent = sig.get("opponent", "?")
+    odds     = sig.get("entry_odds", "?")
+    edge_pct = sig.get("edge_pct", 0)
+    mp       = sig.get("model_prob", 0)
+    book     = sig.get("bookmaker", "?")
+    threshold = sig.get("total_threshold", "?")
+    sel_ru   = sig.get("selection_ru", sig.get("selection", "?"))
+    tour     = sig.get("tour", "ATP")
+    surf_ru  = {"clay": "грунт", "grass": "трава", "hard": "хард"}.get(
+        sig.get("surface", "hard"), sig.get("surface", "hard"))
+    book_display = _BOOK_NAMES.get(book, book)
+    prob_pct = int(mp * 100) if isinstance(mp, float) else 0
+    stake = 1000
+    payout = round(stake * float(odds)) if isinstance(odds, (int, float)) else "?"
+    direction_icon = "📈" if "Больше" in str(sel_ru) else "📉"
+    return (
+        f"🎾 <b>{tour} — Тотал геймов</b>\n"
+        f"📍 {surf_ru}\n\n"
+        f"<b>{player}</b> против {opponent}\n\n"
+        f"✅ Ставить: {direction_icon} <b>{sel_ru}</b>\n\n"
+        f"Почему: модель оценивает вероятность в {prob_pct}%\n"
+        f"Преимущество над букмекером: <b>{edge_pct}%</b>\n\n"
+        f"💰 {book_display}: @ <b>{odds}</b>\n"
+        f"   Поставил 1 000 ₽ → получишь <b>{payout} ₽</b>\n\n"
+        f"📄 Бумажная ставка — реальных денег нет"
+    )
 
 
 def _log_run(job: str, status: str, duration_s: float, message: str, meta: dict | None = None):
