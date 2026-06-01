@@ -16,12 +16,23 @@ from __future__ import annotations
 import json
 import logging
 import os
+import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from typing import Any
 
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
+
 _log = logging.getLogger(__name__)
 _BASE = "https://v3.football.api-sports.io"
+
+
+def _should_retry_apifootball(exc: Exception) -> bool:
+    """Retry on transient errors, but not on quota exhaustion (429) or auth (403)."""
+    if isinstance(exc, urllib.error.HTTPError):
+        return exc.code not in (429, 403)
+    return isinstance(exc, (urllib.error.URLError, OSError, json.JSONDecodeError, TimeoutError))
+
 
 # League IDs on API-Football
 _LEAGUE_IDS: dict[str, int] = {
@@ -53,10 +64,7 @@ def fetch_fixture_id(
     if not league_id:
         return None
 
-    url = (
-        f"{_BASE}/fixtures"
-        f"?date={match_date}&league={league_id}&season={match_date[:4]}"
-    )
+    url = f"{_BASE}/fixtures" f"?date={match_date}&league={league_id}&season={match_date[:4]}"
     try:
         data = _get(url, api_key)
         for fixture in data.get("response", []):
@@ -83,14 +91,16 @@ def fetch_injuries_for_fixture(
         for item in data.get("response", []):
             player = item.get("player", {})
             team = item.get("team", {})
-            result.append({
-                "player_name": player.get("name", "?"),
-                "player_id": str(player.get("id", "")),
-                "team_name": team.get("name", "?"),
-                "team_id": str(team.get("id", "")),
-                "type": item.get("type", "?"),       # e.g. "Missing Fixture"
-                "reason": item.get("reason", "?"),   # e.g. "Knee Injury"
-            })
+            result.append(
+                {
+                    "player_name": player.get("name", "?"),
+                    "player_id": str(player.get("id", "")),
+                    "team_name": team.get("name", "?"),
+                    "team_id": str(team.get("id", "")),
+                    "type": item.get("type", "?"),  # e.g. "Missing Fixture"
+                    "reason": item.get("reason", "?"),  # e.g. "Knee Injury"
+                }
+            )
         return result
     except Exception as exc:
         _log.warning("[injuries] fetch_injuries failed fixture=%s: %s", fixture_id, exc)
@@ -122,7 +132,10 @@ def get_injuries_for_match(
 
     _log.info(
         "[injuries] %s vs %s: %d home / %d away injuries",
-        home_team, away_team, len(home_injuries), len(away_injuries),
+        home_team,
+        away_team,
+        len(home_injuries),
+        len(away_injuries),
     )
 
     return {
@@ -151,7 +164,14 @@ def format_injuries_for_signal(injuries: dict[str, Any]) -> str:
     return f"🏥 Травмы: хозяева — {_fmt(home)} | гости — {_fmt(away)}"
 
 
+@retry(
+    retry=retry_if_exception(_should_retry_apifootball),
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=16),
+    reraise=True,
+)
 def _get(url: str, api_key: str) -> dict[str, Any]:
+    """Fetch JSON from API-Football with exponential backoff on transient errors."""
     req = urllib.request.Request(
         url,
         headers={

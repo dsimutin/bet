@@ -14,10 +14,19 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
+
 from src.infrastructure import odds_cache
 
 _log = logging.getLogger(__name__)
 _BASE = "https://api.the-odds-api.com/v4"
+
+
+def _should_retry_request(exc: Exception) -> bool:
+    """Retry on transient errors, but not on quota exhaustion (HTTP 429)."""
+    if isinstance(exc, urllib.error.HTTPError):
+        return exc.code != 429
+    return isinstance(exc, (urllib.error.URLError, OSError, json.JSONDecodeError, TimeoutError))
 
 
 def _csv_env(name: str, default: str) -> list[str]:
@@ -80,6 +89,22 @@ def get_tennis_h2h_events(api_key: str) -> list[dict[str, Any]]:
     return events
 
 
+@retry(
+    retry=retry_if_exception(_should_retry_request),
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=16),
+    reraise=True,
+)
+def _fetch_active_sports(api_key: str) -> list[dict[str, Any]]:
+    """Fetch active sports list from The Odds API with exponential backoff."""
+    req = urllib.request.Request(
+        f"{_BASE}/sports?apiKey={api_key}",
+        headers={"User-Agent": "bet-analytics/1.0"},
+    )
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        return json.loads(resp.read())
+
+
 def get_active_tennis_keys(api_key: str) -> list[str]:
     """Cache the free sports-list lookup and return active ATP/WTA tennis keys."""
     cache_key = "sports:active-tennis"
@@ -88,19 +113,14 @@ def get_active_tennis_keys(api_key: str) -> list[str]:
         return [str(item) for item in cached]
 
     try:
-        req = urllib.request.Request(
-            f"{_BASE}/sports?apiKey={api_key}",
-            headers={"User-Agent": "bet-analytics/1.0"},
-        )
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            sports = json.loads(resp.read())
+        sports = _fetch_active_sports(api_key)
         keys = [
             str(item["key"])
             for item in sports
             if item.get("active") and "tennis" in str(item.get("key", "")).lower()
         ]
     except Exception as exc:
-        _log.warning("[runtime-odds] tennis sport discovery failed: %s", exc)
+        _log.warning("[runtime-odds] tennis sport discovery failed (after retries): %s", exc)
         keys = []
 
     if not keys:
@@ -109,6 +129,12 @@ def get_active_tennis_keys(api_key: str) -> list[str]:
     return keys
 
 
+@retry(
+    retry=retry_if_exception(_should_retry_request),
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=16),
+    reraise=True,
+)
 def _fetch_odds(
     sport_key: str,
     api_key: str,
