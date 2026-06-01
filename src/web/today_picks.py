@@ -208,6 +208,31 @@ _MARKET_ICON = {
 }
 
 
+_SELECTION_RU_MAP = {
+    "home": "победа хозяев (П1)",
+    "draw": "ничья (Х)",
+    "away": "победа гостей (П2)",
+    "over": "тотал больше",
+    "under": "тотал меньше",
+    "btts_yes": "обе забьют — да",
+    "btts_no": "обе забьют — нет",
+}
+
+
+def _football_bet_label(sel: str, sel_ru: str, home: str, away: str) -> str:
+    sel_low = sel.lower().strip()
+    if sel_low == "home":
+        return f"П1 — победа {home}"
+    if sel_low == "draw":
+        return "Х — ничья"
+    if sel_low == "away":
+        return f"П2 — победа {away}"
+    mapped = _SELECTION_RU_MAP.get(sel_low)
+    if mapped:
+        return mapped
+    return sel_ru or sel or "?"
+
+
 def _surface_ru(surface: Any) -> str:
     s = str(surface or "").lower().strip()
     return _SURFACE_RU.get(s, s or "?")
@@ -240,11 +265,22 @@ def _format_pick(item: dict[str, Any], priority: bool) -> list[str]:
             f"H2H-поправка: {_signed_pct(item.get('h2h_adj'))} | Модель: {escape(str(item.get('model_source', 'elo')))}",
         ]
     else:
-        title = f"{icon} ⚽ <b>{escape(str(item.get('home_team', '?')))} — {escape(str(item.get('away_team', '?')))}</b> | {escape(str(item.get('selection_ru', item.get('selection', '?'))))}"
+        home = escape(str(item.get("home_team", "?")))
+        away = escape(str(item.get("away_team", "?")))
+        sel = item.get("selection", "")
+        sel_ru = item.get("selection_ru", "")
+        bet_label = _football_bet_label(sel, sel_ru, home, away)
+        title = f"{icon} ⚽ <b>{home} — {away}</b>"
+        league = escape(str(item.get("league", item.get("competition", "?"))))
+        model_id = str(item.get("model_id", ""))
+        model_label = model_id.split("_")[2] if model_id.count("_") >= 2 else league
+        fair_odds = item.get("reference_fair_odds", "?")
         facts = [
-            f"Модель Dixon–Coles: {escape(str(item.get('model_id', '?')))}",
-            f"Справедливый коэффициент модели: {item.get('reference_fair_odds', '?')}",
-            f"Размер paper-ставки: {item.get('stake_units', 1)}u",
+            f"Ставка: <b>{bet_label}</b>",
+            f"Лига: {league} | Dixon–Coles модель",
+            f"Данные модели: {model_label} (только история голов)",
+            f"Справедливый кэф модели: {fair_odds} | Ставка: {item.get('stake_units', 1)}u",
+            "⚠️ Модель не учитывает травмы, состав, усталость — проверьте сами",
         ]
     lines = [
         "",
