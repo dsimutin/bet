@@ -153,13 +153,43 @@ def _debug_tennis(chat_id: str) -> None:
             result = scan_tennis_h2h_runtime(
                 model_dir / "tennis_elo_atp_latest.pkl", os.environ.get("THE_ODDS_API_KEY", "")
             )
+            events = result.get("events_checked", 0)
+            signals = result.get("signals_count", 0)
+            skipped = result.get("skipped_no_data", 0)
+            api_st = escape(str(result.get("api_status", "?")))
+            skipped_note = (
+                f"\n⚠️ Пропущено {skipped}: у этих игроков нет истории"
+                " в ELO-модели (меньше 10 матчей в базе)"
+                if skipped
+                else ""
+            )
+            h2h_n = result.get("h2h_count", signals)
+            spread_n = result.get("spread_count", 0)
+            total_n = result.get("total_count", 0)
+            modes = {
+                "multimarket_cached": "мультирынок (кэш)",
+                "h2h_low_quota_cached": "эконом (h2h, кэш)",
+                "h2h_low_quota": "эконом (h2h)",
+            }
+            mode_text = modes.get(str(result.get("runtime_mode", "")), str(result.get("runtime_mode", "?")))
+            top = result.get("top_signals", [])
+            top_lines = ""
+            if top:
+                mkt_icons = {"h2h": "🏆", "spreads": "↔️", "totals": "🔢"}
+                top_lines = "\n\n<b>Топ сигналы:</b>\n" + "\n".join(
+                    f"• {mkt_icons.get(s.get('market','h2h'),'')}"
+                    f"{escape(str(s.get('player','?')))} edge {s.get('edge_pct','?')}%"
+                    for s in top[:3]
+                )
             text = (
                 "🔍 <b>Диагностика тенниса</b>\n"
-                f"Событий проверено: {result.get('events_checked', 0)}\n"
-                f"Сигналов h2h: {result.get('signals_count', 0)}\n"
-                f"Пропущено без данных: {result.get('skipped_no_data', 0)}\n"
-                f"Статус API: {escape(str(result.get('api_status', '?')))}\n"
-                f"Режим: {escape(str(result.get('runtime_mode', '?')))}"
+                f"Событий проверено: <b>{events}</b>\n"
+                f"Сигналов: <b>{signals}</b>"
+                f" (🏆 {h2h_n} h2h | ↔️ {spread_n} фора | 🔢 {total_n} тотал)\n"
+                f"Пропущено: {skipped}{skipped_note}\n"
+                f"Статус API: {api_st}\n"
+                f"Режим: {escape(mode_text)}"
+                f"{top_lines}"
             )
             _send(chat_id, text, _back_button())
         except Exception as exc:

@@ -65,23 +65,90 @@ def build_stats_text() -> str:
     wins = [item for item in settled if item.get("result") == "win"]
     pnl = sum(_num(item.get("pnl_units")) for item in settled)
     stake = sum(_num(item.get("stake_units"), 1.0) for item in settled)
+    roi = pnl / stake * 100 if stake else 0
+    accuracy = len(wins) / len(settled) * 100 if settled else 0
     lines = [
         "📈 <b>Статистика бумажных сигналов</b>",
         "",
         f"Всего записей: <b>{len(entries)}</b>",
         f"Открыто: {len(opened)} | Закрыто: {len(settled)}",
-        f"Победы: {len(wins)} | Точность: {(len(wins) / len(settled) * 100 if settled else 0):.1f}%",
-        f"ROI: {(pnl / stake * 100 if stake else 0):.1f}% | P&L: {pnl:.2f}u",
+        f"Победы: {len(wins)} | Точность: {accuracy:.1f}%",
+        f"ROI: {roi:+.1f}% | P&L: {pnl:+.2f}u",
+        "",
     ]
-    for sport, icon in (("football", "⚽"), ("tennis", "🎾")):
+    for sport, icon, name_ru in (("football", "⚽", "Футбол"), ("tennis", "🎾", "Теннис")):
         rows = [item for item in settled if str(item.get("sport") or "football") == sport]
         sport_wins = sum(item.get("result") == "win" for item in rows)
-        lines.append(
-            f"{icon} {sport}: {sport_wins}/{len(rows)}"
-            if rows
-            else f"{icon} {sport}: пока нет закрытых ставок"
-        )
+        sport_pnl = sum(_num(r.get("pnl_units")) for r in rows)
+        sport_stake = sum(_num(r.get("stake_units"), 1.0) for r in rows)
+        sport_roi = sport_pnl / sport_stake * 100 if sport_stake else 0
+        if rows:
+            lines.append(
+                f"{icon} {name_ru}: {sport_wins}/{len(rows)} ({sport_wins/len(rows)*100:.0f}%)"
+                f" | ROI {sport_roi:+.1f}%"
+            )
+        else:
+            lines.append(f"{icon} {name_ru}: пока нет закрытых ставок")
+    lines += ["", "<b>Как модель учится</b>"]
+    lines += _build_model_info()
     return "\n".join(lines)
+
+
+def _build_model_info() -> list[str]:
+    """Short description of model training state."""
+    import os
+    from pathlib import Path
+
+    model_dir = Path(os.environ.get("MODEL_DIR", "data/models"))
+    lines: list[str] = []
+
+    # Football models
+    try:
+        metas = sorted(model_dir.glob("dc_*.meta.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+        leagues_seen: set[str] = set()
+        for meta_path in metas:
+            import json
+
+            with open(meta_path) as f:
+                meta = json.load(f)
+            league = str(meta.get("league", "?"))
+            if league in leagues_seen:
+                continue
+            leagues_seen.add(league)
+            n_matches = meta.get("n_matches", "?")
+            trained_on_raw = meta.get("trained_on", {})
+            if isinstance(trained_on_raw, dict):
+                trained_on = f"{str(trained_on_raw.get('start','?'))[:10]}–{str(trained_on_raw.get('end','?'))[:10]}"
+            else:
+                trained_on = str(trained_on_raw)[:10]
+            lines.append(f"⚽ {league}: {n_matches} матчей, {trained_on}")
+    except Exception:
+        lines.append("⚽ Футбол: данные модели недоступны")
+
+    # Tennis ELO model
+    try:
+        elo_path = model_dir / "tennis_elo_atp_latest.pkl"
+        if elo_path.exists():
+            import pickle
+
+            with open(elo_path, "rb") as f:
+                elo_model = pickle.load(f)
+            params = getattr(elo_model, "params", None)
+            n_players = getattr(params, "n_players", "?") if params else "?"
+            n_matches = getattr(params, "n_matches", "?") if params else "?"
+            lines.append(f"🎾 Теннис ELO: {n_players} игроков, {n_matches} матчей")
+            lines.append("   Обновляется еженедельно по данным Jeff Sackmann ATP")
+        else:
+            lines.append("🎾 Теннис: модель не найдена")
+    except Exception:
+        lines.append("🎾 Теннис: данные модели недоступны")
+
+    lines += [
+        "",
+        "Модели учатся на закрытых ставках: чем больше settled,",
+        "тем точнее отделяются priority от watchlist сигналов.",
+    ]
+    return lines
 
 
 def build_history_text(limit: int = 20) -> str:
@@ -125,6 +192,27 @@ def split_message(text: str, limit: int = 3900) -> list[str]:
     return chunks or [text[:limit]]
 
 
+_SURFACE_RU = {
+    "clay": "грунт",
+    "hard": "хард",
+    "grass": "трава",
+    "carpet": "ковёр",
+    "indoor hard": "хард (крытый)",
+    "indoor": "крытый",
+}
+
+_MARKET_ICON = {
+    "h2h": "🏆",
+    "spreads": "↔️",
+    "totals": "🔢",
+}
+
+
+def _surface_ru(surface: Any) -> str:
+    s = str(surface or "").lower().strip()
+    return _SURFACE_RU.get(s, s or "?")
+
+
 def _format_pick(item: dict[str, Any], priority: bool) -> list[str]:
     icon = "🟢" if priority else "🟡"
     odds = item.get("entry_odds", "?")
@@ -134,12 +222,21 @@ def _format_pick(item: dict[str, Any], priority: bool) -> list[str]:
     prob_text = f"{float(prob):.1%}" if isinstance(prob, (int, float)) else "?"
     market_text = f"{float(market_prob):.1%}" if isinstance(market_prob, (int, float)) else "?"
     reason = escape(str(item.get("recommendation_reason", "")))
+    market = item.get("market", "h2h")
+    market_icon = _MARKET_ICON.get(str(market), "")
     if item.get("sport") == "tennis":
-        title = f"{icon} 🎾 <b>{escape(str(item.get('player', '?')))} победит {escape(str(item.get('opponent', '?')))}</b>"
+        selection_ru = escape(str(item.get("selection_ru", "")))
+        if market == "h2h":
+            title = f"{icon} 🎾{market_icon} <b>{escape(str(item.get('player', '?')))} победит {escape(str(item.get('opponent', '?')))}</b>"
+        else:
+            title = f"{icon} 🎾{market_icon} <b>{escape(str(item.get('player', '?')))} vs {escape(str(item.get('opponent', '?')))}</b> — {selection_ru or escape(str(item.get('selection', '?')))}"
+        surface_ru = _surface_ru(item.get("surface"))
+        recent_form = item.get("recent_form")
+        form_text = f"{float(recent_form):.0%}" if isinstance(recent_form, (int, float)) else "?"
         facts = [
-            f"Покрытие: {escape(str(item.get('surface', '?')))} | Рейтинг: #{item.get('rank', '?')} vs #{item.get('opp_rank', '?')}",
-            f"ELO: {_pct(item.get('elo_prob'))} | Форма: {_pct(item.get('recent_form'))}",
-            f"Подача: {_pct(item.get('serve_win_pct'))} | Отдых: {item.get('days_since_last_match', '?')} дн.",
+            f"Покрытие: {surface_ru} | Рейтинг: #{item.get('rank', '?')} vs #{item.get('opp_rank', '?')}",
+            f"ELO: {_pct(item.get('elo_prob'))} | Форма (побед, посл. 10): {form_text}",
+            f"Подача (выигрыш гейма): {_pct(item.get('serve_win_pct'))} | Отдых: {item.get('days_since_last_match', '?')} дн.",
             f"H2H-поправка: {_signed_pct(item.get('h2h_adj'))} | Модель: {escape(str(item.get('model_source', 'elo')))}",
         ]
     else:
@@ -152,7 +249,7 @@ def _format_pick(item: dict[str, Any], priority: bool) -> list[str]:
     lines = [
         "",
         title,
-        f"Время: {_event_time_text(item)}",
+        f"📅 {_event_time_text(item)}",
         f"Коэффициент: <b>{odds}</b> | Вероятность модели: <b>{prob_text}</b>",
         f"Рынок после снятия маржи: {market_text} | Edge: <b>{edge}%</b>",
     ]

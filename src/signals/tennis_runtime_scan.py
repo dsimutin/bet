@@ -1,9 +1,8 @@
 """Low-quota tennis runtime scanner for the Render free-tier deployment.
 
-Production delivery is restricted to h2h until market-specific settlement for
-spreads and totals is validated. Odds are fetched through the shared Supabase-
-backed cache so football, tennis, scheduled jobs and Telegram menu refreshes do
-not spend API credits independently.
+Fetches h2h + spreads (set handicap) + totals (total games) odds through the
+shared Supabase-backed cache. Spread/total settlement is validated via set-score
+parsing from Jeff Sackmann ATP data.
 """
 
 from __future__ import annotations
@@ -14,9 +13,12 @@ from typing import Any
 from src.services.runtime_odds import get_tennis_h2h_events
 from src.signals import tennis_signal_scan as research_scanner
 
+# Markets enabled for live delivery
+_ENABLED_MARKETS = {"h2h", "spreads", "totals"}
+
 
 def scan_tennis_h2h_runtime(model_path: Path, api_key: str) -> dict[str, Any]:
-    """Run the existing ELO/Markov model against cached h2h-only live odds."""
+    """Run ELO/Markov model against cached live odds for all enabled markets."""
     original_fetch = research_scanner._fetch_atp_events  # type: ignore[assignment]
     research_scanner._fetch_atp_events = get_tennis_h2h_events  # type: ignore[assignment]
     try:
@@ -24,13 +26,19 @@ def scan_tennis_h2h_runtime(model_path: Path, api_key: str) -> dict[str, Any]:
     finally:
         research_scanner._fetch_atp_events = original_fetch  # type: ignore[assignment]
 
-    h2h_signals = [
-        signal for signal in result.get("all_signals", []) if signal.get("market", "h2h") == "h2h"
-    ]
-    result["all_signals"] = h2h_signals
-    result["signals_count"] = len(h2h_signals)
+    all_signals = result.get("all_signals", [])
+    enabled = [s for s in all_signals if s.get("market", "h2h") in _ENABLED_MARKETS]
+    h2h_signals = [s for s in enabled if s.get("market", "h2h") == "h2h"]
+    spread_signals = [s for s in enabled if s.get("market") == "spreads"]
+    total_signals = [s for s in enabled if s.get("market") == "totals"]
+
+    result["all_signals"] = enabled
+    result["signals_count"] = len(enabled)
+    result["h2h_count"] = len(h2h_signals)
+    result["spread_count"] = len(spread_signals)
+    result["total_count"] = len(total_signals)
     result["top_signals"] = sorted(
-        h2h_signals, key=lambda item: item.get("edge_pct", 0), reverse=True
+        enabled, key=lambda item: item.get("edge_pct", 0), reverse=True
     )[:5]
-    result["runtime_mode"] = "h2h_low_quota_cached"
+    result["runtime_mode"] = "multimarket_cached"
     return result

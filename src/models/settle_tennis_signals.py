@@ -60,10 +60,16 @@ def settle_tennis_from_sackmann(
 
         winner = str(match_row.get("winner_name", "")).strip()
         player_won = _names_match(player, winner)
-        result: Literal["win", "loss"] = "win" if player_won else "loss"
-
-        # Closing odds: use b365w/b365l columns when available
         closing_odds = _pick_closing_odds(match_row, player_won)
+
+        market = str(entry.get("market", "h2h"))
+        if market == "spreads":
+            result = _settle_spread(match_row, player, player_won, entry)
+        elif market == "totals":
+            result = _settle_total(match_row, entry)
+        else:
+            result = "win" if player_won else "loss"
+
         ledger.update_result(signal_id, result=result, closing_odds=closing_odds)
         settled += 1
 
@@ -161,6 +167,79 @@ def _names_match(a: str, b: str) -> bool:
         if len(a_parts) >= 2 and a_parts[-1] == last and a_parts[0].startswith(initial):
             return True
     return False
+
+
+def _parse_score(score_str: str) -> tuple[int, int, int] | None:
+    """Parse '6-4 5-7 7-6(4)' → (winner_sets, loser_sets, total_games).
+
+    Returns None if score is incomplete (RET before last set, W/O).
+    """
+    if not score_str:
+        return None
+    parts = str(score_str).strip().split()
+    winner_sets = 0
+    loser_sets = 0
+    total_games = 0
+    for part in parts:
+        upper = part.upper()
+        if upper in ("RET", "W/O", "DEF", "ABD"):
+            return None  # incomplete match, skip
+        clean = part.split("(")[0]
+        if "-" not in clean:
+            continue
+        try:
+            w_g, l_g = (int(x) for x in clean.split("-", 1))
+            total_games += w_g + l_g
+            if w_g > l_g:
+                winner_sets += 1
+            else:
+                loser_sets += 1
+        except ValueError:
+            continue
+    if winner_sets + loser_sets == 0:
+        return None
+    return winner_sets, loser_sets, total_games
+
+
+def _settle_spread(
+    row: dict[str, Any],
+    player: str,
+    player_won: bool,
+    entry: dict[str, Any],
+) -> Literal["win", "loss"]:
+    """Settle a set-handicap bet.
+
+    handicap field: negative means giving sets (favourite), positive means receiving.
+    Win condition: (actual_sets_p1 - actual_sets_p2) + handicap > 0
+    """
+    score_str = str(row.get("score", ""))
+    parsed = _parse_score(score_str)
+    if parsed is None:
+        return "loss"  # incomplete match, can't settle — treat as loss conservatively
+    winner_sets, loser_sets, _ = parsed
+    player_sets = winner_sets if player_won else loser_sets
+    opp_sets = loser_sets if player_won else winner_sets
+    handicap = float(entry.get("handicap", 0))
+    margin = (player_sets - opp_sets) + handicap
+    return "win" if margin > 0 else "loss"
+
+
+def _settle_total(
+    row: dict[str, Any],
+    entry: dict[str, Any],
+) -> Literal["win", "loss"]:
+    """Settle a total-games over/under bet."""
+    score_str = str(row.get("score", ""))
+    parsed = _parse_score(score_str)
+    if parsed is None:
+        return "loss"
+    _, _, total_games = parsed
+    threshold = float(entry.get("handicap", entry.get("threshold", 0)))
+    is_over = str(entry.get("selection", "")).lower().startswith("over")
+    if is_over:
+        return "win" if total_games > threshold else "loss"
+    else:
+        return "win" if total_games < threshold else "loss"
 
 
 def _pick_closing_odds(row: dict[str, Any], player_won: bool) -> float | None:
