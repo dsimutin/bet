@@ -73,55 +73,67 @@ def start(loop: asyncio.AbstractEventLoop | None = None) -> None:
         _log.warning("[scheduler] Already running — skipping duplicate start")
         return
 
-    interval_h = int(os.environ.get("ACTIVE_REPORT_INTERVAL_HOURS", "3"))
+    interval_h = int(os.environ.get("ACTIVE_REPORT_INTERVAL_HOURS", "6"))
+
+    # Active hours: only run jobs during ACTIVE_HOURS_UTC (saves Render free-tier minutes).
+    # Default 07-22 UTC — covers all live tennis/football, skips night.
+    # Override via ACTIVE_HOURS_UTC="7-22" env var.
+    _active_range = os.environ.get("ACTIVE_HOURS_UTC", "7-22")
+    try:
+        _ah_start, _ah_end = [int(x) for x in _active_range.split("-")]
+    except Exception:
+        _ah_start, _ah_end = 7, 22
+    _active_hours = ",".join(str(h) for h in range(_ah_start, _ah_end + 1))
 
     # ── Job registrations ──────────────────────────────────────────────
-    # Signal scan:     top of every Nth hour
+    # Signal scan: every Nth hour, only during active hours
     sched.add_job(
         _job_signal_scan,
         "cron",
-        hour=f"*/{interval_h}",
+        hour=_active_hours,
         minute=0,
         id="signal_scan",
         replace_existing=True,
         misfire_grace_time=300,
     )
-    # Settlement:      20 min into every Nth hour
+    # Settlement: 20 min into every Nth active hour
     sched.add_job(
         _job_settlement,
         "cron",
-        hour=f"*/{interval_h}",
+        hour=_active_hours,
         minute=20,
         id="settlement",
         replace_existing=True,
         misfire_grace_time=300,
     )
-    # Training check:  40 min into every Nth hour
+    # Training check: once a day at 07:40 UTC (not every 3h — saves minutes)
     sched.add_job(
         _job_training_check,
         "cron",
-        hour=f"*/{interval_h}",
+        hour=7,
         minute=40,
         id="training_check",
         replace_existing=True,
         misfire_grace_time=600,
     )
-    # Active report:   50 min into every Nth hour
+    # Active report: once a day at 09:50 UTC
     sched.add_job(
         _job_active_report,
         "cron",
-        hour=f"*/{interval_h}",
+        hour=9,
         minute=50,
         id="active_report",
         replace_existing=True,
         misfire_grace_time=300,
     )
 
-    # Keep-alive: ping /health every 14 min so Render starter plan never sleeps.
+    # Keep-alive: only during active hours (Render free plan sleeps outside window).
+    # At night the service sleeps → saves ~9h × 60min = ~9 Render hours/day.
     sched.add_job(
         _job_keep_alive,
-        "interval",
-        minutes=14,
+        "cron",
+        hour=_active_hours,
+        minute="*/14",
         id="keep_alive",
         replace_existing=True,
     )
