@@ -40,7 +40,7 @@ services:
     startCommand: uvicorn src.web.health_app:app --host 0.0.0.0 --port $PORT --workers 1 --log-level info
     healthCheckPath: /health
     autoDeploy: true
-    branch: all-the-best
+    branch: fix/p0-supabase-runtime
 
     envVars:
       # ── Пути (относительные — всё живёт внутри репозитория) ──
@@ -61,17 +61,35 @@ services:
       - key: OPENFOOTBALL_SEASONS
         value: "2022-23,2023-24,2024-25,2025-26"
 
+      # ── Supabase PostgreSQL persistent ledger ──
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_LEDGER_ENABLED
+        value: "true"
+      - key: REQUIRE_DATABASE
+        value: "true"
+
+      # ── Quota-efficient Odds API cache ──
+      - key: FOOTBALL_ODDS_REGIONS
+        value: "eu"
+      - key: TENNIS_ODDS_REGIONS
+        value: "eu"
+      - key: TENNIS_MAX_ACTIVE_KEYS
+        value: "2"
+      - key: ODDS_CACHE_TTL_SECONDS
+        value: "14400"
+
+      # ── Unified runtime schedule (UTC) ──
+      - key: RUNTIME_SCAN_HOURS_UTC
+        value: "7,15"
+      - key: SETTLEMENT_HOURS_UTC
+        value: "7,15,22"
+      - key: KEEP_ALIVE_HOURS_UTC
+        value: "6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22"
+
       # ── Active mode scheduler ──
       - key: ACTIVE_MODE
         value: "true"
-      - key: ACTIVE_REPORT_INTERVAL_HOURS
-        value: "3"
-      - key: SIGNAL_SCAN_INTERVAL_HOURS
-        value: "3"
-      - key: SETTLEMENT_INTERVAL_HOURS
-        value: "3"
-      - key: TRAINING_CHECK_INTERVAL_HOURS
-        value: "3"
       - key: FORCE_TRAINING
         value: "false"
       - key: MIN_NEW_SETTLED_MATCHES_FOR_TRAINING
@@ -80,8 +98,10 @@ services:
         value: "true"
       - key: TELEGRAM_SIGNAL_ALERTS_ENABLED
         value: "true"
+
+      # ── Sports (both football and tennis) ──
       - key: SPORTS
-        value: "football"
+        value: "football,tennis"
 
       # ── Telegram (заполнить в Dashboard → Environment) ──
       - key: TELEGRAM_BOT_TOKEN
@@ -89,7 +109,7 @@ services:
       - key: TELEGRAM_CHAT_ID
         sync: false
 
-      # ── The Odds API (опционально) ──
+      # ── The Odds API ──
       - key: THE_ODDS_API_KEY
         sync: false
 
