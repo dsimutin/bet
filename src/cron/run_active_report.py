@@ -478,7 +478,7 @@ def _run_tennis_scan() -> dict[str, Any]:
     if not api_key:
         _log.info("[active] Tennis scan skipped — no Odds API key")
         return {"signals_count": 0, "status": "skip", "no_signal_reason": "no_api_key",
-                "tour": "ATP", "sport": "tennis"}
+                "tour": "ATP", "sport": "tennis", "all_signals": []}
 
     model_path = MODEL_DIR / "tennis_elo_atp_latest.pkl"
     result = scan_tennis_signals(model_path=model_path, api_key=api_key)
@@ -487,9 +487,29 @@ def _run_tennis_scan() -> dict[str, Any]:
         result.get("signals_count", 0), result.get("events_checked", 0), result.get("status"),
     )
 
+    # Save tennis signals to ledger (same as football)
+    tennis_signals = result.get("all_signals", [])
+    if tennis_signals:
+        try:
+            from src.models.signal_ledger import SignalLedger
+            ledger = SignalLedger.load_or_create(LEDGER_PATH)
+            saved = 0
+            for sig in tennis_signals:
+                try:
+                    if ledger.add_signal(sig):
+                        saved += 1
+                except Exception as e:
+                    _log.debug("[active] Tennis signal ledger skip (%s): %s",
+                               sig.get("signal_id", "?"), e)
+            if saved:
+                ledger.save(LEDGER_PATH)
+                _log.info("[active] Tennis: saved %d new signals to ledger", saved)
+        except Exception as e:
+            _log.error("[active] Tennis ledger save failed: %s", e)
+
     # Send Telegram alerts for tennis signals
-    if TELEGRAM_SIGNAL_ALERTS_ENABLED and result.get("all_signals"):
-        _send_tennis_alerts(result["all_signals"])
+    if TELEGRAM_SIGNAL_ALERTS_ENABLED and tennis_signals:
+        _send_tennis_alerts(tennis_signals)
 
     return result
 

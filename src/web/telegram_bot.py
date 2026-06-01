@@ -145,22 +145,33 @@ def _action_picks_today(chat_id: str) -> None:
     import threading
 
     def _run():
+        from src.cron.run_active_report import (
+            _run_signal_scan, _run_tennis_scan, _format_morning_digest,
+        )
+        today = date.today()
+
+        # Each scan gets its own guard — one failure doesn't silence the other
+        signals_result: dict = {}
         try:
-            from src.cron.run_active_report import (
-                _run_signal_scan, _run_tennis_scan, _format_morning_digest,
-            )
-            today = date.today()
             signals_result = _run_signal_scan()
+        except Exception as exc:
+            _log.exception("[bot] football scan failed: %s", exc)
+
+        tennis_result: dict = {}
+        try:
             tennis_result = _run_tennis_scan()
+        except Exception as exc:
+            _log.exception("[bot] tennis scan failed: %s", exc)
 
-            football = signals_result.get("top_signals", [])
-            tennis = tennis_result.get("all_signals", [])
-            all_sigs = football + tennis
+        football = signals_result.get("top_signals", [])
+        tennis = tennis_result.get("all_signals", [])
+        all_sigs = football + tennis
 
+        try:
             text = _format_morning_digest(all_sigs, today)
             _send(chat_id, text, reply_markup=_back_button())
         except Exception as exc:
-            _log.exception("[bot] picks_today failed: %s", exc)
+            _log.exception("[bot] digest format failed: %s", exc)
             _send(chat_id, "❌ Не удалось загрузить ставки — попробуй позже.")
 
     threading.Thread(target=_run, daemon=True).start()
