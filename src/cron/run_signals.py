@@ -170,51 +170,116 @@ def _format_tennis_signal(sig: dict) -> str:
     player   = sig.get("player", "?")
     opponent = sig.get("opponent", "?")
     odds     = sig.get("entry_odds", "?")
-    edge     = sig.get("edge_pct", "?")
+    edge_pct = sig.get("edge_pct", 0)
     mp       = sig.get("model_prob", 0)
-    mp_str   = f"{mp:.1%}" if isinstance(mp, float) else str(mp)
-    surface  = sig.get("surface", "hard").capitalize()
     tour     = sig.get("tour", "ATP")
     book     = sig.get("bookmaker", "?")
     best_of  = sig.get("best_of", 3)
-    bo_str   = " | BO5" if best_of == 5 else ""
 
+    # Surface in plain Russian
+    surface_ru = {
+        "clay": "грунт (Roland Garros)",
+        "grass": "трава (Wimbledon)",
+        "hard": "хард",
+        "carpet": "ковёр",
+    }.get(sig.get("surface", "hard"), sig.get("surface", "hard"))
+
+    # Round label
+    round_label = "Финальная стадия" if best_of == 5 else "Ранний раунд"
+
+    # Rank context
     rank     = sig.get("rank")
     opp_rank = sig.get("opp_rank")
-    rank_str = f" (#{rank})" if rank else ""
-    opp_rank_str = f" (#{opp_rank})" if opp_rank else ""
+    rank_str = f"#{rank}" if rank else "?"
+    opp_rank_str = f"#{opp_rank}" if opp_rank else "?"
 
-    serve    = sig.get("serve_win_pct")
-    serve_str = f" | подача {serve:.1%}" if serve else ""
-    days     = sig.get("days_since_last_match")
-    rest_str = f" | отдых {days}д" if days is not None else ""
-    form     = sig.get("recent_form")
-    form_str = f" | форма {form:.0%}" if form is not None else ""
-    cap      = sig.get("capper_support")
-    cap_n    = sig.get("capper_tips", 0)
-    cap_str  = f"\n👥 Каперы: {cap:.0%} за ({cap_n} прогнозов)" if cap is not None and cap_n > 0 else ""
-    markov   = sig.get("markov_prob")
-    markov_str = f" | Марков={markov:.1%}" if markov else ""
-    src      = sig.get("model_source", "elo_only")
-    src_str  = " 🧮" if "markov" in src else ""
+    # Confidence in plain words
+    prob_pct = int(mp * 100) if isinstance(mp, float) else 0
+    if prob_pct >= 75:
+        conf_label = "Очень высокая 🟢"
+    elif prob_pct >= 65:
+        conf_label = "Высокая 🟡"
+    else:
+        conf_label = "Умеренная 🟠"
 
-    # Alt bookmakers — compact line showing other options
+    # Why we recommend — plain reasons
+    reasons = []
+    form = sig.get("recent_form")
+    if form is not None and form >= 0.6:
+        reasons.append(f"в хорошей форме ({form:.0%} побед)")
+    serve = sig.get("serve_win_pct")
+    if serve is not None and serve >= 0.65:
+        reasons.append(f"сильная подача ({serve:.0%})")
+    days = sig.get("days_since_last_match")
+    if days is not None and days >= 1:
+        reasons.append(f"отдохнул {days} дн.")
+    if rank and opp_rank and rank < opp_rank:
+        reasons.append(f"выше в рейтинге (#{rank} vs #{opp_rank})")
+    cap = sig.get("capper_support")
+    cap_n = sig.get("capper_tips", 0)
+    if cap is not None and cap >= 0.6 and cap_n >= 2:
+        reasons.append(f"{cap_n} каперов ({cap:.0%}) тоже ставят на него")
+    reasons_str = "\n".join(f"  • {r}" for r in reasons) if reasons else "  • превосходит соперника по рейтингу"
+
+    # Best bookmaker + payout example
+    stake_example = 1000
+    payout = round(stake_example * float(odds)) if isinstance(odds, (int, float)) else "?"
+    book_display = _BOOK_NAMES.get(book, book)
+
+    # Alt bookmakers
     alt_books = sig.get("alt_books", [])
     if alt_books:
-        alts = "  ".join(f"{a['bookmaker']} {a['odds']}" for a in alt_books[:4])
-        alt_str = f"\nДругие BK: {alts}"
+        alt_lines = "\n".join(
+            f"  • {_BOOK_NAMES.get(a['bookmaker'], a['bookmaker'])}: {a['odds']}"
+            for a in alt_books[:3]
+        )
+        alt_str = f"\n\nДругие варианты:\n{alt_lines}"
     else:
         alt_str = ""
 
     return (
-        f"🎾 {tour} Сигнал — {surface}{bo_str}\n"
-        f"{player}{rank_str} vs {opponent}{opp_rank_str}\n"
-        f"Ставка: победа <b>{player}</b>\n"
-        f"💰 Лучшая линия: <b>{book} @ {odds}</b> | edge=<b>{edge}%</b>\n"
-        f"Модель: {mp_str}{markov_str}{src_str}{alt_str}\n"
-        f"{serve_str.lstrip(' | ')}{rest_str}{form_str}{cap_str}\n"
-        f"📄 Paper trade"
+        f"🎾 <b>Рекомендация — {tour}</b>\n"
+        f"📍 {surface_ru} · {round_label}\n"
+        f"\n"
+        f"<b>{player}</b> против {opponent}\n"
+        f"(рейтинг {rank_str} vs {opp_rank_str})\n"
+        f"\n"
+        f"✅ Ставить на победу <b>{player}</b>\n"
+        f"\n"
+        f"Почему:\n{reasons_str}\n"
+        f"\n"
+        f"Уверенность модели: {conf_label} ({prob_pct}%)\n"
+        f"\n"
+        f"💰 <b>Где ставить:</b>\n"
+        f"  🏆 {book_display}: коэффициент <b>{odds}</b>\n"
+        f"     → поставил 1 000 ₽ = получишь <b>{payout} ₽</b> при победе{alt_str}\n"
+        f"\n"
+        f"📊 Преимущество нашей модели над букмекером: <b>{edge_pct}%</b>\n"
+        f"📄 Бумажная ставка (реальные деньги не используются)"
     )
+
+
+# Readable bookmaker names
+_BOOK_NAMES = {
+    "betfair_ex_uk":  "Betfair",
+    "betfair_ex_eu":  "Betfair EU",
+    "pinnacle":       "Pinnacle",
+    "bet365":         "Bet365",
+    "williamhill":    "William Hill",
+    "betsson":        "Betsson",
+    "smarkets":       "Smarkets",
+    "nordicbet":      "NordicBet",
+    "betway":         "Betway",
+    "fanduel":        "FanDuel",
+    "draftkings":     "DraftKings",
+    "unibet_eu":      "Unibet",
+    "gtbets":         "GTBets",
+    "mybookieag":     "MyBookie",
+    "betonlineag":    "BetOnline",
+    "lowvig":         "LowVig",
+    "bovada":         "Bovada",
+    "betus":          "BetUS",
+}
 
 
 def _log_run(job: str, status: str, duration_s: float, message: str, meta: dict | None = None):
