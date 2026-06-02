@@ -393,6 +393,8 @@ def _check_event(
                 form = ctx.get("p1_form" if is_p1 else "p2_form")
                 p_rank = ctx.get("p1_rank" if is_p1 else "p2_rank")
                 opp_rank = ctx.get("p2_rank" if is_p1 else "p1_rank")
+                # Extract match_date from commence_time for settlement matching
+                match_date = commence.split("T")[0] if commence else None
                 signals.append(
                     {
                         "signal_id": f"ten_{event_id[:8]}_{book_key}_{player[:4].replace(' ', '')}",
@@ -402,6 +404,8 @@ def _check_event(
                         "opponent": opponent,
                         "surface": breakdown.get("surface", "hard"),
                         "event_id": event_id,
+                        "match_date": match_date,
+                        "event_time_utc": commence,
                         "commence_time": commence,
                         "bookmaker": book_key,
                         "entry_odds": round(entry_odds, 3),
@@ -617,6 +621,7 @@ def _process_spreads(
         fair_odds = round(1.0 / model_p, 3) if model_p > 0 else 99.0
         hcap_str = f"+{handicap}" if handicap > 0 else str(handicap)
         tour = "ATP" if "atp" in sport_key else "WTA"
+        match_date = commence.split("T")[0] if commence else None
 
         signals.append(
             {
@@ -631,6 +636,8 @@ def _process_spreads(
                 "selection_ru": f"Фора {hcap_str} сета",
                 "surface": surface,
                 "event_id": event_id,
+                "match_date": match_date,
+                "event_time_utc": commence,
                 "commence_time": commence,
                 "bookmaker": book_key,
                 "entry_odds": round(price, 3),
@@ -707,6 +714,7 @@ def _process_totals(
         fair_odds = round(1.0 / model_p, 3) if model_p > 0 else 99.0
         direction_ru = "Больше" if is_over else "Меньше"
         tour = "ATP" if "atp" in sport_key else "WTA"
+        match_date = commence.split("T")[0] if commence else None
 
         signals.append(
             {
@@ -721,6 +729,8 @@ def _process_totals(
                 "selection_ru": f"{direction_ru} {threshold} геймов",
                 "surface": surface,
                 "event_id": event_id,
+                "match_date": match_date,
+                "event_time_utc": commence,
                 "commence_time": commence,
                 "bookmaker": book_key,
                 "entry_odds": round(price, 3),
