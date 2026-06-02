@@ -96,11 +96,18 @@ EXOTIC_LEAGUES: dict[str, dict[str, str]] = {
         "region": "asia",
         "league_code": "KLEAGUE",
     },
+    # FIFA World Cup — neutral venue, high quality, active June-July 2026
+    "soccer_fifa_world_cup": {
+        "name": "ЧМ 2026 (FIFA World Cup)",
+        "region": "world_cup",
+        "league_code": "WORLDCUP",
+    },
 }
 
-# Default scan subset: 6 leagues active year-round with highest user interest.
+# Default scan subset: 6 year-round leagues + World Cup (returns [] when not active).
 # Override via EXOTIC_LEAGUES env var (comma-separated sport_keys).
 EXOTIC_DEFAULT_LEAGUES = [
+    "soccer_fifa_world_cup",
     "soccer_usa_mls",
     "soccer_brazil_campeonato",
     "soccer_argentina_primera_division",
@@ -119,6 +126,8 @@ _REGION_PRIORS: dict[str, dict[str, float]] = {
     "americas": {"home": 0.435, "draw": 0.270, "away": 0.295},
     "asia": {"home": 0.450, "draw": 0.260, "away": 0.290},
     "oceania": {"home": 0.440, "draw": 0.265, "away": 0.295},
+    # Neutral venue: minimal home advantage, teams listed first get small edge by convention
+    "world_cup": {"home": 0.415, "draw": 0.270, "away": 0.315},
 }
 
 # Shrinkage weight: fraction of prior vs market in Bayesian blend.

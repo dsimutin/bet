@@ -65,7 +65,7 @@ services:
       - key: TENNIS_MAX_ACTIVE_KEYS
         value: "2"
       - key: ODDS_CACHE_TTL_SECONDS
-        value: "14400"
+        value: "28800"
 
       # Unified runtime schedule (UTC)
       - key: RUNTIME_SCAN_HOURS_UTC
