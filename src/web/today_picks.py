@@ -43,6 +43,16 @@ def build_today_text() -> str:
             "Подходящих сигналов на сегодня пока нет.",
             "Бот не заполняет пустоту случайными ставками. Нажмите «Обновить», чтобы проверить свежую линию.",
         ]
+        # Context: off-season for top leagues + WC countdown
+        from datetime import date as _date
+        wc_start = _date(2026, 6, 11)
+        days_to_wc = (wc_start - today).days
+        if 0 < days_to_wc <= 14:
+            lines.append(f"\n🏆 <b>ЧМ 2026 начнётся через {days_to_wc} дн.</b> — бот начнёт сканировать матчи автоматически.")
+        elif days_to_wc <= 0:
+            lines.append("\n🏆 ЧМ 2026 идёт — бот сканирует матчи.")
+        else:
+            lines.append("\n⚽ Топ-лиги (АПЛ, Бундеслига, и др.) в межсезонье. Сканируются: MLS, Бразилия, Аргентина, РПЛ, теннис.")
         return "\n".join(lines)
     if priority:
         lines.append(f"✅ <b>Приоритетные сигналы ({len(priority)})</b>")
@@ -187,7 +197,11 @@ def build_history_text(limit: int = 20) -> str:
     for item in entries[:limit]:
         sport = "🎾" if item.get("sport") == "tennis" else "⚽"
         result = str(item.get("result", "")) if item.get("result") else ""
-        status = {"win": "✅", "loss": "❌", "void": "↩️"}.get(result, "⏳")
+        ledger_status = item.get("ledger_status", "")
+        if ledger_status == "expired":
+            status = "❓"
+        else:
+            status = {"win": "✅", "loss": "❌", "void": "↩️"}.get(result, "⏳")
         if item.get("sport") == "tennis":
             name = f"{item.get('player', '?')} vs {item.get('opponent', '?')}"
         else:
