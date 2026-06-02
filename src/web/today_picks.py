@@ -305,6 +305,21 @@ def _format_pick(item: dict[str, Any], priority: bool) -> list[str]:
             f"Подача (выигрыш гейма): {_pct(item.get('serve_win_pct'))} | Отдых: {item.get('days_since_last_match', '?')} дн.",
             f"H2H-поправка: {_signed_pct(item.get('h2h_adj'))} | Модель: {escape(str(item.get('model_source', 'elo')))}",
         ]
+    elif item.get("model_source") == "bayesian_zero_shot":
+        home = escape(str(item.get("home_team", "?")))
+        away = escape(str(item.get("away_team", "?")))
+        sel = item.get("selection", "")
+        sel_ru = item.get("selection_ru", "")
+        bet_label = _football_bet_label(sel, sel_ru, home, away)
+        league_name = escape(str(item.get("league_name", item.get("league", "?"))))
+        title = f"{icon} 🌍 <b>{home} — {away}</b>"
+        facts = [
+            f"Ставка: <b>{bet_label}</b>",
+            f"Лига: {league_name} | Байесовская модель (нет истории)",
+            f"Маржа БК: {item.get('margin_pct', '?')}% | Ставка: {item.get('stake_units', 0.5)}u (снижена)",
+            "⚠️ Слабый сигнал: нет исторических данных. Только Watchlist.",
+            "⚠️ Составы/травмы: проверьте вручную (Sofascore, Flashscore)",
+        ]
     else:
         home = escape(str(item.get("home_team", "?")))
         away = escape(str(item.get("away_team", "?")))

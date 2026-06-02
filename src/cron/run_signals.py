@@ -40,6 +40,13 @@ def main() -> None:
     except Exception as exc:
         print(f"[signals] tennis: FAILED {exc}", file=sys.stderr)
 
+    try:
+        exotic = _run_exotic()
+        candidates.extend(exotic)
+        print(f"[signals] exotic: {len(exotic)} candidate(s)")
+    except Exception as exc:
+        print(f"[signals] exotic: FAILED {exc}", file=sys.stderr)
+
     from src.infrastructure.persistent_ledger import load_ledger, save_ledger
     from src.models.feedback_policy import FeedbackPolicy
 
@@ -128,6 +135,16 @@ def _run_league(
     )
 
 
+def _run_exotic() -> list[dict[str, Any]]:
+    api_key = os.environ.get("THE_ODDS_API_KEY", "")
+    if not api_key:
+        return []
+    from src.signals.exotic_zero_shot_scan import scan_exotic_leagues
+    enabled_raw = os.environ.get("EXOTIC_LEAGUES", "")
+    enabled = [s.strip() for s in enabled_raw.split(",") if s.strip()] if enabled_raw else None
+    return scan_exotic_leagues(api_key, leagues=enabled)
+
+
 def _run_tennis(model_dir: Path) -> list[dict[str, Any]]:
     api_key = os.environ.get("THE_ODDS_API_KEY", "")
     if not api_key:
@@ -201,13 +218,22 @@ def _format_priority_alert(signal: dict[str, Any]) -> str:
     edge = signal.get("edge_pct", signal.get("edge_vs_fair_pct", "?"))
     prob = signal.get("model_probability", signal.get("model_prob"))
     prob_text = f"{float(prob):.1%}" if isinstance(prob, (int, float)) else "?"
+    is_exotic = signal.get("model_source") == "bayesian_zero_shot"
+
     if sport == "tennis":
         title = f"🎾 <b>ПРИОРИТЕТНЫЙ PAPER-СИГНАЛ</b>\nПобеда: <b>{signal.get('player', '?')}</b>\nСоперник: {signal.get('opponent', '?')}"
         extras = f"\nПокрытие: {signal.get('surface', '?')}\nФорма: {signal.get('recent_form', '?')} | Отдых: {signal.get('days_since_last_match', '?')} дн."
+        disclaimer = "📄 Бумажный сигнал. Проверьте линию перед любым самостоятельным решением."
+    elif is_exotic:
+        league_name = signal.get("league_name", signal.get("league", "?"))
+        title = f"🌍 <b>WATCHLIST (экзотика)</b> — {league_name}\nМатч: <b>{signal.get('home_team', '?')} — {signal.get('away_team', '?')}</b>\nИсход: <b>{signal.get('selection_ru', signal.get('selection', '?'))}</b>"
+        extras = f"\nМаржа БК: {signal.get('margin_pct', '?')}%"
+        disclaimer = "⚠️ Байесовская модель без истории лиги. Только Watchlist. Проверьте вручную."
     else:
         title = f"⚽ <b>ПРИОРИТЕТНЫЙ PAPER-СИГНАЛ</b>\nМатч: <b>{signal.get('home_team', '?')} — {signal.get('away_team', '?')}</b>\nИсход: <b>{signal.get('selection_ru', signal.get('selection', '?'))}</b>"
         extras = f"\nМодель: {signal.get('model_id', '?')}"
-    return f"{title}\nКоэффициент: <b>{odds}</b>\nВероятность модели: <b>{prob_text}</b>\nEdge: <b>{edge}%</b>{extras}\n\n📄 Бумажный сигнал. Проверьте линию перед любым самостоятельным решением."
+        disclaimer = "📄 Бумажный сигнал. Проверьте линию перед любым самостоятельным решением."
+    return f"{title}\nКоэффициент: <b>{odds}</b>\nВероятность модели: <b>{prob_text}</b>\nEdge: <b>{edge}%</b>{extras}\n\n{disclaimer}"
 
 
 def _log_run(
