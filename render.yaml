@@ -48,13 +48,14 @@ services:
       - key: OPENFOOTBALL_SEASONS
         value: "2022-23,2023-24,2024-25,2025-26"
 
-      # Supabase PostgreSQL persistent runtime state
+      # Supabase PostgreSQL persistent runtime state (optional)
+      # If DATABASE_URL is not configured, app falls back to local JSON ledger
       - key: DATABASE_URL
         sync: false
       - key: SUPABASE_LEDGER_ENABLED
         value: "true"
       - key: REQUIRE_DATABASE
-        value: "true"
+        value: "false"
 
       # Shared low-quota Odds API cache
       - key: FOOTBALL_ODDS_REGIONS
