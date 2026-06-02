@@ -96,11 +96,6 @@ services:
         sync: false
       - key: THE_ODDS_API_KEY
         sync: false
-      # Optional: api-sports.io key (tennis + football injuries fallback)
-      # Free tier: 100 req/day. Register at https://api-sports.io/
-      # Used automatically when THE_ODDS_API_KEY is blocked or unavailable.
-      - key: API_FOOTBALL_KEY
-        sync: false
 
       # Safety
       - key: PAPER_TRADING_ONLY
