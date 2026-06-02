@@ -846,16 +846,14 @@ def debug_tennis_raw():
         "odds_api_io_key_set": bool(odds_io_key),
     }
 
-    # If odds-api.io is configured, show its diagnostic first
+    # If odds-api.io is configured, run full diagnostic
     if odds_io_key:
         try:
-            from src.ingest.oddsapiio_tennis import fetch_tennis_events_as_odds_api_format
-            events = fetch_tennis_events_as_odds_api_format()
-            results["odds_api_io_events"] = len(events)
-            results["odds_api_io_sample"] = events[:2] if events else []
-            results["odds_api_io_status"] = "ok" if events else "no_events"
+            from src.ingest.oddsapiio_tennis import diagnostic_info
+            diag = diagnostic_info()
+            results["odds_api_io"] = diag
         except Exception as exc:
-            results["odds_api_io_error"] = str(exc)
+            results["odds_api_io"] = {"error": str(exc)}
 
     if not api_key:
         results["the_odds_api_status"] = "skipped (THE_ODDS_API_KEY not set)"
