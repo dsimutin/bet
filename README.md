@@ -2,6 +2,19 @@
 
 Аналитическая платформа для поиска ценности в ставках на спорт через легальных российских букмекеров.
 
+> **Status:** ✅ Production Ready | **Tests:** 331/331 passing | **API Quota:** 417/500/month (safe)
+
+---
+
+## 📖 Documentation Quick Links
+
+| Document | Purpose |
+|----------|---------|
+| **[DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md)** | 🚀 Deploy to Render (step-by-step) |
+| **[QUICK_REFERENCE.md](QUICK_REFERENCE.md)** | ⚡ Daily operations & troubleshooting |
+| **[RELEASE_AUDIT_2026-06-02.md](RELEASE_AUDIT_2026-06-02.md)** | 📋 Full audit report (11 sections) |
+| **[scripts/health_check.py](scripts/health_check.py)** | 🏥 Pre-deployment verification |
+
 ---
 
 ## ⚠️ ВАЖНЫЙ ДИСКЛЕЙМЕР — ПРОЧТИТЕ ПРЕЖДЕ ВСЕГО
