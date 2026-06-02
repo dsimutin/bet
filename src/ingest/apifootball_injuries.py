@@ -115,6 +115,7 @@ def get_injuries_for_match(
 ) -> dict[str, list[dict[str, Any]]]:
     """High-level: fetch injuries for both teams. Returns {home: [...], away: [...]}.
 
+    Caches results aggressively (24 hours) since injury data updates ~daily.
     Returns empty dicts if API key not configured or request fails.
     match_date: 'YYYY-MM-DD'
     """
@@ -122,9 +123,25 @@ def get_injuries_for_match(
     if not api_key:
         return {"home": [], "away": [], "available": False}
 
+    # Cache at match level (injuries don't change within a day)
+    cache_key = f"injuries:{league}:{home_team}:{away_team}:{match_date}"
+    try:
+        from src.infrastructure import odds_cache
+        cached = odds_cache.get(cache_key)
+        if isinstance(cached, dict) and cached.get("available"):
+            _log.debug("[injuries] cache hit: %s", cache_key)
+            return cached
+    except Exception:
+        pass
+
     fixture_id = fetch_fixture_id(home_team, away_team, match_date, league, api_key)
     if fixture_id is None:
-        return {"home": [], "away": [], "available": False, "note": "fixture_not_found"}
+        result = {"home": [], "away": [], "available": False, "note": "fixture_not_found"}
+        try:
+            odds_cache.set(cache_key, result, 86400)  # Cache miss for 24h
+        except Exception:
+            pass
+        return result
 
     injuries = fetch_injuries_for_fixture(fixture_id, api_key)
     home_injuries = [i for i in injuries if home_team.lower() in i["team_name"].lower()]
@@ -138,12 +155,17 @@ def get_injuries_for_match(
         len(away_injuries),
     )
 
-    return {
+    result = {
         "home": home_injuries,
         "away": away_injuries,
         "available": True,
         "fixture_id": fixture_id,
     }
+    try:
+        odds_cache.set(cache_key, result, 86400)  # Cache for 24h
+    except Exception:
+        pass
+    return result
 
 
 def format_injuries_for_signal(injuries: dict[str, Any]) -> str:
@@ -180,4 +202,11 @@ def _get(url: str, api_key: str) -> dict[str, Any]:
         },
     )
     with urllib.request.urlopen(req, timeout=10) as resp:
-        return json.loads(resp.read())
+        result = json.loads(resp.read())
+        # Record quota usage
+        try:
+            from src.monitoring.api_quota_monitor import record_apifootball_request
+            record_apifootball_request(1)
+        except Exception:
+            pass
+        return result

@@ -157,6 +157,12 @@ def _fetch_odds(
                 "used": resp.headers.get("x-requests-used", "?"),
                 "last": resp.headers.get("x-requests-last", "?"),
             }
+            # Record quota usage
+            try:
+                from src.monitoring.api_quota_monitor import record_odds_api_request
+                record_odds_api_request(1)
+            except Exception:
+                pass
     except urllib.error.HTTPError as exc:
         if exc.code == 429:
             raise RuntimeError("The Odds API quota exhausted (HTTP 429)") from exc

@@ -647,6 +647,39 @@ def health_active():
 
 
 # ──────────────────────────────────────────────────────────────────
+# /health/quota — API quota usage (prevent overspending)
+# ──────────────────────────────────────────────────────────────────
+
+
+@app.get("/health/quota")
+def health_quota():
+    """Return API quota usage summary."""
+    try:
+        from src.monitoring.api_quota_monitor import get_usage_summary
+        usage = get_usage_summary()
+
+        # Check if any API is above warning threshold (80%)
+        warnings = []
+        for api_name, stats in usage.items():
+            if stats["pct_used"] > 80:
+                warnings.append(f"{api_name}: {stats['pct_used']:.0f}% used ({stats['used']}/{stats['limit']})")
+
+        status = "warning" if warnings else "ok"
+        return {
+            "status": status,
+            "usage": usage,
+            "warnings": warnings,
+            "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        }
+    except Exception as exc:
+        _log.warning("[quota] health check failed: %s", exc)
+        return {
+            "status": "unknown",
+            "error": str(exc),
+            "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        }
+
+
 # /health/all — combined (для Render dashboard / внешних мониторов)
 # ──────────────────────────────────────────────────────────────────
 
@@ -659,6 +692,7 @@ def health_all():
     disk = health_disk()
     readiness = health_readiness()
     active = health_active()
+    quota = health_quota()
 
     def _body(resp):
         if hasattr(resp, "body"):
@@ -670,6 +704,7 @@ def health_all():
         "model": _body(model),
         "drift": _body(drift),
         "disk": _body(disk),
+        "quota": _body(quota),
     }
 
     statuses = [c.get("status", "unknown") for c in checks.values()]

@@ -36,6 +36,7 @@ def get_live_match_result(
 ) -> dict[str, Any] | None:
     """Query The Odds API for a recently completed match result.
 
+    Caches results aggressively (6 hours) since match results don't change.
     Returns:
         {
             "home_team": "...",
@@ -50,6 +51,16 @@ def get_live_match_result(
         return None
 
     sport_key = _LEAGUE_TO_SPORT[league.upper()]
+
+    # Check cache first — results are immutable once matched
+    cache_key = f"live_result:{sport_key}:{league}:{home_team}:{away_team}:{match_date}"
+    from src.infrastructure import odds_cache
+    cached = odds_cache.get(cache_key)
+    if isinstance(cached, dict):
+        _log.debug("[live_results] cache hit: %s", cache_key)
+        return cached
+    if cached == "NOT_FOUND":  # Explicitly cache miss to avoid repeated API calls
+        return None
 
     # Query a window around the match date (±3 days to catch delayed results)
     try:
@@ -72,6 +83,7 @@ def get_live_match_result(
             data = json.loads(resp.read())
 
         if not isinstance(data, list):
+            odds_cache.set(cache_key, "NOT_FOUND", 6 * 3600)
             return None
 
         # Find matching event and check if it's completed with a result
@@ -90,21 +102,26 @@ def get_live_match_result(
             if completed and bookmakers:
                 result_ft = _infer_result_from_odds(event, home_team, away_team)
                 if result_ft:
-                    _log.info(
-                        "[live_results] found %s: %s vs %s → %s",
-                        league,
-                        home_team,
-                        away_team,
-                        result_ft,
-                    )
-                    return {
+                    result = {
                         "home_team": home_team,
                         "away_team": away_team,
                         "result_ft": result_ft,
                         "match_date": str(match_date),
                         "source": "odds_api",
                     }
+                    # Cache for 6 hours (result immutable)
+                    odds_cache.set(cache_key, result, 6 * 3600)
+                    _log.info(
+                        "[live_results] found & cached %s: %s vs %s → %s",
+                        league,
+                        home_team,
+                        away_team,
+                        result_ft,
+                    )
+                    return result
 
+        # Not found, cache the miss for 1 hour
+        odds_cache.set(cache_key, "NOT_FOUND", 1 * 3600)
         return None
 
     except urllib.error.HTTPError as exc:
