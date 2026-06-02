@@ -17,11 +17,13 @@ _log = logging.getLogger(__name__)
 def settle_tennis_from_sackmann(
     ledger: SignalLedger,
     cache_dir: Path,
+    api_key: str = "",
 ) -> dict[str, Any]:
     """Check open tennis signals against latest ATP results.
 
     Downloads current-year ATP CSV (cached), looks for matches where
     the signal player won or lost, marks them settled.
+    Falls back to live API if historical data doesn't have the match.
 
     Returns dict with settled/unmatched counts and per-signal results.
     """
@@ -32,7 +34,7 @@ def settle_tennis_from_sackmann(
     df = download_atp_season(current_year, cache_dir, use_cache=True)
     if df.empty:
         _log.warning("[tennis_settle] No ATP data for %d", current_year)
-        return {"settled": 0, "unmatched": 0, "no_data": True}
+        df = None
 
     settled = 0
     unmatched = 0
@@ -53,7 +55,20 @@ def settle_tennis_from_sackmann(
         except Exception:
             signal_date = None
 
-        match_row = _find_match(df, player, opponent, signal_date)
+        match_row = None
+        if df is not None:
+            match_row = _find_match(df, player, opponent, signal_date)
+
+        # Fallback to live API if historical data doesn't have it
+        if match_row is None and api_key:
+            live_result = _get_live_tennis_result_fallback(entry, api_key)
+            if live_result:
+                # Convert to Sackmann-like row format
+                match_row = {
+                    "winner_name": player if live_result.get("player_won") else opponent,
+                    "loser_name": opponent if live_result.get("player_won") else player,
+                }
+
         if match_row is None:
             unmatched += 1
             continue
@@ -264,6 +279,42 @@ def _pick_closing_odds(row: dict[str, Any], player_won: bool) -> float | None:
                         return f
             except (TypeError, ValueError):
                 pass
+    return None
+
+
+def _get_live_tennis_result_fallback(entry: dict[str, Any], api_key: str) -> dict[str, Any] | None:
+    """Try to get tennis result from live API when historical data doesn't have it."""
+    try:
+        from src.ingest.live_results import get_live_tennis_result
+
+        player = str(entry.get("player", "")).strip()
+        opponent = str(entry.get("opponent", "")).strip()
+        tour = entry.get("league", "ATP")
+        event_date_str = entry.get("event_date") or entry.get("event_time_utc") or ""
+
+        if not all([player, opponent, event_date_str]):
+            return None
+
+        try:
+            event_date = datetime.fromisoformat(
+                event_date_str.replace("Z", "+00:00")
+            ).date()
+        except ValueError:
+            return None
+
+        live_result = get_live_tennis_result(player, opponent, event_date, tour, api_key)
+        if live_result:
+            result_ft = live_result.get("result_ft", "")
+            player_won = result_ft == "H"
+            return {
+                "player": player,
+                "opponent": opponent,
+                "player_won": player_won,
+                "_source": "live_api",
+            }
+    except Exception as exc:
+        _log.debug("[tennis_settle] live_result fallback failed: %s", exc)
+
     return None
 
 

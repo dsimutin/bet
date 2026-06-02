@@ -52,19 +52,19 @@ def main() -> None:
 
     from src.infrastructure.persistent_ledger import load_ledger, save_ledger
 
+    api_key = os.environ.get("THE_ODDS_API_KEY", "").strip()
     ledger = load_ledger(ledger_path)
     football_report: dict = {"settled_count": 0, "settled_signals": [], "summary": ledger.summary()}
     if football_df is not None:
         try:
             from src.models.settle_signal_ledger import settle_ledger_from_results
 
-            api_key = os.environ.get("THE_ODDS_API_KEY", "").strip()
             football_report = settle_ledger_from_results(ledger, football_df, api_key=api_key)
             print(f"[settle] Football: {football_report.get('settled_count', 0)} settled")
         except Exception as exc:
             print(f"[settle] Football settlement failed: {exc}", file=sys.stderr)
 
-    tennis_report = _settle_tennis(ledger)
+    tennis_report = _settle_tennis(ledger, api_key)
 
     # Auto-expire open signals whose event passed >24h ago without a matching result.
     # This prevents stale signals from accumulating as permanent "open" entries.
@@ -116,13 +116,13 @@ def main() -> None:
     )
 
 
-def _settle_tennis(ledger) -> dict:
+def _settle_tennis(ledger, api_key: str = "") -> dict:
     """Settle only supported tennis h2h signals."""
     try:
         from src.models.settle_tennis_signals import settle_tennis_from_sackmann
 
         cache_dir = Path(os.environ.get("DATA_DIR", "data")) / "raw" / "tennis_atp"
-        report = settle_tennis_from_sackmann(ledger, cache_dir)
+        report = settle_tennis_from_sackmann(ledger, cache_dir, api_key=api_key)
         print(
             f"[settle] Tennis: {report.get('settled', 0)} settled, "
             f"{report.get('unmatched', 0)} pending"
