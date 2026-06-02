@@ -1,124 +1,157 @@
-# Tennis Odds Sources & Troubleshooting
+# Tennis Odds Sources & Setup
 
 ## Current Status
 
-**Tennis signals are BLOCKED** due to The Odds API requiring IP allowlist access.
-
-### The Problem
-- **THE_ODDS_API_KEY:** `b2f752cc0ee7679fc670c188bc1eb9ff` (set in Render)
-- **Error:** HTTP 403 "Host not in allowlist"
-- **Scope:** Blocks both ATP and WTA live odds fetch in `get_active_tennis_keys()` → `_fetch_odds()`
-- **Impact:** `tennis_signal_scan.py` cannot generate any signals when The Odds API fails
+| Source | Status | Blocker |
+|---|---|---|
+| **odds-api.io** | ✅ Integrated (awaiting API key) | Need to register & add `ODDS_API_IO_KEY` to Render |
+| The Odds API | ❌ Blocked | HTTP 403 "Host not in allowlist" |
 
 ---
 
-## Solution: Contact The Odds API Support
+## Step 1: Register at odds-api.io (FREE, 2 minutes)
 
-### Steps to Unblock IP Access
+1. Go to **https://odds-api.io/**
+2. Click **"Get Free API Key"** or **"Sign Up"**
+3. Enter email — no credit card required
+4. Copy your API key
 
-1. **Email The Odds API Support:**
-   - Visit: https://the-odds-api.com/
-   - Look for "Contact" or "Support" link
-   - **Request:** "Please remove IP allowlist restrictions from API key `b2f752cc0ee7679fc670c188bc1eb9ff` so it can be accessed from Render.com (IP range: N/A, cloud-based)"
-   
-2. **Render IP Information:**
-   - Render uses dynamic IP ranges
-   - Mention in email: "API is deployed on Render.com's frankfurt region (free tier)"
-   - Ask if they can allow **all IPs** or provide **Render's IP range**
-
-3. **Timeline:**
-   - Expected response: 24-48 hours
-   - Once unblocked, no code changes needed—system will work immediately
+**Free tier:** 100 requests/hour, 2 bookmakers per call, ATP/WTA tennis included.
+2 scans/day × 30 days = 60 requests/month — well within limits.
 
 ---
 
-## Rejected Alternatives
+## Step 2: Add key to Render Dashboard
 
-### ❌ api-sports.io
-- **Status:** No tennis support
-- **Supported:** Football, basketball, baseball, hockey only
-- **Tested:** Confirmed no tennis endpoints available
-
-### ❌ ESPNbet / BetFair
-- **Why rejected:** Require account creation + rate limits too restrictive for free tier
-- **Cost:** Paid API access required
+1. Open **https://render.com/** → your `bet-api` service
+2. Go to **Environment** tab
+3. Add new variable:
+   - **Key:** `ODDS_API_IO_KEY`
+   - **Value:** your API key from step 1
+4. Click **Save Changes** — service will redeploy automatically
 
 ---
 
-## Potential Future Solutions (if The Odds API remains blocked)
+## Step 3: Verify (optional)
 
-### 1. **Pinnacle API** (Professional)
-- **Pros:** Most accurate odds, no IP restrictions
-- **Cons:** Requires account + approval process (2-3 weeks)
-- **Cost:** Free for approved sports betting professionals
-- **Effort:** High (re-architecture needed)
-
-### 2. **Tennis Data from Betfair**
-- **Pros:** Rich historical + live data
-- **Cons:** Requires Betfair account + API key
-- **Cost:** Free (with account)
-- **Effort:** Medium (Betfair API is well-documented)
-
-### 3. **Official ATP/WTA Rankings + Manual Odds Scraping**
-- **Pros:** No API limitations
-- **Cons:** Manual, labor-intensive, may violate TOS
-- **Cost:** Time only
-- **Effort:** Very high, not recommended
-
----
-
-## Current Workaround
-
-**In `src/services/runtime_odds.py` (lines 60-96):**
-
-```python
-def get_tennis_h2h_events(api_key: str) -> list[dict[str, Any]]:
-    # Returns empty list [] when The Odds API is unavailable
-    # Tennis signals simply won't be generated
-    # Football signals continue normally
-    ...
+Check Render logs for:
+```
+[runtime-odds] tennis odds-api.io: N events cached
 ```
 
-**Frontend behavior:**
-- `src/web/today_picks.py` shows "No tennis signals available" message
-- System remains operational for football/exotic leagues only
+If you see this, tennis signals will start appearing in the next scan (07:00 or 15:00 UTC).
 
 ---
 
-## Testing Tennis Recovery
+## Architecture
 
-Once The Odds API is unblocked, verify with:
-
-```bash
-# 1. Check Render logs for successful tennis fetch
-curl https://bet-api-xyz.onrender.com/health
-
-# 2. Run signal scan manually
-python -m src.signals.tennis_signal_scan
-
-# 3. Check for generated signals in data/signals/
-cat data/signals/2026-06-02_signals.json | jq '.[] | select(.sport == "tennis")'
 ```
+get_tennis_h2h_events()          # src/services/runtime_odds.py
+    │
+    ├─ ODDS_API_IO_KEY set?
+    │   YES → odds-api.io         # src/ingest/oddsapiio_tennis.py
+    │           ↓ 8h cache
+    │           ↓ convert to The Odds API v4 format
+    │           ↓ return events
+    │
+    └─ ODDS_API_IO_KEY not set → The Odds API (blocked by IP allowlist)
+```
+
+---
+
+## odds-api.io Response Format
+
+The adapter converts odds-api.io format → The Odds API v4 format automatically.
+No changes needed in tennis_signal_scan.py.
+
+**Input (odds-api.io):**
+```json
+{
+  "id": 12345,
+  "home": "Novak Djokovic",
+  "away": "Carlos Alcaraz",
+  "startTime": "2026-06-10T10:00:00Z",
+  "bookmakers": [
+    {
+      "name": "Bet365",
+      "markets": [
+        {
+          "name": "moneyline",
+          "outcomes": [
+            {"name": "Novak Djokovic", "price": 2.5},
+            {"name": "Carlos Alcaraz", "price": 1.6}
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+**Output (The Odds API v4 format):**
+```json
+{
+  "id": "12345",
+  "sport_key": "tennis_atp",
+  "home_team": "Novak Djokovic",
+  "away_team": "Carlos Alcaraz",
+  "commence_time": "2026-06-10T10:00:00Z",
+  "bookmakers": [
+    {
+      "key": "bet365",
+      "title": "Bet365",
+      "markets": [
+        {
+          "key": "h2h",
+          "outcomes": [
+            {"name": "Novak Djokovic", "price": 2.5},
+            {"name": "Carlos Alcaraz", "price": 1.6}
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+---
+
+## Bookmaker Configuration
+
+On free tier, max 2 bookmakers per call. Default: `singbet,bet365`.
+
+To change, set in Render Environment:
+```
+ODDS_API_IO_BOOKMAKERS=singbet,bet365
+```
+
+Available bookmakers: check https://odds-api.io/ → bookmakers list.
+
+---
+
+## Evaluated Alternatives (audit summary)
+
+| Source | Tennis | Free | IP Restrictions | Verdict |
+|---|---|---|---|---|
+| **odds-api.io** | ✅ ATP/WTA | 100 req/hour | ❌ None | **CHOSEN** |
+| OddsPapi.io | ✅ ATP/WTA/ITF | 250 req/month | ❌ None | Viable backup |
+| BetsAPI | ✅ ATP/WTA | ❌ $10/month | ❌ None | Paid backup |
+| The Odds API | ✅ ATP/WTA | 500 req/month | ✅ IP allowlist | Blocked |
+| api-sports.io | ❌ No tennis | N/A | — | Rejected |
+| Betfair Exchange | ✅ ATP/WTA | With account | ✅ GeoIP | Geo-blocked |
+| Sportradar | ✅ All | 30-day trial | ❌ None | Enterprise cost |
+| Sofascore | Scores only | Unofficial | ✅ Cloud blocked | Rejected |
+| Pinnacle API | ✅ ATP/WTA | ❌ Closed Jul'25 | — | Rejected |
 
 ---
 
 ## History
 
-| Date | Event | Status |
-|---|---|---|
-| 2026-06-02 | Initial key tried (`f3b2a2de...`) | 403 IP Allowlist |
-| 2026-06-02 | Secondary key issued (`b2f752cc...`) | 403 IP Allowlist |
-| 2026-06-02 | api-sports.io fallback implemented | ❌ No tennis support (removed) |
-| 2026-06-02 | **Awaiting The Odds API support response** | 🕐 Pending |
-
----
-
-## Quick Reference
-
-| Component | Status | Blocker |
-|---|---|---|
-| Football signals | ✅ Working | None |
-| Exotic league signals | ✅ Working | None |
-| Tennis signals | ❌ Blocked | The Odds API HTTP 403 |
-| Tennis settlement | ✅ Ready | Awaiting signals |
+| Date | Event |
+|---|---|
+| 2026-06-02 | The Odds API blocked (HTTP 403 IP allowlist) |
+| 2026-06-02 | api-sports.io rejected (no tennis support) |
+| 2026-06-02 | Full audit of 10 sources by research agent |
+| 2026-06-02 | **odds-api.io selected and integrated** |
+| 2026-06-02 | Awaiting `ODDS_API_IO_KEY` in Render Dashboard |
 

@@ -96,6 +96,13 @@ services:
         sync: false
       - key: THE_ODDS_API_KEY
         sync: false
+      # Tennis: odds-api.io (free, no IP restrictions). Register at https://odds-api.io/
+      # Free tier: 100 req/hour, 2 bookmakers. Tennis ATP/WTA supported.
+      - key: ODDS_API_IO_KEY
+        sync: false
+      # Bookmakers for odds-api.io free tier (max 2, comma-separated slugs)
+      - key: ODDS_API_IO_BOOKMAKERS
+        value: "singbet,bet365"
 
       # Safety
       - key: PAPER_TRADING_ONLY

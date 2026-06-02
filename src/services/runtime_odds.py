@@ -60,10 +60,31 @@ def get_football_h2h_odds(sport_key: str, api_key: str) -> list[dict[str, Any]]:
 def get_tennis_h2h_events(api_key: str) -> list[dict[str, Any]]:
     """Return cached h2h odds for currently active tennis competitions.
 
-    Primary source: The Odds API (requires IP allowlist access).
-    Note: Tennis signals are unavailable when The Odds API is blocked by IP restrictions.
-    See docs/TENNIS_ODDS_SOURCES.md for alternative sources and unblocking instructions.
+    Source priority:
+    1. odds-api.io (if ODDS_API_IO_KEY configured) — free, 100 req/hour, no IP restrictions
+    2. The Odds API (if ODDS_API_IO_KEY not set) — requires IP allowlist, may return HTTP 403
+
+    See docs/TENNIS_ODDS_SOURCES.md for setup instructions and alternatives.
     """
+    # Primary: odds-api.io when ODDS_API_IO_KEY is configured
+    try:
+        from src.ingest.oddsapiio_tennis import is_configured as io_ok, fetch_tennis_events_as_odds_api_format
+        if io_ok():
+            cache_key = "odds:tennis:oddsapiio:h2h"
+            cached = odds_cache.get(cache_key)
+            if isinstance(cached, list):
+                _log.info("[runtime-odds] tennis cache hit via odds-api.io (%d events)", len(cached))
+                return cached
+            events = fetch_tennis_events_as_odds_api_format()
+            if events:
+                odds_cache.set(cache_key, events, _ttl_seconds())
+                _log.info("[runtime-odds] tennis odds-api.io: %d events cached", len(events))
+                return events
+            _log.warning("[runtime-odds] odds-api.io returned no tennis events — falling back to The Odds API")
+    except Exception as exc:
+        _log.warning("[runtime-odds] odds-api.io tennis failed: %s — falling back", exc)
+
+    # Fallback: The Odds API (blocked by IP allowlist on Render free tier)
     regions = _csv_env("TENNIS_ODDS_REGIONS", "eu")
     max_keys = _int_env("TENNIS_MAX_ACTIVE_KEYS", 2, minimum=1, maximum=6)
     keys = get_active_tennis_keys(api_key)[:max_keys]
