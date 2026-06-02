@@ -34,10 +34,12 @@ def _csv_env(name: str, default: str) -> list[str]:
 
 
 def _ttl_seconds() -> int:
+    # Default 28800s (8h) so that scans at 7:00 and 15:00 UTC share one cache window.
+    # Set ODDS_CACHE_TTL_SECONDS to override. Minimum 300s enforced.
     try:
-        return max(int(os.environ.get("ODDS_CACHE_TTL_SECONDS", "14400")), 300)
+        return max(int(os.environ.get("ODDS_CACHE_TTL_SECONDS", "28800")), 300)
     except ValueError:
-        return 14400
+        return 28800
 
 
 def get_football_h2h_odds(sport_key: str, api_key: str) -> list[dict[str, Any]]:

@@ -22,23 +22,9 @@ _log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Exotic league registry  (The Odds API sport_key → display info)
 # ---------------------------------------------------------------------------
-
+# Full list — all known exotic leagues supported by the model.
+# Active default subset is controlled by EXOTIC_DEFAULT_LEAGUES below.
 EXOTIC_LEAGUES: dict[str, dict[str, str]] = {
-    "soccer_vietnam_v_league_1": {
-        "name": "V-League (Вьетнам)",
-        "region": "asia",
-        "league_code": "VLEAGUE",
-    },
-    "soccer_thailand_thai_league": {
-        "name": "Thai League (Таиланд)",
-        "region": "asia",
-        "league_code": "THAI",
-    },
-    "soccer_australia_aleague": {
-        "name": "A-League (Австралия)",
-        "region": "oceania",
-        "league_code": "ALEAGUE",
-    },
     "soccer_usa_mls": {
         "name": "MLS (США)",
         "region": "americas",
@@ -53,6 +39,37 @@ EXOTIC_LEAGUES: dict[str, dict[str, str]] = {
         "name": "Liga Profesional (Аргентина)",
         "region": "americas",
         "league_code": "ARGENTINA",
+    },
+    "soccer_russia_premier_league": {
+        "name": "РПЛ (Россия)",
+        "region": "europe",
+        "league_code": "RPL",
+    },
+    "soccer_japan_j_league": {
+        "name": "J1 League (Япония)",
+        "region": "asia",
+        "league_code": "JLEAGUE",
+    },
+    "soccer_mexico_ligamx": {
+        "name": "Liga MX (Мексика)",
+        "region": "americas",
+        "league_code": "LIGAMX",
+    },
+    # Extended — enable via EXOTIC_LEAGUES env var
+    "soccer_vietnam_v_league_1": {
+        "name": "V-League (Вьетнам)",
+        "region": "asia",
+        "league_code": "VLEAGUE",
+    },
+    "soccer_thailand_thai_league": {
+        "name": "Thai League (Таиланд)",
+        "region": "asia",
+        "league_code": "THAI",
+    },
+    "soccer_australia_aleague": {
+        "name": "A-League (Австралия)",
+        "region": "oceania",
+        "league_code": "ALEAGUE",
     },
     "soccer_turkey_super_league": {
         "name": "Süper Lig (Турция)",
@@ -69,32 +86,28 @@ EXOTIC_LEAGUES: dict[str, dict[str, str]] = {
         "region": "europe",
         "league_code": "PORTUGAL",
     },
-    "soccer_russia_premier_league": {
-        "name": "РПЛ (Россия)",
-        "region": "europe",
-        "league_code": "RPL",
-    },
     "soccer_belgium_first_div": {
         "name": "Pro League (Бельгия)",
         "region": "europe",
         "league_code": "BELGIUM",
-    },
-    "soccer_japan_j_league": {
-        "name": "J1 League (Япония)",
-        "region": "asia",
-        "league_code": "JLEAGUE",
     },
     "soccer_south_korea_kleague1": {
         "name": "K League 1 (Корея)",
         "region": "asia",
         "league_code": "KLEAGUE",
     },
-    "soccer_mexico_ligamx": {
-        "name": "Liga MX (Мексика)",
-        "region": "americas",
-        "league_code": "LIGAMX",
-    },
 }
+
+# Default scan subset: 6 leagues active year-round with highest user interest.
+# Override via EXOTIC_LEAGUES env var (comma-separated sport_keys).
+EXOTIC_DEFAULT_LEAGUES = [
+    "soccer_usa_mls",
+    "soccer_brazil_campeonato",
+    "soccer_argentina_primera_division",
+    "soccer_russia_premier_league",
+    "soccer_japan_j_league",
+    "soccer_mexico_ligamx",
+]
 
 # ---------------------------------------------------------------------------
 # Bayesian priors by region
@@ -125,12 +138,12 @@ def scan_exotic_leagues(
     api_key: str,
     leagues: list[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """Scan all (or selected) exotic leagues and return zero-shot signals.
+    """Scan exotic leagues and return zero-shot signals.
 
     Args:
         api_key: The Odds API key.
         leagues: Optional list of sport_key strings to restrict scan.
-                 Defaults to all EXOTIC_LEAGUES.
+                 Defaults to EXOTIC_DEFAULT_LEAGUES (6 leagues, quota-safe).
     Returns:
         List of signal dicts, each with confidence="low".
     """
@@ -138,7 +151,7 @@ def scan_exotic_leagues(
         _log.debug("[exotic] no API key — skipping exotic scan")
         return []
 
-    active = leagues or list(EXOTIC_LEAGUES.keys())
+    active = leagues or EXOTIC_DEFAULT_LEAGUES
     all_signals: list[dict[str, Any]] = []
 
     for sport_key in active:
@@ -175,7 +188,7 @@ def _fetch_events(sport_key: str, api_key: str) -> list[dict[str, Any]]:
         from src.services.runtime_odds import _csv_env
         regions = _csv_env("FOOTBALL_ODDS_REGIONS", "eu")
         data, _headers = _fetch_odds(sport_key, api_key, regions, ["h2h"])
-        odds_cache.set(cache_key, data, 4 * 3600)  # 4h cache
+        odds_cache.set(cache_key, data, 8 * 3600)  # 8h cache — covers both daily scans
         return data
     except Exception as exc:
         _log.debug("[exotic] fetch failed %s: %s", sport_key, exc)
