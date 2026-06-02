@@ -58,13 +58,19 @@ def get_football_h2h_odds(sport_key: str, api_key: str) -> list[dict[str, Any]]:
 
 
 def get_tennis_h2h_events(api_key: str) -> list[dict[str, Any]]:
-    """Return cached h2h odds for currently active tennis competitions."""
+    """Return cached h2h odds for currently active tennis competitions.
+
+    Primary source: The Odds API.
+    Fallback: api-sports.io tennis (if API_FOOTBALL_KEY configured and primary fails).
+    """
     regions = _csv_env("TENNIS_ODDS_REGIONS", "eu")
     max_keys = _int_env("TENNIS_MAX_ACTIVE_KEYS", 2, minimum=1, maximum=6)
     keys = get_active_tennis_keys(api_key)[:max_keys]
 
     events: list[dict[str, Any]] = []
     seen: set[str] = set()
+    primary_failed = False
+
     for sport_key in keys:
         cache_key = f"odds:tennis:{sport_key}:regions={','.join(regions)}:markets=h2h"
         cached = odds_cache.get(cache_key)
@@ -74,11 +80,12 @@ def get_tennis_h2h_events(api_key: str) -> list[dict[str, Any]]:
         else:
             try:
                 data, headers = _fetch_odds(sport_key, api_key, regions, ["h2h"])
+                odds_cache.set(cache_key, data, _ttl_seconds())
+                _log_quota("tennis", sport_key, headers, len(data))
             except Exception as exc:
                 _log.warning("[runtime-odds] tennis %s fetch failed: %s", sport_key, exc)
+                primary_failed = True
                 continue
-            odds_cache.set(cache_key, data, _ttl_seconds())
-            _log_quota("tennis", sport_key, headers, len(data))
 
         for event in data:
             event_id = str(event.get("id", ""))
@@ -88,6 +95,24 @@ def get_tennis_h2h_events(api_key: str) -> list[dict[str, Any]]:
             enriched = dict(event)
             enriched["_sport_key"] = sport_key
             events.append(enriched)
+
+    # Fallback: api-sports.io tennis when The Odds API is blocked or returns nothing
+    if (primary_failed or not events):
+        try:
+            from src.ingest.apisports_tennis import fetch_tennis_events_as_odds_api_format, is_configured as apisports_ok
+            if apisports_ok():
+                fallback = fetch_tennis_events_as_odds_api_format(days_ahead=1)
+                for event in fallback:
+                    event_id = str(event.get("id", ""))
+                    if not event_id or event_id in seen:
+                        continue
+                    seen.add(event_id)
+                    events.append(event)
+                if fallback:
+                    _log.info("[runtime-odds] tennis fallback (api-sports.io): %d events", len(fallback))
+        except Exception as exc:
+            _log.debug("[runtime-odds] tennis fallback failed: %s", exc)
+
     return events
 
 
