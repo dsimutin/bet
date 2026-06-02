@@ -126,7 +126,9 @@ def settle_ledger_from_results(
                 continue
 
             actual = result_row["actual_selection"]
-            result: Literal["win", "loss"] = "win" if entry.get("selection") == actual else "loss"
+            # Tennis signals back the player by default, so selection is "H"
+            signal_selection = entry.get("selection", "H")
+            result: Literal["win", "loss"] = "win" if signal_selection == actual else "loss"
             ledger.update_result(signal_id, result=result, closing_odds=None)
             settled_signals.append(ledger.get(signal_id))
 
@@ -243,12 +245,16 @@ def _get_live_tennis_result_fallback(entry: dict[str, Any], api_key: str) -> dic
         from src.ingest.live_results import get_live_tennis_result
         from datetime import datetime
 
-        player1 = entry.get("home_team", "")
-        player2 = entry.get("away_team", "")
-        tour = entry.get("league", "")  # League field stores ATP/WTA
+        # Tennis signals use "player"/"opponent" instead of "home_team"/"away_team"
+        player1 = entry.get("player") or entry.get("home_team", "")
+        player2 = entry.get("opponent") or entry.get("away_team", "")
+
+        # Tennis signals don't always have explicit tour, infer from rank/surface
+        # For simplicity, default to ATP (can enhance later if needed)
+        tour = entry.get("league", "ATP")
         event_date_str = entry.get("event_date") or entry.get("event_time_utc") or ""
 
-        if not all([player1, player2, tour, event_date_str]):
+        if not all([player1, player2, event_date_str]):
             return None
 
         # Parse event date
@@ -261,11 +267,13 @@ def _get_live_tennis_result_fallback(entry: dict[str, Any], api_key: str) -> dic
 
         live_result = get_live_tennis_result(player1, player2, event_date, tour, api_key)
         if live_result:
+            # Map result to home/away: player wins = "H", opponent wins = "A"
+            result_ft = live_result.get("result_ft", "")
             return {
-                "home_team": player1,
-                "away_team": player2,
+                "player": player1,
+                "opponent": player2,
                 "match_date": event_date,
-                "actual_selection": RESULT_TO_SELECTION.get(live_result["result_ft"], ""),
+                "actual_selection": result_ft,  # H or A, matches tennis signal selection
                 "_source": "live_api",
             }
     except Exception as exc:
