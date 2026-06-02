@@ -73,8 +73,12 @@ def _pick_closing_odds(
 def settle_ledger_from_results(
     ledger: SignalLedger,
     results: pd.DataFrame,
+    api_key: str = "",
 ) -> dict[str, Any]:
-    """Settle football h2h signals and return a backward-compatible report."""
+    """Settle football h2h signals and return a backward-compatible report.
+
+    Falls back to live API results if historical data doesn't have the match.
+    """
     prepared_results = _prepare_results(results)
     result_by_match = {
         _match_key(row["match_date"], row["home_team"], row["away_team"]): row
@@ -97,6 +101,11 @@ def settle_ledger_from_results(
             entry.get("away_team"),
         )
         result_row = result_by_match.get(match_key)
+
+        # Fallback to live API if historical data doesn't have it
+        if result_row is None and api_key:
+            result_row = _get_live_result_fallback(entry, api_key)
+
         if result_row is None:
             unmatched.append(signal_id)
             continue
@@ -172,6 +181,46 @@ def _looks_like_iso_date(value: str) -> bool:
 
 def _normalize_team(value: Any) -> str:
     return " ".join(str(value or "").strip().lower().split())
+
+
+def _get_live_result_fallback(entry: dict[str, Any], api_key: str) -> dict[str, Any] | None:
+    """Try to get result from live API when historical data doesn't have it."""
+    try:
+        from src.ingest.live_results import get_live_match_result
+        from datetime import datetime
+
+        home_team = entry.get("home_team", "")
+        away_team = entry.get("away_team", "")
+        league = entry.get("league", "")
+        event_date_str = entry.get("event_date") or entry.get("event_time_utc") or ""
+
+        if not all([home_team, away_team, league, event_date_str]):
+            return None
+
+        # Parse event date
+        try:
+            event_date = datetime.fromisoformat(
+                str(event_date_str).replace("Z", "+00:00")
+            ).date()
+        except ValueError:
+            return None
+
+        live_result = get_live_match_result(home_team, away_team, event_date, league, api_key)
+        if live_result:
+            # Convert to expected format
+            return {
+                "home_team": home_team,
+                "away_team": away_team,
+                "match_date": event_date,
+                "actual_selection": RESULT_TO_SELECTION.get(live_result["result_ft"], ""),
+                "_source": "live_api",
+            }
+    except Exception as exc:
+        import logging
+
+        logging.getLogger(__name__).debug("[settle] live_result fallback failed: %s", exc)
+
+    return None
 
 
 if __name__ == "__main__":

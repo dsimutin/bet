@@ -58,7 +58,8 @@ def main() -> None:
         try:
             from src.models.settle_signal_ledger import settle_ledger_from_results
 
-            football_report = settle_ledger_from_results(ledger, football_df)
+            api_key = os.environ.get("THE_ODDS_API_KEY", "").strip()
+            football_report = settle_ledger_from_results(ledger, football_df, api_key=api_key)
             print(f"[settle] Football: {football_report.get('settled_count', 0)} settled")
         except Exception as exc:
             print(f"[settle] Football settlement failed: {exc}", file=sys.stderr)
