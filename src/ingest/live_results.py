@@ -151,6 +151,113 @@ def _teams_match(signal_team: str, api_team: str) -> bool:
     return False
 
 
+def get_live_tennis_result(
+    player1: str,
+    player2: str,
+    match_date: date,
+    tour: str,
+    api_key: str,
+) -> dict[str, Any] | None:
+    """Query The Odds API for a completed tennis match result.
+
+    tour: "ATP" or "WTA" (used to select tennis_atp or tennis_wta)
+    Returns:
+        {
+            "home_team": player1,
+            "away_team": player2,
+            "result_ft": "H" | "A",
+            "match_date": YYYY-MM-DD,
+            "source": "odds_api"
+        }
+        or None if not found / not completed.
+    """
+    if not api_key:
+        return None
+
+    sport_key = "tennis_atp" if tour.upper() == "ATP" else "tennis_wta"
+    cache_key = f"live_result:{sport_key}:{player1}:{player2}:{match_date}"
+    from src.infrastructure import odds_cache
+
+    cached = odds_cache.get(cache_key)
+    if isinstance(cached, dict):
+        _log.debug("[live_results] tennis cache hit: %s", cache_key)
+        return cached
+    if cached == "NOT_FOUND":
+        return None
+
+    try:
+        start_date = (match_date - timedelta(days=1)).isoformat()
+        end_date = (match_date + timedelta(days=2)).isoformat()
+
+        query = (
+            f"apiKey={api_key}&sport={sport_key}"
+            f"&date_format=iso&commenceTimeFrom={start_date}T00:00:00Z"
+            f"&commenceTimeTo={end_date}T23:59:59Z"
+        )
+        url = f"{_BASE}/sports/{sport_key}/odds?{query}"
+
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": "bet-analytics/1.0"},
+            method="GET",
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+            # Record quota usage
+            try:
+                from src.monitoring.api_quota_monitor import record_odds_api_request
+                record_odds_api_request(1)
+            except Exception:
+                pass
+
+        if not isinstance(data, list):
+            odds_cache.set(cache_key, "NOT_FOUND", 6 * 3600)
+            return None
+
+        # Find matching event (tennis uses home_team/away_team for players)
+        for event in data:
+            h_name = str(event.get("home_team", "")).lower().strip()
+            a_name = str(event.get("away_team", "")).lower().strip()
+            completed = event.get("completed", False)
+            bookmakers = event.get("bookmakers", [])
+
+            if not _teams_match(player1, h_name) or not _teams_match(player2, a_name):
+                continue
+
+            if completed and bookmakers:
+                result_ft = _infer_tennis_result_from_odds(event)
+                if result_ft:
+                    result = {
+                        "home_team": player1,
+                        "away_team": player2,
+                        "result_ft": result_ft,
+                        "match_date": str(match_date),
+                        "source": "odds_api",
+                    }
+                    odds_cache.set(cache_key, result, 6 * 3600)
+                    _log.info(
+                        "[live_results] tennis found & cached %s: %s vs %s → %s",
+                        tour,
+                        player1,
+                        player2,
+                        result_ft,
+                    )
+                    return result
+
+        odds_cache.set(cache_key, "NOT_FOUND", 1 * 3600)
+        return None
+
+    except urllib.error.HTTPError as exc:
+        if exc.code == 429:
+            _log.warning("[live_results] tennis API quota exhausted")
+        else:
+            _log.warning("[live_results] tennis HTTP %d: %s", exc.code, exc)
+        return None
+    except Exception as exc:
+        _log.warning("[live_results] tennis lookup failed: %s", exc)
+        return None
+
+
 def _infer_result_from_odds(
     event: dict[str, Any], home_team: str, away_team: str
 ) -> Literal["H", "D", "A"] | None:
@@ -186,6 +293,33 @@ def _infer_result_from_odds(
             if d_odds > 0 and d_odds < 1.1:
                 return "D"
             if a_odds > 0 and a_odds < 1.1:
+                return "A"
+
+    return None
+
+
+def _infer_tennis_result_from_odds(event: dict[str, Any]) -> Literal["H", "A"] | None:
+    """Infer tennis result from h2h odds (2 outcomes: player1, player2)."""
+    bookmakers = event.get("bookmakers", [])
+    if not bookmakers:
+        return None
+
+    for bm in bookmakers:
+        markets = bm.get("markets", [])
+        for market in markets:
+            if market.get("key") != "h2h":
+                continue
+            outcomes = market.get("outcomes", [])
+            if not outcomes or len(outcomes) < 2:
+                continue
+
+            # outcomes: [player1, player2]
+            p1_odds = float(outcomes[0].get("price", 0) or 0)
+            p2_odds = float(outcomes[1].get("price", 0) or 0)
+
+            if p1_odds > 0 and p1_odds < 1.1:
+                return "H"
+            if p2_odds > 0 and p2_odds < 1.1:
                 return "A"
 
     return None

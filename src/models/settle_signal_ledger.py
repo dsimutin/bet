@@ -90,31 +90,45 @@ def settle_ledger_from_results(
     for signal_id, entry in ledger.entries().items():
         if entry.get("ledger_status") != "open":
             continue
-        if entry.get("sport", "football") == "tennis":
-            continue
         if entry.get("market_key", "h2h") != "h2h":
             continue
 
-        match_key = _match_key(
-            entry.get("event_date"),
-            entry.get("home_team"),
-            entry.get("away_team"),
-        )
-        result_row = result_by_match.get(match_key)
+        sport = entry.get("sport", "football")
 
-        # Fallback to live API if historical data doesn't have it
-        if result_row is None and api_key:
-            result_row = _get_live_result_fallback(entry, api_key)
+        # Handle football
+        if sport == "football":
+            match_key = _match_key(
+                entry.get("event_date"),
+                entry.get("home_team"),
+                entry.get("away_team"),
+            )
+            result_row = result_by_match.get(match_key)
 
-        if result_row is None:
-            unmatched.append(signal_id)
-            continue
+            # Fallback to live API if historical data doesn't have it
+            if result_row is None and api_key:
+                result_row = _get_live_result_fallback(entry, api_key)
 
-        actual = result_row["actual_selection"]
-        result: Literal["win", "loss"] = "win" if entry.get("selection") == actual else "loss"
-        closing_odds = _pick_closing_odds(result_row, entry.get("selection", ""))
-        ledger.update_result(signal_id, result=result, closing_odds=closing_odds)
-        settled_signals.append(ledger.get(signal_id))
+            if result_row is None:
+                unmatched.append(signal_id)
+                continue
+
+            actual = result_row["actual_selection"]
+            result: Literal["win", "loss"] = "win" if entry.get("selection") == actual else "loss"
+            closing_odds = _pick_closing_odds(result_row, entry.get("selection", ""))
+            ledger.update_result(signal_id, result=result, closing_odds=closing_odds)
+            settled_signals.append(ledger.get(signal_id))
+
+        # Handle tennis
+        elif sport == "tennis":
+            result_row = _get_live_tennis_result_fallback(entry, api_key)
+            if result_row is None:
+                unmatched.append(signal_id)
+                continue
+
+            actual = result_row["actual_selection"]
+            result: Literal["win", "loss"] = "win" if entry.get("selection") == actual else "loss"
+            ledger.update_result(signal_id, result=result, closing_odds=None)
+            settled_signals.append(ledger.get(signal_id))
 
     settled_count = len(settled_signals)
     wins = sum(1 for item in settled_signals if item.get("result") == "win")
@@ -219,6 +233,45 @@ def _get_live_result_fallback(entry: dict[str, Any], api_key: str) -> dict[str, 
         import logging
 
         logging.getLogger(__name__).debug("[settle] live_result fallback failed: %s", exc)
+
+    return None
+
+
+def _get_live_tennis_result_fallback(entry: dict[str, Any], api_key: str) -> dict[str, Any] | None:
+    """Try to get tennis result from live API when historical data doesn't have it."""
+    try:
+        from src.ingest.live_results import get_live_tennis_result
+        from datetime import datetime
+
+        player1 = entry.get("home_team", "")
+        player2 = entry.get("away_team", "")
+        tour = entry.get("league", "")  # League field stores ATP/WTA
+        event_date_str = entry.get("event_date") or entry.get("event_time_utc") or ""
+
+        if not all([player1, player2, tour, event_date_str]):
+            return None
+
+        # Parse event date
+        try:
+            event_date = datetime.fromisoformat(
+                str(event_date_str).replace("Z", "+00:00")
+            ).date()
+        except ValueError:
+            return None
+
+        live_result = get_live_tennis_result(player1, player2, event_date, tour, api_key)
+        if live_result:
+            return {
+                "home_team": player1,
+                "away_team": player2,
+                "match_date": event_date,
+                "actual_selection": RESULT_TO_SELECTION.get(live_result["result_ft"], ""),
+                "_source": "live_api",
+            }
+    except Exception as exc:
+        import logging
+
+        logging.getLogger(__name__).debug("[settle] live_tennis_result fallback failed: %s", exc)
 
     return None
 
