@@ -1,0 +1,137 @@
+{
+  "audit_date": "2026-06-02",
+  "branch": "audit/ruflo-full-verification",
+  "base_branch": "all-the-best",
+  "total_tests_before": 277,
+  "total_tests_after": 291,
+  "coverage_before_pct": 61,
+  "coverage_after_pct": 64,
+  "verdict": "CONDITIONALLY_READY_FOR_PAPER_TRADING",
+  "findings": [
+    {
+      "id": "F-001",
+      "priority": "P1",
+      "status": "FIXED",
+      "title": "apscheduler missing from pyproject.toml dependencies",
+      "file": "pyproject.toml",
+      "description": "apscheduler was in requirements-render.txt but not in pyproject.toml. Clean install via `pip install -e '.[dev]'` did not install it, causing test_scheduler_enabled_when_active_mode_true to fail.",
+      "fix": "Added apscheduler>=3.10.0 to pyproject.toml [project.dependencies]",
+      "test": "tests/test_telegram_delivery.py::TestSchedulerStates::test_scheduler_enabled_when_active_mode_true"
+    },
+    {
+      "id": "F-002",
+      "priority": "P1",
+      "status": "FIXED",
+      "title": "src/backtest/run_backtest.py had 0% test coverage",
+      "file": "src/backtest/run_backtest.py",
+      "description": "Core backtest engine (BacktestConfig, WalkForwardBacktester, BacktestTrade, BacktestMetrics) had zero test coverage. These are critical for the walk-forward backtest mission.",
+      "fix": "Created tests/test_backtest_core.py with 14 tests covering config validation, missing columns, fold integrity, no-trade edge case, dataset hash reproducibility.",
+      "test": "tests/test_backtest_core.py (14 tests, all pass)"
+    },
+    {
+      "id": "F-003",
+      "priority": "P1",
+      "status": "FIXED",
+      "title": "src/backtest/walk_forward.py had 0% test coverage",
+      "file": "src/backtest/walk_forward.py",
+      "description": "Walk-forward CLI module _brier_log_loss helper and core logic untested.",
+      "fix": "Added 3 tests in tests/test_backtest_core.py for _brier_log_loss (normal, perfect, random, empty)",
+      "test": "tests/test_backtest_core.py::test_walk_forward_*"
+    },
+    {
+      "id": "F-004",
+      "priority": "P2",
+      "status": "OPEN",
+      "title": "Illness/player-state pipeline not integrated into production signal path",
+      "file": "src/signals/run_signal_scan.py:551",
+      "description": "IllnessFeatureBuilder class exists with correct anti-leakage cutoff logic, but: (1) no real data source fetches injury data, (2) production signal generation always passes illness_features=None, (3) Dixon-Coles model receives no player-state features. The illness infrastructure is scaffolding only.",
+      "fix_required": "Integrate a public injury data source (e.g. apifootball.com free tier) and call filter_by_cutoff() before signal generation.",
+      "test": "tests/test_no_lookahead.py covers the class in isolation"
+    },
+    {
+      "id": "F-005",
+      "priority": "P2",
+      "status": "OPEN",
+      "title": "Tennis model not implemented",
+      "file": "src/ingest/active_sports_resolver.py:235",
+      "description": "active_sports_resolver returns ['tennis_atp', 'tennis_wta'] when sport='tennis', but no src/models/tennis_elo.py or src/signals/tennis_signal_scan.py exist. CLAUDE.md describes tennis ELO + Markov models but they are not implemented.",
+      "fix_required": "Either implement tennis_elo.py with surface-specific Elo or remove tennis from active_sports_resolver to avoid silent no-op.",
+      "test": "No tennis tests exist (test_tennis.py referenced in docs but file does not exist)"
+    },
+    {
+      "id": "F-006",
+      "priority": "P2",
+      "status": "OPEN",
+      "title": "src/cron/run_settle.py has 0% test coverage",
+      "file": "src/cron/run_settle.py",
+      "description": "Settlement cron entrypoint completely untested. Settlement is critical for paper ledger integrity.",
+      "fix_required": "Add integration tests that mock the ledger and verify settlement flow."
+    },
+    {
+      "id": "F-007",
+      "priority": "P3",
+      "status": "OPEN",
+      "title": ".gitignore has conflicting rules for data/models/*.pkl",
+      "file": ".gitignore",
+      "description": "Line '!data/models/*.pkl' un-ignores pkl files, but later 'data/models/*.pkl' re-ignores them. The last rule wins so pkl files ARE ignored, but the conflict creates confusion.",
+      "fix_required": "Remove the '!data/models/*.pkl' line from .gitignore"
+    },
+    {
+      "id": "F-008",
+      "priority": "INFO",
+      "status": "VERIFIED_SAFE",
+      "title": "pickle.load used in model_registry.py",
+      "file": "src/models/model_registry.py:89,105",
+      "description": "pickle.load used for model deserialization. Trust boundary is local filesystem only (data/models/). No untrusted paths are loaded. Models are written by the same codebase via the registry.",
+      "verdict": "ACCEPTABLE - local filesystem trust boundary is documented"
+    },
+    {
+      "id": "F-009",
+      "priority": "INFO",
+      "status": "VERIFIED_SAFE",
+      "title": "subprocess.run in run_signal_pipeline.py",
+      "file": "src/models/run_signal_pipeline.py:383",
+      "description": "subprocess.run used to invoke sub-commands. cmd is always [sys.executable, '-m', ...] + programmatically-built args from argparse.Namespace. No user-controlled string interpolation. shell=False.",
+      "verdict": "SAFE - no injection vector"
+    },
+    {
+      "id": "F-010",
+      "priority": "INFO",
+      "status": "VERIFIED_SAFE",
+      "title": "Closing odds not used as signal input",
+      "file": "src/models/historical_value_model.py:512",
+      "description": "closing_odds_prefix columns are extracted only into signal.clv_reference_odds (CLV post-factum), never into entry_odds or model probability input. Comment at line 512 explicitly documents this.",
+      "verdict": "SAFE - no closing odds leakage"
+    }
+  ],
+  "external_dependencies": [
+    {
+      "id": "EXT-001",
+      "name": "The Odds API",
+      "env_var": "THE_ODDS_API_KEY",
+      "status": "UNVERIFIED_EXTERNAL_DEPENDENCY",
+      "impact": "Without this key, live signal scan uses staged historical data only"
+    },
+    {
+      "id": "EXT-002",
+      "name": "Telegram Bot",
+      "env_var": "TELEGRAM_BOT_TOKEN",
+      "status": "UNVERIFIED_EXTERNAL_DEPENDENCY",
+      "impact": "Without token, all notifications print to stdout (dry-run). Dry-run verified working."
+    },
+    {
+      "id": "EXT-003",
+      "name": "PostgreSQL (Render)",
+      "env_var": "DATABASE_URL",
+      "status": "UNVERIFIED_EXTERNAL_DEPENDENCY",
+      "impact": "Without DATABASE_URL, SQLite fallback is used. SQLite path tested."
+    },
+    {
+      "id": "EXT-004",
+      "name": "Odds API IO (tennis)",
+      "env_var": "ODDS_API_IO_KEY",
+      "status": "UNVERIFIED_EXTERNAL_DEPENDENCY",
+      "impact": "Tennis signals not generated without this key (tennis model not implemented anyway)"
+    }
+  ]
+}
