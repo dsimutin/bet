@@ -768,11 +768,12 @@ def debug_tennis():
     from pathlib import Path
 
     api_key = os.environ.get("THE_ODDS_API_KEY", "")
+    odds_io_key = os.environ.get("ODDS_API_IO_KEY", "")
     model_dir = Path(os.environ.get("MODEL_DIR", "data/models"))
     model_path = model_dir / "tennis_elo_atp_latest.pkl"
 
-    if not api_key:
-        return {"error": "THE_ODDS_API_KEY not set", "signals": []}
+    if not api_key and not odds_io_key:
+        return {"error": "No tennis odds key configured (need THE_ODDS_API_KEY or ODDS_API_IO_KEY)", "signals": []}
 
     if not model_path.exists():
         return {"error": f"No model at {model_path}", "signals": []}
@@ -838,10 +839,28 @@ def debug_tennis_raw():
     import urllib.request as _urllib
 
     api_key = os.environ.get("THE_ODDS_API_KEY", "")
-    if not api_key:
-        return {"error": "THE_ODDS_API_KEY not set"}
+    odds_io_key = os.environ.get("ODDS_API_IO_KEY", "")
 
-    results = {}
+    results = {
+        "the_odds_api_key_set": bool(api_key),
+        "odds_api_io_key_set": bool(odds_io_key),
+    }
+
+    # If odds-api.io is configured, show its diagnostic first
+    if odds_io_key:
+        try:
+            from src.ingest.oddsapiio_tennis import fetch_tennis_events_as_odds_api_format
+            events = fetch_tennis_events_as_odds_api_format()
+            results["odds_api_io_events"] = len(events)
+            results["odds_api_io_sample"] = events[:2] if events else []
+            results["odds_api_io_status"] = "ok" if events else "no_events"
+        except Exception as exc:
+            results["odds_api_io_error"] = str(exc)
+
+    if not api_key:
+        results["the_odds_api_status"] = "skipped (THE_ODDS_API_KEY not set)"
+        return results
+
     sport_keys = ["tennis_atp", "tennis_wta"]
 
     # Also check which sports are active

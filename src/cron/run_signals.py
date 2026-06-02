@@ -147,7 +147,10 @@ def _run_exotic() -> list[dict[str, Any]]:
 
 def _run_tennis(model_dir: Path) -> list[dict[str, Any]]:
     api_key = os.environ.get("THE_ODDS_API_KEY", "")
-    if not api_key:
+    # Run if either odds-api.io OR The Odds API key is configured
+    odds_io_configured = bool(os.environ.get("ODDS_API_IO_KEY", "").strip())
+    if not api_key and not odds_io_configured:
+        print("[signals] tennis: skipped (no THE_ODDS_API_KEY or ODDS_API_IO_KEY configured)")
         return []
     from src.signals.tennis_runtime_scan import scan_tennis_h2h_runtime
 
