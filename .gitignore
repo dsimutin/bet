@@ -67,6 +67,9 @@ configs/secrets.local.yaml
 htmlcov/
 .pytest_cache/
 
+# Claude-flow session files (runtime only)
+.claude-flow/sessions/
+
 # Ruflo / claude-flow runtime artifacts
 .swarm/memory.db
 .swarm/memory.db-shm
