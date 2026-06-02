@@ -1160,25 +1160,23 @@ def _send_status_report(
 
 
 def _probe_active_soccer_leagues(api_key: str) -> list[str]:
-    """Query /sports to find soccer competitions that currently have events.
-
-    Returns a list of active sport_key strings (e.g. ['soccer_epl', 'soccer_usa_mls']).
-    Returns [] on any error (non-critical — used only for reporting).
-    """
+    """Return active soccer sport_keys using cached sports list (24h cache)."""
     try:
-        import urllib.request as _urllib, json as _json
+        from src.infrastructure import odds_cache
+        from src.services.runtime_odds import _fetch_active_sports
 
-        req = _urllib.Request(
-            f"https://api.the-odds-api.com/v4/sports?apiKey={api_key}&all=false",
-            headers={"User-Agent": "bet-analytics/1.0"},
-        )
-        with _urllib.urlopen(req, timeout=10) as resp:
-            sports = _json.loads(resp.read())
+        cache_key = "sports:active-soccer"
+        cached = odds_cache.get(cache_key)
+        if isinstance(cached, list):
+            return cached
+
+        sports = _fetch_active_sports(api_key)
         active = [
             s["key"]
             for s in sports
             if s.get("group", "").lower() == "soccer" and s.get("active", False)
         ]
+        odds_cache.set(cache_key, active, 86400)  # 24h — sports list rarely changes
         _log.info("[active] Odds API active soccer leagues: %d found — %s", len(active), active[:8])
         return active
     except Exception as exc:
@@ -1191,26 +1189,21 @@ def _validate_odds_api_key_in_background(
     providers_ok: list[str],
     providers_skip: list[str],
 ) -> None:
-    """Quick check: verify the Odds API key is valid by fetching available sports."""
+    """Quick check: verify Odds API key via cached sports list (no extra quota cost)."""
     try:
-        import urllib.request as _urllib
+        from src.services.runtime_odds import _fetch_active_sports
+        from src.infrastructure import odds_cache
 
-        req = _urllib.Request(
-            f"https://api.the-odds-api.com/v4/sports?apiKey={api_key}",
-            headers={"User-Agent": "bet-analytics/1.0"},
-        )
-        with _urllib.urlopen(req, timeout=8) as resp:
-            if resp.status == 200:
-                _log.info("[active] Odds API key is VALID — no upcoming matches today")
-                # Update providers list in-place
-                if "Odds API" not in providers_ok:
-                    providers_ok.append("Odds API ✅ (ключ верный)")
-            else:
-                _log.warning("[active] Odds API key check returned %s", resp.status)
+        cache_key = "sports:active-soccer"
+        cached = odds_cache.get(cache_key)
+        if cached is None:
+            _fetch_active_sports(api_key)  # warms cache as side effect
+
+        _log.info("[active] Odds API key is VALID — no upcoming matches today")
+        if "Odds API" not in providers_ok:
+            providers_ok.append("Odds API ✅ (ключ верный)")
     except Exception as exc:
-        code = getattr(getattr(exc, "code", None), "__str__", lambda: str(exc))()
         _log.warning("[active] Odds API key validation failed: %s", exc)
-        # Replace "Odds API" with error entry
         if "Odds API" in providers_ok:
             providers_ok.remove("Odds API")
         providers_skip.append(f"Odds API ❌ ошибка ключа ({code})")
