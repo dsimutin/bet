@@ -1,9 +1,15 @@
-"""Monitor API quota usage to prevent overspending in production."""
+"""Monitor API quota usage to prevent overspending in production.
+
+Hard stop thresholds (requests remaining, not used):
+  THE_ODDS_API_MIN_REMAINING_HARD_STOP      — refuse any new call at or below this
+  THE_ODDS_API_MIN_REMAINING_PRIORITY_REFRESH — allow only priority refreshes above this
+"""
 
 from __future__ import annotations
 
 import json
 import logging
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -75,7 +81,64 @@ class APIQuotaMonitor:
             }
         return result
 
-    def _load(self) -> dict[str, dict[str, int]]:
+    def update_remaining_from_header(self, api_name: str, remaining: int) -> None:
+        """Update authoritative remaining count from API response header.
+
+        The Odds API returns x-requests-remaining in every response.
+        Storing this gives a more accurate picture than counting locally.
+        """
+        data = self._load()
+        meta_key = f"_meta_{api_name}"
+        if meta_key not in data:
+            data[meta_key] = {}
+        data[meta_key]["last_remaining"] = remaining
+        data[meta_key]["last_remaining_at"] = datetime.now(timezone.utc).isoformat()
+        self._save(data)
+
+    def get_last_known_remaining(self, api_name: str) -> int | None:
+        """Return the last known remaining count from API response headers, or None."""
+        data = self._load()
+        meta = data.get(f"_meta_{api_name}", {})
+        val = meta.get("last_remaining")
+        return int(val) if val is not None else None
+
+    def check_hard_stop(self, api_name: str = "the_odds_api") -> None:
+        """Raise RuntimeError if remaining quota is at or below the hard stop threshold.
+
+        Reads THE_ODDS_API_MIN_REMAINING_HARD_STOP (default 25).
+        Uses last known remaining from API headers; falls back to local count.
+        """
+        hard_stop = int(os.environ.get("THE_ODDS_API_MIN_REMAINING_HARD_STOP", "25"))
+        if hard_stop <= 0:
+            return
+
+        remaining = self.get_last_known_remaining(api_name)
+        if remaining is None:
+            month = datetime.now(timezone.utc).date().isoformat()[:7]
+            used, limit = self.monthly_usage(api_name, month)
+            remaining = limit - used
+
+        if remaining <= hard_stop:
+            raise RuntimeError(
+                f"[quota] Hard stop: {api_name} has only {remaining} requests remaining "
+                f"(threshold={hard_stop}). Set THE_ODDS_API_MIN_REMAINING_HARD_STOP=0 to disable."
+            )
+
+    def is_priority_refresh_allowed(self, api_name: str = "the_odds_api") -> bool:
+        """Return True if enough quota remains for priority refreshes.
+
+        Uses THE_ODDS_API_MIN_REMAINING_PRIORITY_REFRESH (default 80).
+        When False, only hard-minimum requests should be made.
+        """
+        threshold = int(os.environ.get("THE_ODDS_API_MIN_REMAINING_PRIORITY_REFRESH", "80"))
+        remaining = self.get_last_known_remaining(api_name)
+        if remaining is None:
+            month = datetime.now(timezone.utc).date().isoformat()[:7]
+            used, limit = self.monthly_usage(api_name, month)
+            remaining = limit - used
+        return remaining > threshold
+
+    def _load(self) -> dict[str, Any]:
         """Load quota data from file."""
         if not self.quota_file.exists():
             return {}
@@ -111,3 +174,18 @@ def record_apifootball_request(calls: int = 1) -> None:
 def get_usage_summary() -> dict[str, Any]:
     """Get monthly usage summary for all APIs."""
     return _monitor.usage_summary()
+
+
+def check_odds_api_quota() -> None:
+    """Raise RuntimeError if The Odds API quota is exhausted. Call before any API request."""
+    _monitor.check_hard_stop("the_odds_api")
+
+
+def update_odds_api_remaining(remaining: int) -> None:
+    """Record the x-requests-remaining header value from an Odds API response."""
+    _monitor.update_remaining_from_header("the_odds_api", remaining)
+
+
+def is_odds_api_priority_refresh_allowed() -> bool:
+    """Return True if quota allows priority refreshes."""
+    return _monitor.is_priority_refresh_allowed("the_odds_api")

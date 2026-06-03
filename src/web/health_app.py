@@ -14,16 +14,18 @@ Endpoints:
 
 from __future__ import annotations
 
+import hmac
 import json
 import logging
 import os
 import sys
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from glob import glob
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 # Configure root logger so all app INFO messages appear in Render / uvicorn logs.
@@ -48,6 +50,13 @@ def _env_bool(key: str, default: bool = False) -> bool:
 
 
 ACTIVE_MODE = _env_bool("ACTIVE_MODE", False)
+ADMIN_API_TOKEN = os.environ.get("ADMIN_API_TOKEN", "").strip()
+
+# In-memory update deduplication (last 200 Telegram update_ids)
+_seen_update_ids: set[int] = set()
+_seen_update_ids_queue: list[int] = []
+_SEEN_MAX = 200
+_last_trigger_at: dict[str, float] = {}
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -180,6 +189,28 @@ app = FastAPI(
 
 def _utcnow() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _require_admin(request: Request) -> None:
+    """Enforce ADMIN_API_TOKEN when configured. Warns but allows when unconfigured."""
+    if not ADMIN_API_TOKEN:
+        _log.warning("[security] ADMIN_API_TOKEN not set — admin endpoint accessible without auth")
+        return
+    auth = request.headers.get("Authorization", "")
+    expected = f"Bearer {ADMIN_API_TOKEN}"
+    if not hmac.compare_digest(auth.encode(), expected.encode()):
+        raise HTTPException(status_code=401, detail="Admin API token required")
+
+
+def _check_trigger_cooldown(endpoint: str) -> None:
+    """Rate-limit manual trigger endpoints via TELEGRAM_MANUAL_REFRESH_COOLDOWN_SECONDS."""
+    cooldown = int(os.environ.get("TELEGRAM_MANUAL_REFRESH_COOLDOWN_SECONDS", "60"))
+    now = time.time()
+    last = _last_trigger_at.get(endpoint, 0.0)
+    if now - last < cooldown:
+        remaining = int(cooldown - (now - last))
+        raise HTTPException(status_code=429, detail=f"Rate limited: retry in {remaining}s")
+    _last_trigger_at[endpoint] = now
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -725,12 +756,14 @@ def health_all():
 
 
 @app.post("/trigger")
-def trigger_report():
+def trigger_report(request: Request):
     """Немедленно запустить active report и отправить в Telegram.
 
     Используй для проверки что бот работает:
-        curl -X POST https://your-app.onrender.com/trigger
+        curl -X POST -H "Authorization: Bearer $ADMIN_API_TOKEN" https://your-app.onrender.com/trigger
     """
+    _require_admin(request)
+    _check_trigger_cooldown("trigger")
     import threading
 
     result: dict = {"started": False, "error": None}
@@ -765,6 +798,8 @@ def debug_tennis():
 
     Использование: GET /debug/tennis
     """
+    if not _env_bool("ENABLE_DEBUG_ROUTES", False):
+        raise HTTPException(status_code=404, detail="Not found")
     from pathlib import Path
 
     api_key = os.environ.get("THE_ODDS_API_KEY", "")
@@ -795,11 +830,13 @@ def debug_tennis():
 
 
 @app.post("/trigger/tennis-scan")
-def trigger_tennis_scan():
+def trigger_tennis_scan(request: Request):
     """Немедленно запустить теннисный скан сигналов.
 
-    curl -X POST https://your-app.onrender.com/trigger/tennis-scan
+    curl -X POST -H "Authorization: Bearer $ADMIN_API_TOKEN" https://your-app.onrender.com/trigger/tennis-scan
     """
+    _require_admin(request)
+    _check_trigger_cooldown("tennis-scan")
     import threading
 
     def _run():
@@ -835,6 +872,8 @@ def debug_tennis_raw():
     Диагностика: есть ли вообще теннисные события в API.
     curl https://your-app.onrender.com/debug/tennis-raw
     """
+    if not _env_bool("ENABLE_DEBUG_ROUTES", False):
+        raise HTTPException(status_code=404, detail="Not found")
     import json as _json
     import urllib.request as _urllib
 
@@ -915,11 +954,13 @@ def debug_tennis_raw():
 
 
 @app.post("/trigger/morning-digest")
-def trigger_morning_digest():
+def trigger_morning_digest(request: Request):
     """Немедленно запустить утренний дайджест и отправить в Telegram.
 
-    curl -X POST https://your-app.onrender.com/trigger/morning-digest
+    curl -X POST -H "Authorization: Bearer $ADMIN_API_TOKEN" https://your-app.onrender.com/trigger/morning-digest
     """
+    _require_admin(request)
+    _check_trigger_cooldown("morning-digest")
     import threading
 
     def _run():
@@ -946,8 +987,22 @@ def trigger_morning_digest():
 @app.post("/webhook/telegram")
 async def telegram_webhook(request: Request):
     """Telegram sends all updates here. Register with /webhook/telegram/setup."""
+    webhook_secret = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "").strip()
+    if webhook_secret:
+        received = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+        if not hmac.compare_digest(received.encode(), webhook_secret.encode()):
+            return JSONResponse({"ok": False}, status_code=403)
     try:
         update = await request.json()
+        update_id = int(update.get("update_id", 0))
+        if update_id:
+            if update_id in _seen_update_ids:
+                return {"ok": True}
+            _seen_update_ids.add(update_id)
+            _seen_update_ids_queue.append(update_id)
+            if len(_seen_update_ids_queue) > _SEEN_MAX:
+                old = _seen_update_ids_queue.pop(0)
+                _seen_update_ids.discard(old)
         import threading
 
         threading.Thread(
@@ -970,11 +1025,12 @@ def _handle_bot_update(update: dict) -> None:
 
 
 @app.post("/webhook/telegram/setup")
-def telegram_webhook_setup():
+def telegram_webhook_setup(request: Request):
     """Register webhook URL with Telegram. Run once after deploy.
 
-    curl -X POST https://your-app.onrender.com/webhook/telegram/setup
+    curl -X POST -H "Authorization: Bearer $ADMIN_API_TOKEN" https://your-app.onrender.com/webhook/telegram/setup
     """
+    _require_admin(request)
     from src.web.telegram_bot import setup_webhook, get_webhook_info
 
     app_url = os.environ.get("RENDER_EXTERNAL_URL", "").strip()
@@ -1004,6 +1060,8 @@ def debug_odds_sports():
 
     curl https://your-app.onrender.com/debug/odds-sports
     """
+    if not _env_bool("ENABLE_DEBUG_ROUTES", False):
+        raise HTTPException(status_code=404, detail="Not found")
     import json as _json
     import urllib.request as _urllib
 

@@ -5,12 +5,23 @@ import json
 import logging
 import os
 import threading
+import time
 import urllib.request
 from html import escape
 from pathlib import Path
 from typing import Any
 
 _log = logging.getLogger(__name__)
+_last_refresh_at: dict[str, float] = {}
+
+
+def _is_allowed_chat(chat_id: str) -> bool:
+    """Return True if chat is in TELEGRAM_ALLOWED_CHAT_IDS allowlist (or no allowlist set)."""
+    allowlist_raw = os.environ.get("TELEGRAM_ALLOWED_CHAT_IDS", "").strip()
+    if not allowlist_raw:
+        return True
+    allowed = {c.strip() for c in allowlist_raw.split(",") if c.strip()}
+    return chat_id in allowed
 
 
 def handle_update(update: dict[str, Any]) -> None:
@@ -29,6 +40,9 @@ def _handle_message(message: dict[str, Any]) -> None:
     first_name = str(message.get("from", {}).get("first_name", ""))
     if not chat_id:
         return
+    if not _is_allowed_chat(chat_id):
+        _log.warning("[bot] Message from unauthorized chat_id=%s — ignored", chat_id)
+        return
     if text.startswith("/today"):
         _send_today(chat_id)
     elif text.startswith("/stats"):
@@ -45,6 +59,9 @@ def _handle_callback(callback: dict[str, Any]) -> None:
     chat_id = str(callback.get("message", {}).get("chat", {}).get("id", ""))
     _answer_callback(str(callback.get("id", "")))
     if not chat_id:
+        return
+    if not _is_allowed_chat(chat_id):
+        _log.warning("[bot] Callback from unauthorized chat_id=%s — ignored", chat_id)
         return
     action = callback.get("data")
     if action == "picks_today":
@@ -104,6 +121,14 @@ def send_today_digest_default_chat() -> str:
 
 
 def _refresh(chat_id: str) -> None:
+    cooldown = int(os.environ.get("TELEGRAM_MANUAL_REFRESH_COOLDOWN_SECONDS", "300"))
+    now = time.time()
+    last = _last_refresh_at.get(chat_id, 0.0)
+    if now - last < cooldown:
+        remaining = int(cooldown - (now - last))
+        _send(chat_id, f"⏳ Обновление доступно через {remaining} сек.", _back_button())
+        return
+    _last_refresh_at[chat_id] = now
     _send(chat_id, "🔄 Обновляю общий cached-скан футбола и тенниса. Это займёт до минуты.")
 
     def _run() -> None:
