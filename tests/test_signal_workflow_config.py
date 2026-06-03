@@ -80,5 +80,21 @@ def test_render_keep_alive_is_manual_only() -> None:
     assert "workflow_dispatch:" in keep_alive
     assert "cron:" not in keep_alive
     assert "*/14" not in keep_alive
+    assert "secrets.RENDER_EXTERNAL_URL" in keep_alive
+    assert "vars.RENDER_URL" not in keep_alive
+    assert "skipping ping" not in keep_alive
+    assert "exit 1" in keep_alive
     assert "schedule:" in wakeup
+    assert "secrets.RENDER_EXTERNAL_URL" in wakeup
     assert "/health" in wakeup
+
+
+def test_runtime_entrypoints_use_authoritative_ledger_backend() -> None:
+    checked = [
+        Path("src/cron/run_active_report.py"),
+        Path("scripts/generate_signals.py"),
+    ]
+    for path in checked:
+        source = path.read_text(encoding="utf-8")
+        assert "SignalLedger.load_or_create" not in source
+        assert "persistent_ledger" in source

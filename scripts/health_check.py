@@ -272,10 +272,11 @@ def main(argv: list[str] | None = None) -> int:
         else:
             _log.info("\n✅ All checks passed. System is ready for deployment.\n")
         _log.info("Next steps:")
-        _log.info("  1. Commit and push to all-the-best branch")
-        _log.info("  2. Set THE_ODDS_API_KEY in Render environment")
-        _log.info("  3. Render auto-deploys on push")
-        _log.info("  4. Monitor logs at 07:00 UTC for signal generation\n")
+        _log.info("  1. Commit and push the feature branch")
+        _log.info("  2. Open a PR into all-the-best")
+        _log.info("  3. Set required secrets in Render and GitHub Actions")
+        _log.info("  4. Deploy from the reviewed production branch")
+        _log.info("  5. Monitor logs at 07:00 UTC for signal generation\n")
         return 0
     else:
         _log.error("\n❌ Some checks failed. Fix issues before deploying.\n")

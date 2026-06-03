@@ -64,3 +64,31 @@ def test_today_picks_loads_authoritative_backend(monkeypatch, tmp_path) -> None:
 
 def test_today_picks_reads_authoritative_backend(monkeypatch, tmp_path) -> None:
     test_today_picks_loads_authoritative_backend(monkeypatch, tmp_path)
+
+
+def test_dashboard_reads_authoritative_backend(monkeypatch, tmp_path) -> None:
+    class FakeLedger:
+        def summary(self):
+            return {"total_signals": 7}
+
+        def entries(self):
+            return {"s1": {"signal_id": "s1"}}
+
+    calls = []
+
+    def fake_load_ledger(path):
+        calls.append(path)
+        return FakeLedger()
+
+    ledger_path = tmp_path / "authority.json"
+    monkeypatch.setenv("LEDGER_PATH", str(ledger_path))
+    monkeypatch.setattr("src.infrastructure.persistent_ledger.load_ledger", fake_load_ledger)
+
+    import importlib
+    import src.web.app as dashboard
+
+    importlib.reload(dashboard)
+
+    assert dashboard._ledger_summary()["total_signals"] == 7
+    assert dashboard._recent_signals() == [{"signal_id": "s1"}]
+    assert calls == [ledger_path, ledger_path]

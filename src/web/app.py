@@ -19,6 +19,7 @@ from fastapi.templating import Jinja2Templates
 
 _ROOT = Path(__file__).parent.parent.parent
 _DATA = _ROOT / "data"
+_LEDGER_PATH = Path(os.environ.get("LEDGER_PATH", _DATA / "core" / "paper_signal_ledger.json"))
 _TEMPLATES = Path(__file__).parent / "templates"
 _log = logging.getLogger(__name__)
 
@@ -81,7 +82,7 @@ def _ledger_summary() -> dict[str, Any]:
     try:
         from src.infrastructure.persistent_ledger import load_ledger
 
-        return load_ledger(_DATA / "core" / "paper_signal_ledger.json").summary()
+        return load_ledger(_LEDGER_PATH).summary()
     except Exception:
         return {
             "total_signals": 0,
@@ -97,7 +98,7 @@ def _recent_signals(n: int = 20) -> list[dict[str, Any]]:
     try:
         from src.infrastructure.persistent_ledger import load_ledger
 
-        entries = load_ledger(_DATA / "core" / "paper_signal_ledger.json").entries()
+        entries = load_ledger(_LEDGER_PATH).entries()
     except Exception:
         return []
     rows = sorted(

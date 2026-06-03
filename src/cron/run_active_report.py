@@ -385,9 +385,9 @@ def _format_tennis_pick(sig: dict, n: int) -> str:
 
 def _run_signal_scan() -> dict[str, Any]:
     """Run signal scan across all configured leagues. Returns summary dict."""
+    from src.infrastructure.persistent_ledger import load_ledger, save_ledger
     from src.models.model_registry import ModelRegistry
     from src.signals.run_signal_scan import generate_signals_for_league
-    from src.models.signal_ledger import SignalLedger
 
     started = datetime.now(timezone.utc)
     t0 = time.perf_counter()
@@ -491,7 +491,7 @@ def _run_signal_scan() -> dict[str, Any]:
     # Save new signals to ledger and Telegram
     if all_signals:
         try:
-            ledger = SignalLedger.load_or_create(LEDGER_PATH)
+            ledger = load_ledger(LEDGER_PATH)
             for sig in all_signals:
                 try:
                     if "opening_odds" not in sig:
@@ -499,7 +499,7 @@ def _run_signal_scan() -> dict[str, Any]:
                     ledger.add_signal(sig)
                 except Exception:
                     dupes_skipped += 1
-            ledger.save(LEDGER_PATH)
+            save_ledger(ledger, LEDGER_PATH)
         except Exception as e:
             source_errors.append(f"ledger_save: {e}")
 
@@ -562,6 +562,7 @@ def _run_signal_scan() -> dict[str, Any]:
 
 def _run_tennis_scan() -> dict[str, Any]:
     """Run ATP tennis signal scan. Returns summary dict."""
+    from src.infrastructure.persistent_ledger import load_ledger, save_ledger
     from src.signals.tennis_signal_scan import scan_tennis_signals
 
     api_key = os.environ.get("THE_ODDS_API_KEY", "")
@@ -590,9 +591,7 @@ def _run_tennis_scan() -> dict[str, Any]:
     tennis_signals = result.get("all_signals", [])
     if tennis_signals:
         try:
-            from src.models.signal_ledger import SignalLedger
-
-            ledger = SignalLedger.load_or_create(LEDGER_PATH)
+            ledger = load_ledger(LEDGER_PATH)
             saved = 0
             for sig in tennis_signals:
                 try:
@@ -603,7 +602,7 @@ def _run_tennis_scan() -> dict[str, Any]:
                         "[active] Tennis signal ledger skip (%s): %s", sig.get("signal_id", "?"), e
                     )
             if saved:
-                ledger.save(LEDGER_PATH)
+                save_ledger(ledger, LEDGER_PATH)
                 _log.info("[active] Tennis: saved %d new signals to ledger", saved)
         except Exception as e:
             _log.error("[active] Tennis ledger save failed: %s", e)
@@ -654,9 +653,9 @@ def _send_tennis_alerts(signals: list[dict]) -> None:
 
 def _run_settlement() -> dict[str, Any]:
     """Run settlement and drift check. Returns summary dict."""
+    from src.infrastructure.persistent_ledger import load_ledger, save_ledger
     from src.ingest.openfootball import OpenFootballLoader
     from src.models.settle_signal_ledger import settle_ledger_from_results
-    from src.models.signal_ledger import SignalLedger
     from src.monitoring.drift_detector import CUSUMDriftDetector
     import pandas as pd
 
@@ -709,10 +708,10 @@ def _run_settlement() -> dict[str, Any]:
 
     try:
         results_csv = STAGING_DIR / "latest_results.csv"
-        ledger = SignalLedger.load_or_create(LEDGER_PATH)
+        ledger = load_ledger(LEDGER_PATH)
         results_df = pd.read_csv(results_csv, encoding="latin-1")
         report = settle_ledger_from_results(ledger, results_df)
-        ledger.save(LEDGER_PATH)
+        save_ledger(ledger, LEDGER_PATH)
 
         today_iso = date.today().isoformat()
         (REPORTS_DIR / f"settlement_{today_iso}.json").write_text(
@@ -737,9 +736,8 @@ def _run_settlement() -> dict[str, Any]:
     # Settle tennis signals
     try:
         from src.ingest.atp_results import fetch_recent_results
-        from src.models.signal_ledger import SignalLedger as _SL2
 
-        _ledger2 = _SL2.load_or_create(LEDGER_PATH)
+        _ledger2 = load_ledger(LEDGER_PATH)
         tennis_open = [
             e
             for e in _ledger2.entries().values()
@@ -773,7 +771,7 @@ def _run_settlement() -> dict[str, Any]:
                         tennis_settled_count += 1
                         break
             if tennis_settled_count:
-                _ledger2.save(LEDGER_PATH)
+                save_ledger(_ledger2, LEDGER_PATH)
                 result["settled_count"] = result.get("settled_count", 0) + tennis_settled_count
                 _log.info("[settlement] Tennis: settled %d bets", tennis_settled_count)
     except Exception as e:
@@ -807,7 +805,6 @@ def _run_settlement() -> dict[str, Any]:
 def _run_training_check() -> dict[str, Any]:
     """Check if enough new data exists; retrain only if warranted."""
     from src.models.run_history import read_last_run
-    from src.models.signal_ledger import SignalLedger
     from src.models.model_registry import ModelRegistry
 
     started = datetime.now(timezone.utc)

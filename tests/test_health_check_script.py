@@ -30,3 +30,18 @@ def test_default_health_script_runs_real_tests(monkeypatch) -> None:
     assert health_check.check_tests() is True
     assert seen["cmd"] == ["python", "-m", "pytest", "-q"]
     assert "THE_ODDS_API_KEY" not in seen["env"]
+
+
+def test_health_script_next_steps_do_not_push_directly_to_production(monkeypatch, caplog) -> None:
+    monkeypatch.setattr(health_check, "check_environment", lambda: True)
+    monkeypatch.setattr(health_check, "check_dependencies", lambda: True)
+    monkeypatch.setattr(health_check, "check_data_files", lambda: True)
+    monkeypatch.setattr(health_check, "check_models", lambda: True)
+    monkeypatch.setattr(health_check, "check_api_quota", lambda: True)
+    monkeypatch.setattr(health_check, "check_tests", lambda collect_only=False: True)
+    caplog.set_level("INFO")
+
+    assert health_check.main([]) == 0
+
+    assert "push to all-the-best branch" not in caplog.text
+    assert "Open a PR into all-the-best" in caplog.text
