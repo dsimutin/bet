@@ -95,6 +95,23 @@ def _has_production_models() -> bool:
     return False
 
 
+def _required_leagues() -> list[str]:
+    raw = os.environ.get("LEAGUES", "EPL,BUNDESLIGA,LALIGA,SERIEA,LIGUE1")
+    return [item.strip().upper() for item in raw.split(",") if item.strip()]
+
+
+def _production_model_leagues() -> set[str]:
+    leagues: set[str] = set()
+    for f in MODEL_DIR.glob("dc_*.meta.json"):
+        try:
+            meta = json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if meta.get("status") == "production" and meta.get("league"):
+            leagues.add(str(meta["league"]).upper())
+    return leagues
+
+
 def _bootstrap_models_in_background() -> None:
     """Run run_trainer in a daemon thread so the web service starts immediately."""
     import threading
@@ -358,17 +375,16 @@ def health_readiness():
     """Check whether the system is ready to generate and deliver signals."""
     checks: dict[str, dict] = {}
 
-    # 1. Production model exists
-    meta_files = sorted(glob(str(MODEL_DIR / "dc_*.meta.json")))
-    prod_models = [
-        p for p in meta_files if json.loads(Path(p).read_text()).get("status") == "production"
-    ]
+    # 1. Production model exists for every enabled league
+    required_leagues = _required_leagues()
+    prod_model_leagues = _production_model_leagues()
+    missing_model_leagues = sorted(set(required_leagues) - prod_model_leagues)
     checks["model"] = {
-        "ready": bool(prod_models),
+        "ready": bool(required_leagues) and not missing_model_leagues,
         "detail": (
-            f"{len(prod_models)} production model(s) found"
-            if prod_models
-            else "No production model — run daily-trainer cron first"
+            f"production models present for {', '.join(required_leagues)}"
+            if required_leagues and not missing_model_leagues
+            else f"missing production model(s): {', '.join(missing_model_leagues)}"
         ),
     }
 
@@ -486,7 +502,26 @@ def health_readiness():
             ),
         }
 
-    # 10. Active report overdue (> 4 hours since last run)
+    # 10. Production control-plane config must be present, but never echoed.
+    app_env = os.environ.get("APP_ENV", "development").strip().lower()
+    if app_env == "production":
+        required_env = [
+            "DATABASE_URL",
+            "ADMIN_API_TOKEN",
+            "TELEGRAM_WEBHOOK_SECRET",
+            "TELEGRAM_ALLOWED_CHAT_IDS",
+        ]
+        missing = [name for name in required_env if not os.environ.get(name, "").strip()]
+        checks["production_config"] = {
+            "ready": not missing,
+            "detail": (
+                "required production control-plane config present"
+                if not missing
+                else f"missing required production config: {', '.join(missing)}"
+            ),
+        }
+
+    # 11. Active report overdue (> 4 hours since last run)
     if ACTIVE_MODE:
         try:
             from src.models.run_history import read_last_run
@@ -509,7 +544,7 @@ def health_readiness():
         except Exception:
             pass
 
-    # 11. Repeated Telegram delivery failures
+    # 12. Repeated Telegram delivery failures
     tg_delivery = _read_tg_delivery_status()
     if tg_delivery.get("last_status") == "failed":
         checks["telegram_delivery"] = {
@@ -517,7 +552,11 @@ def health_readiness():
             "detail": f"Last Telegram delivery failed: {tg_delivery.get('last_error', 'unknown')}",
         }
 
-    ready_for_signals = all(checks[k]["ready"] for k in ("model", "ledger", "staging_data"))
+    critical_checks = ["model", "ledger", "staging_data"]
+    for optional_critical in ("scheduler", "telegram_config", "production_config"):
+        if optional_critical in checks:
+            critical_checks.append(optional_critical)
+    ready_for_signals = all(checks[k]["ready"] for k in critical_checks)
     degraded = not all(c.get("ready", True) for c in checks.values())
 
     return {
@@ -539,6 +578,10 @@ def ready():
         "status": "ok" if ready_ok else "not_ready",
         "ledger": {"backend": ledger.get("backend"), "ok": ledger.get("ok")},
         "degraded": readiness.get("degraded"),
+        "checks": {
+            name: {"ready": bool(check.get("ready"))}
+            for name, check in dict(readiness.get("checks", {})).items()
+        },
         "ts": _utcnow(),
     }
     return JSONResponse(payload, status_code=200 if ready_ok else 503)
