@@ -129,7 +129,7 @@ def get_injuries_for_match(
         from src.infrastructure import odds_cache
 
         cached = odds_cache.get(cache_key)
-        if isinstance(cached, dict) and cached.get("available"):
+        if isinstance(cached, dict):
             _log.debug("[injuries] cache hit: %s", cache_key)
             return cached
     except Exception:

@@ -131,7 +131,17 @@ def get_football_h2h_odds(sport_key: str, api_key: str) -> list[dict[str, Any]]:
         )
         return _annotate_snapshot(cached_events, cached_at)
 
-    data, headers = _fetch_odds(sport_key, api_key, regions, ["h2h"])
+    try:
+        data, headers = _fetch_odds(sport_key, api_key, regions, ["h2h"])
+    except Exception:
+        if cached_events:
+            _log.warning(
+                "[runtime-odds] football refresh failed for %s; using cached %s snapshot",
+                sport_key,
+                _freshness_tier(cached_at),
+            )
+            return _annotate_snapshot(cached_events, cached_at)
+        raise
     fetched_at = datetime.now(timezone.utc).isoformat()
     odds_cache.set(cache_key, _wrap_snapshot(data, fetched_at), _cache_storage_ttl_seconds())
     _log_quota("football", sport_key, headers, len(data))
