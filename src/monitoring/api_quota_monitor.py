@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -19,12 +20,33 @@ class APIQuotaMonitor:
         "apifootball": {"free": 100},
     }
 
-    def __init__(self, quota_file: Path = Path("data/monitoring/api_quota.json")) -> None:
+    _DEFAULT_QUOTA_FILE = Path("data/monitoring/api_quota.json")
+
+    def __init__(
+        self,
+        quota_file: Path = _DEFAULT_QUOTA_FILE,
+        *,
+        use_database: bool | None = None,
+    ) -> None:
         self.quota_file = quota_file
         self.quota_file.parent.mkdir(parents=True, exist_ok=True)
+        self.use_database = (
+            use_database if use_database is not None else quota_file == self._DEFAULT_QUOTA_FILE
+        )
 
     def record_request(self, api_name: str, calls: int = 1) -> None:
         """Record API calls made."""
+        if self._database_enabled():
+            try:
+                today = datetime.now(timezone.utc).date().isoformat()
+                _get_db().record_api_quota_request(api_name, calls, today)
+                self._warn_if_needed(api_name, today[:7])
+                return
+            except Exception as exc:
+                _log.warning("[quota] database request record failed: %s", exc)
+                if self._production():
+                    raise
+
         data = self._load()
         today = datetime.now(timezone.utc).date().isoformat()
 
@@ -36,30 +58,31 @@ class APIQuotaMonitor:
         data[today][api_name] += calls
         self._save(data)
 
-        # Check if approaching limit
-        month_total = sum(v.get(api_name, 0) for k, v in data.items() if k.startswith(today[:7]))
-        limit = self.LIMITS.get(api_name, {}).get("free", float("inf"))
-
-        if month_total > limit * 0.8:
-            _log.warning(
-                "[quota] %s usage %.0f%% of monthly limit (%d/%d)",
-                api_name,
-                month_total / limit * 100,
-                month_total,
-                limit,
-            )
+        self._warn_if_needed(api_name, today[:7])
 
     def can_request(self, api_name: str, min_remaining: int) -> bool:
         used, limit = self.monthly_usage(api_name)
         return (limit - used) >= min_remaining
 
     def record_provider_headers(self, record: dict[str, Any]) -> None:
+        record = dict(record)
+        api_name = _provider_api_name(str(record.get("provider", "")))
+        if api_name:
+            record["api_name"] = api_name
+        if self._database_enabled():
+            try:
+                _get_db().record_api_quota_provider_headers(record)
+                return
+            except Exception as exc:
+                _log.warning("[quota] database provider record failed: %s", exc)
+                if self._production():
+                    raise
+
         data = self._load()
         records = data.setdefault("_provider_records", [])
         if isinstance(records, list):
             records.append(record)
             data["_provider_records"] = records[-200:]
-        api_name = _provider_api_name(str(record.get("provider", "")))
         used = _parse_int(record.get("x_requests_used"))
         if api_name and used is not None:
             month = str(record.get("requested_at_utc") or datetime.now(timezone.utc).isoformat())[
@@ -79,6 +102,17 @@ class APIQuotaMonitor:
         """Get (used, limit) for month (YYYY-MM)."""
         if not month:
             month = datetime.now(timezone.utc).date().isoformat()[:7]
+
+        if self._database_enabled():
+            try:
+                used = _get_db().fetch_api_quota_monthly_usage(api_name, month)
+                limit = self.LIMITS.get(api_name, {}).get("free", 0)
+                return used, limit
+            except Exception as exc:
+                _log.warning("[quota] database usage read failed: %s", exc)
+                if self._production():
+                    limit = self.LIMITS.get(api_name, {}).get("free", 0)
+                    return limit, limit
 
         data = self._load()
         local_used = sum(
@@ -125,6 +159,25 @@ class APIQuotaMonitor:
             self.quota_file.write_text(json.dumps(data, indent=2, ensure_ascii=False, default=str))
         except Exception as exc:
             _log.warning("[quota] failed to save: %s", exc)
+
+    def _database_enabled(self) -> bool:
+        if os.environ.get("QUOTA_STATE_BACKEND", "").strip().lower() == "local_json":
+            return False
+        return self.use_database
+
+    def _production(self) -> bool:
+        return os.environ.get("APP_ENV", "development").strip().lower() == "production"
+
+    def _warn_if_needed(self, api_name: str, month: str) -> None:
+        used, limit = self.monthly_usage(api_name, month)
+        if limit and used > limit * 0.8:
+            _log.warning(
+                "[quota] %s usage %.0f%% of monthly limit (%d/%d)",
+                api_name,
+                used / limit * 100,
+                used,
+                limit,
+            )
 
 
 # Global instance
@@ -177,3 +230,9 @@ def _parse_int(value: Any) -> int | None:
         return int(str(value).strip())
     except (TypeError, ValueError):
         return None
+
+
+def _get_db():
+    from src.infrastructure.render_db import get_db
+
+    return get_db()
