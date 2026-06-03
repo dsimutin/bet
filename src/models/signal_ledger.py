@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
+from src.models.ledger_migrations import LEDGER_SCHEMA_VERSION
+
 SignalResult = Literal["win", "loss", "push", "void"]
 DeliveryStatus = Literal["registered", "dry_run", "sent", "failed", "blocked"]
 LedgerStatus = Literal["open", "settled", "void", "expired"]
@@ -280,6 +282,7 @@ class SignalLedger:
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "version": self.VERSION,
+            "ledger_schema_version": LEDGER_SCHEMA_VERSION,
             "saved_at_utc": datetime.now(timezone.utc).isoformat(),
             "entries": self._entries,
             "summary": self.summary(),

@@ -10,7 +10,8 @@ python scripts/rebuild_clean_feedback_metrics.py
 
 The script loads the existing ledger, preserves all entries, marks legacy tennis
 spreads/totals as `legacy_invalid=true` and `feedback_eligible=false`, then writes a
-JSON report in `data/reports/`.
+timestamped backup beside the local ledger before overwrite and a JSON report in
+`data/reports/`.
 
 Rollback is data-preserving: restore the previous ledger backup or remove migration
 marker fields from affected entries. Do not delete historical entries without an

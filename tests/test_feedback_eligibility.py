@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from src.models.feedback_policy import FeedbackPolicy, is_feedback_eligible
 
@@ -79,3 +80,8 @@ def test_cleanup_script_preserves_original_entries(monkeypatch, tmp_path, capsys
     assert captured["total_entries"] == 2
     assert captured["excluded_legacy_invalid_totals_spreads"] == 1
     assert list((tmp_path / "data" / "reports").glob("clean_feedback_metrics_*.json"))
+    backups = list(ledger_path.parent.glob("paper_signal_ledger.backup_*.json"))
+    assert len(backups) == 1
+    original = json.loads(backups[0].read_text(encoding="utf-8"))
+    assert "legacy_invalid" not in original["entries"]["legacy_total"]
+    assert captured["ledger_backup_path"] == str(Path("data/core") / backups[0].name)

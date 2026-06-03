@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from src.infrastructure.persistent_ledger import (
@@ -22,6 +24,41 @@ def test_development_can_use_local_json_backend(monkeypatch, tmp_path) -> None:
     monkeypatch.delenv("DATABASE_URL", raising=False)
     backend = get_ledger_backend(tmp_path / "ledger.json")
     assert isinstance(backend, LocalJsonLedgerBackend)
+
+
+def test_local_backend_auto_migrates_legacy_ledger(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("APP_ENV", "development")
+    ledger_path = tmp_path / "ledger.json"
+    ledger_path.write_text(
+        json.dumps({"entries": {"s1": {"market": "totals"}}}),
+        encoding="utf-8",
+    )
+
+    ledger = LocalJsonLedgerBackend(ledger_path).load()
+    saved = json.loads(ledger_path.read_text(encoding="utf-8"))
+
+    assert ledger.entries()["s1"]["legacy_invalid"] is True
+    assert saved["ledger_schema_version"] == 2
+    assert saved["entries"]["s1"]["legacy_invalid"] is True
+
+
+def test_supabase_backend_auto_migrates_through_authority(monkeypatch) -> None:
+    from src.infrastructure.persistent_ledger import SupabaseLedgerBackend
+
+    saved = []
+    monkeypatch.setattr(
+        "src.infrastructure.supabase_ledger.load_entries",
+        lambda: {"s1": {"market": "spreads"}},
+    )
+    monkeypatch.setattr(
+        "src.infrastructure.supabase_ledger.save_entries",
+        lambda entries: saved.append(entries),
+    )
+
+    ledger = SupabaseLedgerBackend().load()
+
+    assert ledger.entries()["s1"]["legacy_invalid"] is True
+    assert saved == [{"s1": ledger.entries()["s1"]}]
 
 
 def test_production_database_failure_is_fail_closed(monkeypatch, tmp_path) -> None:

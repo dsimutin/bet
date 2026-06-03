@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import logging
 import os
+import json
 from pathlib import Path
 from typing import Protocol
 
 from src.infrastructure import supabase_ledger
+from src.models.ledger_migrations import migrate_ledger_payload
 from src.models.signal_ledger import SignalLedger
 
 _log = logging.getLogger(__name__)
@@ -24,7 +26,20 @@ class LocalJsonLedgerBackend:
         self.path = path
 
     def load(self) -> SignalLedger:
-        return SignalLedger.load_or_create(self.path)
+        if not self.path.exists():
+            return SignalLedger()
+        raw = json.loads(self.path.read_text(encoding="utf-8"))
+        migrated, report = migrate_ledger_payload(raw)
+        ledger = SignalLedger(entries=migrated.get("entries", {}))
+        if migrated != raw:
+            self.save(ledger)
+            _log.info(
+                "Migrated local ledger %s to schema %s (%s legacy-invalid entries)",
+                self.path,
+                report.get("to_version"),
+                report.get("legacy_invalid_marked"),
+            )
+        return ledger
 
     def save(self, ledger: SignalLedger) -> None:
         ledger.save(self.path)
@@ -36,7 +51,16 @@ class LocalJsonLedgerBackend:
 class SupabaseLedgerBackend:
     def load(self) -> SignalLedger:
         entries = supabase_ledger.load_entries()
-        return SignalLedger(entries=entries)
+        migrated, report = migrate_ledger_payload({"entries": entries})
+        ledger = SignalLedger(entries=migrated.get("entries", {}))
+        if report.get("legacy_invalid_marked"):
+            self.save(ledger)
+            _log.info(
+                "Migrated Supabase ledger to schema %s (%s legacy-invalid entries)",
+                report.get("to_version"),
+                report.get("legacy_invalid_marked"),
+            )
+        return ledger
 
     def save(self, ledger: SignalLedger) -> None:
         supabase_ledger.save_entries(ledger.entries())
