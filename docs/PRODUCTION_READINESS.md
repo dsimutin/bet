@@ -20,6 +20,7 @@ This app is prepared only for a limited paper-trading pilot. It must run with
 - `ADMIN_API_TOKEN` configured.
 - `TELEGRAM_WEBHOOK_SECRET` configured before webhook setup.
 - `TELEGRAM_ALLOWED_CHAT_IDS` configured.
+- `QUOTA_STATE_BACKEND=database` so quota state survives process restarts.
 
 ## Limits
 
@@ -28,6 +29,8 @@ This app is prepared only for a limited paper-trading pilot. It must run with
 - Free Render has no production SLA. Use paid always-on infrastructure or a reliable
   external scheduler for production scheduling.
 - Local filesystem data on Render is a diagnostic mirror, not durable authority.
+- Local JSON quota state is development-only; production quota hard stops use the
+  metadata database and fail closed if usage cannot be read.
 - Model artifacts require a durable source: versioned repository artifacts, object
   storage, or Supabase Storage.
 - External credentials and provider availability cannot be fully verified locally.

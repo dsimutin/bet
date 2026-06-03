@@ -83,6 +83,8 @@ services:
         value: "25"
       - key: THE_ODDS_API_MIN_REMAINING_PRIORITY_REFRESH
         value: "50"
+      - key: QUOTA_STATE_BACKEND
+        value: "database"
 
       # Unified runtime schedule (UTC)
       - key: RUNTIME_SCAN_HOURS_UTC

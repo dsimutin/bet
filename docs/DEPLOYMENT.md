@@ -18,6 +18,7 @@ reliable scheduler.
 - `TELEGRAM_WEBHOOK_SECRET`
 - `TELEGRAM_ALLOWED_CHAT_IDS`
 - `PAPER_TRADING_ONLY=true`
+- `QUOTA_STATE_BACKEND=database`
 
 ## Quota Safety
 
@@ -29,6 +30,11 @@ Use these defaults unless a provider plan changes:
 - `EXOTIC_WATCHLIST_ODDS_MAX_AGE_SECONDS=14400`
 - `THE_ODDS_API_MIN_REMAINING_HARD_STOP=25`
 - `THE_ODDS_API_MIN_REMAINING_PRIORITY_REFRESH=50`
+- `QUOTA_STATE_BACKEND=database`
+
+Quota counters and provider `x-requests-*` headers are persisted in the metadata
+database. `QUOTA_STATE_BACKEND=local_json` is only a development/debug fallback;
+do not use it for production paper runs because it can reset quota state.
 
 ## First Pilot Check
 
