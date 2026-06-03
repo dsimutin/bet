@@ -1209,21 +1209,21 @@ def _validate_odds_api_key_in_background(
     providers_ok: list[str],
     providers_skip: list[str],
 ) -> None:
-    """Quick check: verify Odds API key via cached sports list (no extra quota cost)."""
+    """Classify Odds API availability from cache without spending extra quota."""
     try:
-        from src.services.runtime_odds import _fetch_active_sports
         from src.infrastructure import odds_cache
 
         cache_key = "sports:active-soccer"
         cached = odds_cache.get(cache_key)
         if cached is None:
-            _fetch_active_sports(api_key)  # warms cache as side effect
+            _log.info("[active] Odds API key validation skipped — sports cache unavailable")
+            return
 
-        _log.info("[active] Odds API key is VALID — no upcoming matches today")
+        _log.info("[active] Odds API key treated as valid from cached sports probe")
         if "Odds API" not in providers_ok:
             providers_ok.append("Odds API ✅ (ключ верный)")
     except Exception as exc:
-        _log.warning("[active] Odds API key validation failed: %s", exc)
+        _log.warning("[active] Odds API key validation failed: %s", _sanitize_error_text(str(exc)))
         if "Odds API" in providers_ok:
             providers_ok.remove("Odds API")
         providers_skip.append("Odds API ❌ ошибка ключа")
