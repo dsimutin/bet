@@ -85,7 +85,13 @@ def settle_tennis_from_sackmann(
         else:
             result = "win" if player_won else "loss"
 
-        ledger.update_result(signal_id, result=result, closing_odds=closing_odds)
+        ledger.update_result(
+            signal_id,
+            result=result,
+            closing_odds=closing_odds,
+            settlement_source="sackmann_or_live",
+            settlement_reason=f"tennis_{market}",
+        )
         settled += 1
 
         results.append(
@@ -221,40 +227,50 @@ def _settle_spread(
     player: str,
     player_won: bool,
     entry: dict[str, Any],
-) -> Literal["win", "loss"]:
+) -> Literal["win", "loss", "push", "void"]:
     """Settle a set-handicap bet.
 
-    handicap field: negative means giving sets (favourite), positive means receiving.
-    Win condition: (actual_sets_p1 - actual_sets_p2) + handicap > 0
+    `handicap` is from the selected player's bookmaker side. It covers when:
+    `(player_sets - opponent_sets) + handicap > 0`.
+
+    Examples: 2-0 with -1.5 wins; 2-1 with -1.5 loses; 1-2 with +1.5 wins;
+    2-0 with -2.0 pushes.
     """
     score_str = str(row.get("score", ""))
     parsed = _parse_score(score_str)
     if parsed is None:
-        return "loss"  # incomplete match, can't settle — treat as loss conservatively
+        return "void"
     winner_sets, loser_sets, _ = parsed
     player_sets = winner_sets if player_won else loser_sets
     opp_sets = loser_sets if player_won else winner_sets
     handicap = float(entry.get("handicap", 0))
     margin = (player_sets - opp_sets) + handicap
-    return "win" if margin > 0 else "loss"
+    if margin > 0:
+        return "win"
+    if margin == 0:
+        return "push"
+    return "loss"
 
 
 def _settle_total(
     row: dict[str, Any],
     entry: dict[str, Any],
-) -> Literal["win", "loss"]:
+) -> Literal["win", "loss", "push", "void"]:
     """Settle a total-games over/under bet."""
     score_str = str(row.get("score", ""))
     parsed = _parse_score(score_str)
     if parsed is None:
-        return "loss"
+        return "void"
     _, _, total_games = parsed
-    threshold = float(entry.get("handicap", entry.get("threshold", 0)))
+    threshold = float(
+        entry.get("total_threshold", entry.get("threshold", entry.get("handicap", 0)))
+    )
     is_over = str(entry.get("selection", "")).lower().startswith("over")
+    if total_games == threshold:
+        return "push"
     if is_over:
         return "win" if total_games > threshold else "loss"
-    else:
-        return "win" if total_games < threshold else "loss"
+    return "win" if total_games < threshold else "loss"
 
 
 def _pick_closing_odds(row: dict[str, Any], player_won: bool) -> float | None:
@@ -296,9 +312,7 @@ def _get_live_tennis_result_fallback(entry: dict[str, Any], api_key: str) -> dic
             return None
 
         try:
-            event_date = datetime.fromisoformat(
-                event_date_str.replace("Z", "+00:00")
-            ).date()
+            event_date = datetime.fromisoformat(event_date_str.replace("Z", "+00:00")).date()
         except ValueError:
             return None
 

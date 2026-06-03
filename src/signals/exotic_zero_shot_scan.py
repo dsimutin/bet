@@ -195,6 +195,7 @@ def _fetch_events(sport_key: str, api_key: str) -> list[dict[str, Any]]:
 
     try:
         from src.services.runtime_odds import _csv_env
+
         regions = _csv_env("FOOTBALL_ODDS_REGIONS", "eu")
         data, _headers = _fetch_odds(sport_key, api_key, regions, ["h2h"])
         odds_cache.set(cache_key, data, 8 * 3600)  # 8h cache — covers both daily scans
@@ -252,7 +253,7 @@ def _score_event(
 
     # Extract h2h odds from bookmakers
     h_odds, d_odds, a_odds, bookmaker_name = _best_h2h_odds(event)
-    if h_odds is None:
+    if h_odds is None or d_odds is None or a_odds is None:
         return None
 
     # Devig: compute fair market probabilities (multiplicative)
@@ -284,9 +285,12 @@ def _score_event(
     if edge_pct < _MIN_EDGE_PCT:
         return None
 
-    dataset_hash = "sha256:" + hashlib.sha256(
-        f"{sport_key}:{home_team}:{away_team}:{commence_time_raw}".encode()
-    ).hexdigest()[:12]
+    dataset_hash = (
+        "sha256:"
+        + hashlib.sha256(
+            f"{sport_key}:{home_team}:{away_team}:{commence_time_raw}".encode()
+        ).hexdigest()[:12]
+    )
 
     _RU = {"home": f"П1 ({home_team})", "draw": "Ничья", "away": f"П2 ({away_team})"}
 

@@ -78,9 +78,11 @@ def _load_json(path: Path) -> Any:
 
 
 def _ledger_summary() -> dict[str, Any]:
-    ledger_path = _DATA / "core" / "paper_signal_ledger.json"
-    data = _load_json(ledger_path)
-    if data is None:
+    try:
+        from src.infrastructure.persistent_ledger import load_ledger
+
+        return load_ledger(_DATA / "core" / "paper_signal_ledger.json").summary()
+    except Exception:
         return {
             "total_signals": 0,
             "open_signals": 0,
@@ -89,15 +91,15 @@ def _ledger_summary() -> dict[str, Any]:
             "roi_pct": 0,
             "pnl_units": 0,
         }
-    return data.get("summary", {})
 
 
 def _recent_signals(n: int = 20) -> list[dict[str, Any]]:
-    ledger_path = _DATA / "core" / "paper_signal_ledger.json"
-    data = _load_json(ledger_path)
-    if data is None:
+    try:
+        from src.infrastructure.persistent_ledger import load_ledger
+
+        entries = load_ledger(_DATA / "core" / "paper_signal_ledger.json").entries()
+    except Exception:
         return []
-    entries = data.get("entries", {})
     rows = sorted(
         entries.values(),
         key=lambda e: e.get("ledger_created_at_utc", ""),

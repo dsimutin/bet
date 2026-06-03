@@ -37,9 +37,7 @@ class APIQuotaMonitor:
         self._save(data)
 
         # Check if approaching limit
-        month_total = sum(
-            v.get(api_name, 0) for k, v in data.items() if k.startswith(today[:7])
-        )
+        month_total = sum(v.get(api_name, 0) for k, v in data.items() if k.startswith(today[:7]))
         limit = self.LIMITS.get(api_name, {}).get("free", float("inf"))
 
         if month_total > limit * 0.8:
@@ -50,6 +48,10 @@ class APIQuotaMonitor:
                 month_total,
                 limit,
             )
+
+    def can_request(self, api_name: str, min_remaining: int) -> bool:
+        used, limit = self.monthly_usage(api_name)
+        return (limit - used) >= min_remaining
 
     def monthly_usage(self, api_name: str, month: str = "") -> tuple[int, int]:
         """Get (used, limit) for month (YYYY-MM)."""
@@ -87,9 +89,7 @@ class APIQuotaMonitor:
     def _save(self, data: dict[str, Any]) -> None:
         """Save quota data to file."""
         try:
-            self.quota_file.write_text(
-                json.dumps(data, indent=2, ensure_ascii=False, default=str)
-            )
+            self.quota_file.write_text(json.dumps(data, indent=2, ensure_ascii=False, default=str))
         except Exception as exc:
             _log.warning("[quota] failed to save: %s", exc)
 
@@ -101,6 +101,18 @@ _monitor = APIQuotaMonitor()
 def record_odds_api_request(calls: int = 1) -> None:
     """Record The Odds API call."""
     _monitor.record_request("the_odds_api", calls)
+
+
+def can_make_odds_api_request(*, priority_refresh: bool = False) -> bool:
+    import os
+
+    threshold_name = (
+        "THE_ODDS_API_MIN_REMAINING_PRIORITY_REFRESH"
+        if priority_refresh
+        else "THE_ODDS_API_MIN_REMAINING_HARD_STOP"
+    )
+    min_remaining = int(os.environ.get(threshold_name, "50" if priority_refresh else "25"))
+    return _monitor.can_request("the_odds_api", min_remaining)
 
 
 def record_apifootball_request(calls: int = 1) -> None:

@@ -108,8 +108,10 @@ def check_updates() -> None:
         for upd in updates:
             msg = upd.get("message", {})
             chat = msg.get("chat", {})
-            print(f"       update_id={upd['update_id']} chat_id={chat.get('id')} "
-                  f"type={chat.get('type')} text={msg.get('text', '')[:40]!r}")
+            print(
+                f"       update_id={upd['update_id']} chat_id={chat.get('id')} "
+                f"type={chat.get('type')} text={msg.get('text', '')[:40]!r}"
+            )
 
 
 def send_test_message(text: str) -> bool:
@@ -126,14 +128,18 @@ def send_test_message(text: str) -> bool:
     result = _api("sendMessage", payload)
     if result.get("ok"):
         msg = result["result"]
-        print(f"[OK]   Delivered — message_id={msg.get('message_id')} "
-              f"chat={msg.get('chat', {}).get('id')}")
+        print(
+            f"[OK]   Delivered — message_id={msg.get('message_id')} "
+            f"chat={msg.get('chat', {}).get('id')}"
+        )
         return True
     else:
         print(f"[FAIL] sendMessage: {result.get('description')}")
         err = result.get("error_code")
         if err == 400:
-            print("       Hint: check chat_id format (should be negative for groups, e.g. -100xxxxxxx)")
+            print(
+                "       Hint: check chat_id format (should be negative for groups, e.g. -100xxxxxxx)"
+            )
         elif err == 403:
             print("       Hint: bot was blocked or not added to this chat")
         elif err == 401:
@@ -152,9 +158,15 @@ def delete_webhook() -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Telegram bot diagnostics")
-    parser.add_argument("--send-test", metavar="TEXT", help="Send a test message to TELEGRAM_CHAT_ID")
-    parser.add_argument("--check-webhook", action="store_true", help="Check and display webhook state")
-    parser.add_argument("--delete-webhook", action="store_true", help="Delete active webhook (enable polling)")
+    parser.add_argument(
+        "--send-test", metavar="TEXT", help="Send a test message to TELEGRAM_CHAT_ID"
+    )
+    parser.add_argument(
+        "--check-webhook", action="store_true", help="Check and display webhook state"
+    )
+    parser.add_argument(
+        "--delete-webhook", action="store_true", help="Delete active webhook (enable polling)"
+    )
     parser.add_argument("--check-updates", action="store_true", help="Show pending getUpdates")
     args = parser.parse_args()
 

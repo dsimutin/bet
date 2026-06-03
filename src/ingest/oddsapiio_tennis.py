@@ -25,8 +25,16 @@ _BASE = "https://api2.odds-api.io/v3"
 
 # Well-known bookmaker slugs on odds-api.io (in preference order for devigging)
 _PREFERRED_BOOKMAKERS = [
-    "pinnacle", "bet365", "betway", "unibet", "william-hill",
-    "1xbet", "betfair", "marathonbet", "bwin", "betsson",
+    "pinnacle",
+    "bet365",
+    "betway",
+    "unibet",
+    "william-hill",
+    "1xbet",
+    "betfair",
+    "marathonbet",
+    "bwin",
+    "betsson",
 ]
 
 
@@ -73,7 +81,9 @@ def _get_available_bookmakers() -> list[str]:
         bks = data if isinstance(data, list) else data.get("data", data.get("results", []))
         slugs = []
         for bk in bks:
-            slug = str(bk.get("slug") or bk.get("key") or bk.get("name", "")).lower().replace(" ", "-")
+            slug = (
+                str(bk.get("slug") or bk.get("key") or bk.get("name", "")).lower().replace(" ", "-")
+            )
             if slug:
                 slugs.append(slug)
         # Prefer known sharp bookmakers for devigging
@@ -100,9 +110,7 @@ def _choose_bookmakers() -> list[str]:
 
 def _player_name(event: dict[str, Any], side: str) -> str:
     """Extract player name, handle both 'home'/'away' and 'home_team'/'away_team'."""
-    return str(
-        event.get(f"{side}_team") or event.get(side) or ""
-    ).strip()
+    return str(event.get(f"{side}_team") or event.get(side) or "").strip()
 
 
 def _market_key(market_name: str) -> str:
@@ -169,11 +177,13 @@ def _convert_to_odds_api_format(
                 markets_out.append({"key": mk_key, "outcomes": outcomes_out})
 
         if markets_out:
-            bookmakers_out.append({
-                "key": bk_key,
-                "title": bk_name,
-                "markets": markets_out,
-            })
+            bookmakers_out.append(
+                {
+                    "key": bk_key,
+                    "title": bk_name,
+                    "markets": markets_out,
+                }
+            )
 
     if not bookmakers_out:
         return None
@@ -214,7 +224,9 @@ def fetch_tennis_events_as_odds_api_format() -> list[dict[str, Any]]:
 
     # Handle wrapped responses
     if isinstance(events_raw, dict):
-        events_raw = events_raw.get("data") or events_raw.get("results") or events_raw.get("events") or []
+        events_raw = (
+            events_raw.get("data") or events_raw.get("results") or events_raw.get("events") or []
+        )
     if not isinstance(events_raw, list):
         _log.warning("[oddsapiio] unexpected /events response type: %s", type(events_raw).__name__)
         return _fetch_via_leagues(bookmakers_str)
@@ -256,10 +268,13 @@ def _fetch_odds_for_events(
         # Fetch odds separately
         odds_raw: dict[str, Any] = {}
         try:
-            resp = _fetch("/odds", {
-                "eventId": str(event_id),
-                "bookmakers": bookmakers_str,
-            })
+            resp = _fetch(
+                "/odds",
+                {
+                    "eventId": str(event_id),
+                    "bookmakers": bookmakers_str,
+                },
+            )
             if isinstance(resp, dict):
                 odds_raw = resp
             elif isinstance(resp, list) and resp:
@@ -350,7 +365,12 @@ def diagnostic_info() -> dict[str, Any]:
     try:
         events_raw = _fetch("/events", {"sport": "tennis"})
         if isinstance(events_raw, dict):
-            events_raw = events_raw.get("data") or events_raw.get("results") or events_raw.get("events") or []
+            events_raw = (
+                events_raw.get("data")
+                or events_raw.get("results")
+                or events_raw.get("events")
+                or []
+            )
         if isinstance(events_raw, list):
             info["events_count"] = len(events_raw)
             info["events_sample"] = [

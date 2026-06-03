@@ -108,7 +108,9 @@ def scan_tennis_signals(
         _log.debug("[tennis] Rankings unavailable: %s", exc)
 
     # Inject live serve stats from Tennis Abstract (current-season accuracy boost)
-    if markov_model is not None:
+    if markov_model is not None and (
+        _bool_env("ENABLE_TENNIS_SPREADS", False) or _bool_env("ENABLE_TENNIS_TOTALS", False)
+    ):
         try:
             from src.ingest.tennis_abstract import fetch_serve_stats
 
@@ -249,7 +251,17 @@ def scan_tennis_signals(
         if alt_signals:
             _log.info("[tennis] Alt markets (spreads+totals): %d signals", len(alt_signals))
 
-    # Deduplicate: keep only the best bookmaker per (event, player) pair
+    from src.models.timestamp_policy import verify_pre_match_timestamps
+
+    generated_now = datetime.now(timezone.utc).isoformat()
+    for signal in signals:
+        signal["timestamp_verification_status"] = verify_pre_match_timestamps(signal)
+        signal.setdefault(
+            "odds_snapshot_age_seconds", _age_seconds(signal.get("snapshot_ts_utc"), generated_now)
+        )
+        signal.setdefault("odds_freshness_tier", "priority")
+
+    # Deduplicate: keep only the best bookmaker for each canonical bet.
     signals = _deduplicate_signals(signals)
 
     duration = time.perf_counter() - t0
@@ -284,15 +296,14 @@ def scan_tennis_signals(
 
 
 def _deduplicate_signals(signals: list[dict]) -> list[dict]:
-    """Keep one signal per (event_id, player) — the bookmaker with highest edge.
+    """Keep one signal per canonical bet and merge identical alt-book lines.
 
     Also attaches alt_books list (other bookmakers with edge) to the best signal
     so a single Telegram message can show all available lines.
     """
-    # Group by (event_id, player)
     groups: dict[tuple, list[dict]] = {}
     for sig in signals:
-        key = (sig.get("event_id", ""), sig.get("player", ""))
+        key = _dedupe_key(sig)
         groups.setdefault(key, []).append(sig)
 
     result = []
@@ -312,6 +323,26 @@ def _deduplicate_signals(signals: list[dict]) -> list[dict]:
         result.append(best)
 
     return result
+
+
+def _dedupe_key(sig: dict[str, Any]) -> tuple[Any, ...]:
+    market = str(sig.get("market", "h2h")).lower()
+    event_id = sig.get("event_id", "")
+    if market == "totals":
+        return (
+            event_id,
+            market,
+            str(sig.get("selection", "")).split()[0].lower(),
+            float(sig.get("total_threshold", 0.0) or 0.0),
+        )
+    if market == "spreads":
+        return (
+            event_id,
+            market,
+            sig.get("player", sig.get("selection", "")),
+            float(sig.get("handicap", 0.0) or 0.0),
+        )
+    return (event_id, "h2h", sig.get("player", sig.get("selection", "")), None)
 
 
 def _check_event(
@@ -395,6 +426,12 @@ def _check_event(
                 opp_rank = ctx.get("p2_rank" if is_p1 else "p1_rank")
                 # Extract match_date from commence_time for settlement matching
                 match_date = commence.split("T")[0] if commence else None
+                snapshot_ts = str(
+                    event.get("_odds_snapshot_ts_utc")
+                    or market.get("last_update")
+                    or bookmaker.get("last_update")
+                    or datetime.now(timezone.utc).isoformat()
+                )
                 signals.append(
                     {
                         "signal_id": f"ten_{event_id[:8]}_{book_key}_{player[:4].replace(' ', '')}",
@@ -406,6 +443,15 @@ def _check_event(
                         "event_id": event_id,
                         "match_date": match_date,
                         "event_time_utc": commence,
+                        "snapshot_ts_utc": snapshot_ts,
+                        "source_last_update_utc": market.get("last_update")
+                        or bookmaker.get("last_update")
+                        or "",
+                        "source_event_id": event_id,
+                        "source_sport_key": event.get("_sport_key", event.get("sport_key", "")),
+                        "source_bookmaker_key": book_key,
+                        "source_bookmaker_title": bookmaker.get("title", ""),
+                        "source_market_key": "h2h",
                         "commence_time": commence,
                         "bookmaker": book_key,
                         "entry_odds": round(entry_odds, 3),
@@ -499,7 +545,7 @@ def _generate_alt_market_signals(
             book_key = bookmaker.get("key", "")
             for market in bookmaker.get("markets", []):
                 mkt_key = market.get("key", "")
-                if mkt_key == "spreads":
+                if mkt_key == "spreads" and _bool_env("ENABLE_TENNIS_SPREADS", False):
                     _process_spreads(
                         market,
                         player1,
@@ -519,7 +565,7 @@ def _generate_alt_market_signals(
                         dataset_hash,
                         signals,
                     )
-                elif mkt_key == "totals":
+                elif mkt_key == "totals" and _bool_env("ENABLE_TENNIS_TOTALS", False):
                     _process_totals(
                         market,
                         player1,
@@ -628,6 +674,8 @@ def _process_spreads(
                 "signal_id": f"ten_hcap_{event_id[:8]}_{book_key}_{bet_player[:4].replace(' ', '')}",
                 "sport": "tennis",
                 "market": "spreads",
+                "experimental_market": True,
+                "feedback_eligible": False,
                 "market_ru": "Фора по сетам",
                 "tour": tour,
                 "player": bet_player,
@@ -638,6 +686,10 @@ def _process_spreads(
                 "event_id": event_id,
                 "match_date": match_date,
                 "event_time_utc": commence,
+                "snapshot_ts_utc": str(
+                    market.get("last_update") or datetime.now(timezone.utc).isoformat()
+                ),
+                "source_market_key": "spreads",
                 "commence_time": commence,
                 "bookmaker": book_key,
                 "entry_odds": round(price, 3),
@@ -721,16 +773,22 @@ def _process_totals(
                 "signal_id": f"ten_tot_{event_id[:8]}_{book_key}_{'ov' if is_over else 'un'}{int(threshold)}",
                 "sport": "tennis",
                 "market": "totals",
+                "experimental_market": True,
+                "feedback_eligible": False,
                 "market_ru": "Тотал геймов",
                 "tour": tour,
                 "player": player1,
                 "opponent": player2,
-                "selection": f"{'Over' if is_over else 'Under'} {threshold}",
+                "selection": "over" if is_over else "under",
                 "selection_ru": f"{direction_ru} {threshold} геймов",
                 "surface": surface,
                 "event_id": event_id,
                 "match_date": match_date,
                 "event_time_utc": commence,
+                "snapshot_ts_utc": str(
+                    market.get("last_update") or datetime.now(timezone.utc).isoformat()
+                ),
+                "source_market_key": "totals",
                 "commence_time": commence,
                 "bookmaker": book_key,
                 "entry_odds": round(price, 3),
@@ -770,6 +828,28 @@ def _names_similar(a: str, b: str) -> bool:
     if a.split()[-1] == b.split()[-1] and len(a.split()[-1]) > 3:
         return True
     return False
+
+
+def _bool_env(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _age_seconds(snapshot_raw: Any, now_raw: Any) -> int | None:
+    try:
+        snapshot = datetime.fromisoformat(str(snapshot_raw).replace("Z", "+00:00"))
+        now = datetime.fromisoformat(str(now_raw).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if snapshot.tzinfo is None:
+        snapshot = snapshot.replace(tzinfo=timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    return max(
+        0, int((now.astimezone(timezone.utc) - snapshot.astimezone(timezone.utc)).total_seconds())
+    )
 
 
 def _resolve_player_name(

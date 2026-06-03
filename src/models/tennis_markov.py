@@ -578,15 +578,17 @@ class TennisMarkovModel:
     ) -> float:
         """P(player1 covers set handicap).
 
-        handicap > 0 means player1 gives sets (favourite, e.g. -1.5).
-        Returns P(player1 wins by more than |handicap| sets).
-        E.g. handicap=-1.5: P(player1 wins 2-0 in BO3).
+        `handicap` is the bookmaker line from player1's side. The bet covers when:
+        `(player1_sets - opponent_sets) + handicap > 0`.
+
+        Examples: -1.5 requires a BO3 2-0 win; +1.5 covers a BO3 1-2 loss;
+        -2.0 on a 2-0 BO3 result is a push, not a win.
         """
         dist = self.predict_set_score_probs(player1, player2, surface, best_of)
         p_cover = 0.0
         for (sa, sb), prob in dist.items():
             net = sa - sb  # positive means player1 is ahead
-            if net - handicap > 0:
+            if net + handicap > 0:
                 p_cover += prob
         return max(0.05, min(0.95, p_cover))
 

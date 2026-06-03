@@ -622,7 +622,9 @@ def _send_tennis_alerts(signals: list[dict]) -> None:
     chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
     dry_run = not (token and chat_id)
 
-    config = TelegramConfig(bot_token=token, chat_id=chat_id, dry_run=dry_run)
+    config = TelegramConfig(
+        bot_token=token, chat_id=chat_id, dry_run=dry_run, max_message_length=4096
+    )
     sender = TelegramSender(config)
 
     for sig in signals[:5]:  # cap to 5 per scan to avoid spam
@@ -1018,7 +1020,9 @@ def _send_signal_alerts(signals: list[dict]) -> int:
             )
         return 0
 
-    config = TelegramConfig(bot_token=token, chat_id=chat_id, dry_run=False)
+    config = TelegramConfig(
+        bot_token=token, chat_id=chat_id, dry_run=False, max_message_length=4096
+    )
     sender = TelegramSender(config)
     sent = 0
     for sig in signals:
@@ -1206,7 +1210,7 @@ def _validate_odds_api_key_in_background(
         _log.warning("[active] Odds API key validation failed: %s", exc)
         if "Odds API" in providers_ok:
             providers_ok.remove("Odds API")
-        providers_skip.append(f"Odds API ❌ ошибка ключа ({code})")
+        providers_skip.append("Odds API ❌ ошибка ключа")
 
 
 def _determine_no_signal_reason(api_key: str, providers_skip: list[str]) -> str:

@@ -31,9 +31,9 @@ _FORM_PTS = {"W": 1.0, "D": 0.5, "L": 0.0}
 
 # How much fatigue adjusts the attack probability
 _FATIGUE_ADJ = {
-    "severe": 0.93,   # < 3 days rest
-    "mild": 0.97,     # 3–4 days
-    "none": 1.0,      # ≥ 5 days
+    "severe": 0.93,  # < 3 days rest
+    "mild": 0.97,  # 3–4 days
+    "none": 1.0,  # ≥ 5 days
 }
 
 # Max probability adjustment from recent form: ±0.05
@@ -93,16 +93,16 @@ def compute_match_context(
     fatigue_away = _fatigue_level(rest_away)
 
     # Probability adjustment: form above/below 0.5 shifts probability ±FORM_MAX_ADJ
-    prob_adj_home = round((form_home - 0.5) * 2 * _FORM_MAX_ADJ, 4) if form_home is not None else 0.0
-    prob_adj_away = round((form_away - 0.5) * 2 * _FORM_MAX_ADJ, 4) if form_away is not None else 0.0
+    prob_adj_home = (
+        round((form_home - 0.5) * 2 * _FORM_MAX_ADJ, 4) if form_home is not None else 0.0
+    )
+    prob_adj_away = (
+        round((form_away - 0.5) * 2 * _FORM_MAX_ADJ, 4) if form_away is not None else 0.0
+    )
 
     # Fatigue further drags down probability
-    fatigue_drag_home = {
-        "severe": -0.05, "mild": -0.02, "none": 0.0
-    }.get(fatigue_home, 0.0)
-    fatigue_drag_away = {
-        "severe": -0.05, "mild": -0.02, "none": 0.0
-    }.get(fatigue_away, 0.0)
+    fatigue_drag_home = {"severe": -0.05, "mild": -0.02, "none": 0.0}.get(fatigue_home, 0.0)
+    fatigue_drag_away = {"severe": -0.05, "mild": -0.02, "none": 0.0}.get(fatigue_away, 0.0)
 
     prob_adj_home = round(prob_adj_home + fatigue_drag_home, 4)
     prob_adj_away = round(prob_adj_away + fatigue_drag_away, 4)
@@ -124,6 +124,7 @@ def compute_match_context(
 def apply_context_to_signal(signal: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
     """Merge context into signal and adjust model probability if home/away selection."""
     signal = {**signal, **{f"ctx_{k}": v for k, v in ctx.items()}}
+    signal["injuries_context_mode"] = signal.get("injuries_context_mode", "informational_only")
 
     selection = str(signal.get("selection", "")).lower()
     prob = signal.get("model_probability", signal.get("model_prob"))
@@ -139,7 +140,9 @@ def apply_context_to_signal(signal: dict[str, Any], ctx: dict[str, Any]) -> dict
 
     if adj != 0.0:
         adjusted = max(0.05, min(0.95, float(prob) + adj))
-        signal["model_probability"] = round(adjusted, 4)
+        from src.models.production_signal_engine import recompute_signal_metrics
+
+        signal = recompute_signal_metrics(signal, adjusted_probability=adjusted)
         signal["context_adj"] = adj
 
     return signal

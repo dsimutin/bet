@@ -625,22 +625,19 @@ python -m src.cron.run_settle
 ### Проверка готовности к релизу
 
 ```bash
-# 1. Syntax check
-python -m compileall src/ -q
+uv sync --extra dev
+uv run --extra dev pytest -q
+uv run --extra dev mypy src
+uv run --extra dev black --check src tests
+python scripts/health_check.py
+```
 
-# 2. Import check
-python -c "from src.web.health_app import app; print('OK')"
+После деплоя:
 
-# 3. Unit tests
-pytest tests/test_release_readiness.py -v
-
-# 4. Full test suite
-pytest tests/ -v -m unit
-
-# 5. Health endpoint (после деплоя)
+```bash
 curl https://your-app.onrender.com/health
-curl https://your-app.onrender.com/health/readiness
-curl https://your-app.onrender.com/health/all
+curl https://your-app.onrender.com/ready
+curl -H "Authorization: Bearer $ADMIN_API_TOKEN" https://your-app.onrender.com/health/all
 ```
 
 ### Telegram уведомления — проверка
@@ -652,6 +649,20 @@ python -m src.cron.run_signals
 # Реальная отправка (с токеном)
 TELEGRAM_BOT_TOKEN=xxx TELEGRAM_CHAT_ID=yyy python -m src.cron.run_signals
 ```
+
+## Production Paper Pilot Constraints
+
+- `PAPER_TRADING_ONLY=true` is mandatory. The app must not place real bets.
+- Production ledger authority is Supabase/PostgreSQL. Local JSON is a diagnostic mirror only.
+- Public liveness is only `GET /health`; deep health, trigger, debug, and webhook setup
+  routes require `Authorization: Bearer $ADMIN_API_TOKEN`.
+- Telegram webhook requests must include `X-Telegram-Bot-Api-Secret-Token`.
+- Tennis spreads/totals are disabled by default and remain experimental.
+- Injuries are informational-only until calibrated and backtested.
+- Free Render is development / limited paper pilot infrastructure without SLA.
+
+See `docs/PRODUCTION_READINESS.md`, `docs/DEPLOYMENT.md`,
+`docs/LEDGER_MIGRATION.md`, and `docs/MODEL_LIMITATIONS.md`.
 
 ---
 

@@ -440,8 +440,8 @@ class TestSchedulerStates:
             running, n_jobs = asyncio.run(_check())
             assert running is True
             assert (
-                n_jobs == 8
-            )  # signal_scan, settlement, today_digest, today_digest_refresh, training_check, keep_alive, tennis_refresh, tennis_retrain
+                n_jobs == 7
+            )  # signal_scan, settlement, today digests, training_check, tennis_refresh, tennis_retrain
 
     def test_scheduler_logs_next_run_times(self, caplog) -> None:
         import asyncio
@@ -495,6 +495,7 @@ class TestHealthActiveEndpoint:
                 "TELEGRAM_CHAT_ID": "-1001234" if active_mode == "true" else "",
                 "TELEGRAM_STATUS_REPORTS_ENABLED": "true",
                 "TELEGRAM_SIGNAL_ALERTS_ENABLED": "true",
+                "ADMIN_API_TOKEN": "test-admin",
             },
             clear=False,
         ):
@@ -504,7 +505,9 @@ class TestHealthActiveEndpoint:
 
             importlib.reload(ha)
             client = TestClient(ha.app)
-            return client.get("/health/active").json()
+            return client.get(
+                "/health/active", headers={"Authorization": "Bearer test-admin"}
+            ).json()
 
     def test_returns_telegram_section(self, tmp_path) -> None:
         data = self._get_active()
@@ -521,13 +524,16 @@ class TestHealthActiveEndpoint:
     def test_telegram_token_present_false_when_missing(self) -> None:
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("TELEGRAM_BOT_TOKEN", None)
+            os.environ["ADMIN_API_TOKEN"] = "test-admin"
             from fastapi.testclient import TestClient
             import importlib
             import src.web.health_app as ha
 
             importlib.reload(ha)
             client = TestClient(ha.app)
-            data = client.get("/health/active").json()
+            data = client.get(
+                "/health/active", headers={"Authorization": "Bearer test-admin"}
+            ).json()
         assert data["telegram"]["bot_token_present"] is False
 
     def test_last_delivery_status_from_file(self, tmp_path) -> None:
@@ -542,13 +548,16 @@ class TestHealthActiveEndpoint:
             )
         )
         with patch("src.web.health_app.REPORTS_DIR", tmp_path):
+            os.environ["ADMIN_API_TOKEN"] = "test-admin"
             from fastapi.testclient import TestClient
             import importlib
             import src.web.health_app as ha
 
             importlib.reload(ha)
             client = TestClient(ha.app)
-            data = client.get("/health/active").json()
+            data = client.get(
+                "/health/active", headers={"Authorization": "Bearer test-admin"}
+            ).json()
         assert data["telegram"]["last_delivery_status"] == "sent"
 
 

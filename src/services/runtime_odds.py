@@ -12,6 +12,7 @@ import logging
 import os
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
 from typing import Any
 
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
@@ -22,7 +23,7 @@ _log = logging.getLogger(__name__)
 _BASE = "https://api.the-odds-api.com/v4"
 
 
-def _should_retry_request(exc: Exception) -> bool:
+def _should_retry_request(exc: BaseException) -> bool:
     """Retry on transient errors, but not on quota exhaustion (HTTP 429)."""
     if isinstance(exc, urllib.error.HTTPError):
         return exc.code != 429
@@ -33,28 +34,110 @@ def _csv_env(name: str, default: str) -> list[str]:
     return [item.strip() for item in os.environ.get(name, default).split(",") if item.strip()]
 
 
-def _ttl_seconds() -> int:
-    # Default 28800s (8h) so that scans at 7:00 and 15:00 UTC share one cache window.
-    # Set ODDS_CACHE_TTL_SECONDS to override. Minimum 300s enforced.
+def _int_seconds(name: str, default: int, minimum: int = 1) -> int:
     try:
-        return max(int(os.environ.get("ODDS_CACHE_TTL_SECONDS", "28800")), 300)
+        return max(int(os.environ.get(name, str(default))), minimum)
+    except ValueError:
+        return default
+
+
+def _cache_storage_ttl_seconds() -> int:
+    # Backward-compatible alias, but runtime freshness is checked separately.
+    try:
+        return max(
+            int(
+                os.environ.get(
+                    "CACHE_STORAGE_TTL_SECONDS", os.environ.get("ODDS_CACHE_TTL_SECONDS", "28800")
+                )
+            ),
+            300,
+        )
     except ValueError:
         return 28800
+
+
+def _priority_max_age_seconds() -> int:
+    return _int_seconds("PRIORITY_ODDS_MAX_AGE_SECONDS", 900, minimum=60)
+
+
+def _watchlist_max_age_seconds() -> int:
+    return _int_seconds("WATCHLIST_ODDS_MAX_AGE_SECONDS", 3600, minimum=60)
+
+
+def _wrap_snapshot(events: list[dict[str, Any]], fetched_at: str | None = None) -> dict[str, Any]:
+    return {
+        "events": events,
+        "fetched_at_utc": fetched_at or datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def _unwrap_snapshot(value: Any) -> tuple[list[dict[str, Any]], str | None]:
+    if isinstance(value, dict) and isinstance(value.get("events"), list):
+        return list(value["events"]), str(value.get("fetched_at_utc") or "")
+    if isinstance(value, list):
+        return value, None
+    return [], None
+
+
+def _annotate_snapshot(
+    events: list[dict[str, Any]], fetched_at: str | None
+) -> list[dict[str, Any]]:
+    if not fetched_at:
+        fetched_at = datetime.now(timezone.utc).isoformat()
+    annotated: list[dict[str, Any]] = []
+    for event in events:
+        enriched = dict(event)
+        enriched["_odds_snapshot_ts_utc"] = fetched_at
+        annotated.append(enriched)
+    return annotated
+
+
+def _snapshot_age_seconds(fetched_at: str | None) -> float | None:
+    if not fetched_at:
+        return None
+    try:
+        dt = datetime.fromisoformat(fetched_at.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - dt.astimezone(timezone.utc)).total_seconds()
+
+
+def _freshness_tier(fetched_at: str | None, *, exotic: bool = False) -> str:
+    age = _snapshot_age_seconds(fetched_at)
+    if age is None:
+        return "stale_blocked"
+    if not exotic and age <= _priority_max_age_seconds():
+        return "priority"
+    max_watch = (
+        _int_seconds("EXOTIC_WATCHLIST_ODDS_MAX_AGE_SECONDS", 14400, minimum=60)
+        if exotic
+        else _watchlist_max_age_seconds()
+    )
+    if age <= max_watch:
+        return "watchlist"
+    return "stale_blocked"
 
 
 def get_football_h2h_odds(sport_key: str, api_key: str) -> list[dict[str, Any]]:
     """Return cached live football h2h odds for one league."""
     regions = _csv_env("FOOTBALL_ODDS_REGIONS", "eu")
     cache_key = f"odds:football:{sport_key}:regions={','.join(regions)}:markets=h2h"
-    cached = odds_cache.get(cache_key)
-    if isinstance(cached, list):
-        _log.info("[runtime-odds] football cache hit %s (%d events)", sport_key, len(cached))
-        return cached
+    cached_events, cached_at = _unwrap_snapshot(odds_cache.get(cache_key))
+    if cached_events and _freshness_tier(cached_at) == "priority":
+        _log.info(
+            "[runtime-odds] football priority cache hit %s (%d events)",
+            sport_key,
+            len(cached_events),
+        )
+        return _annotate_snapshot(cached_events, cached_at)
 
     data, headers = _fetch_odds(sport_key, api_key, regions, ["h2h"])
-    odds_cache.set(cache_key, data, _ttl_seconds())
+    fetched_at = datetime.now(timezone.utc).isoformat()
+    odds_cache.set(cache_key, _wrap_snapshot(data, fetched_at), _cache_storage_ttl_seconds())
     _log_quota("football", sport_key, headers, len(data))
-    return data
+    return _annotate_snapshot(data, fetched_at)
 
 
 def get_tennis_h2h_events(api_key: str) -> list[dict[str, Any]]:
@@ -68,19 +151,31 @@ def get_tennis_h2h_events(api_key: str) -> list[dict[str, Any]]:
     """
     # Primary: odds-api.io when ODDS_API_IO_KEY is configured
     try:
-        from src.ingest.oddsapiio_tennis import is_configured as io_ok, fetch_tennis_events_as_odds_api_format
+        from src.ingest.oddsapiio_tennis import (
+            is_configured as io_ok,
+            fetch_tennis_events_as_odds_api_format,
+        )
+
         if io_ok():
             cache_key = "odds:tennis:oddsapiio:h2h"
-            cached = odds_cache.get(cache_key)
-            if isinstance(cached, list):
-                _log.info("[runtime-odds] tennis cache hit via odds-api.io (%d events)", len(cached))
-                return cached
-            events = fetch_tennis_events_as_odds_api_format()
-            if events:
-                odds_cache.set(cache_key, events, _ttl_seconds())
-                _log.info("[runtime-odds] tennis odds-api.io: %d events cached", len(events))
-                return events
-            _log.warning("[runtime-odds] odds-api.io returned no tennis events — falling back to The Odds API")
+            cached_events, cached_at = _unwrap_snapshot(odds_cache.get(cache_key))
+            if cached_events and _freshness_tier(cached_at) == "priority":
+                _log.info(
+                    "[runtime-odds] tennis cache hit via odds-api.io (%d events)",
+                    len(cached_events),
+                )
+                return _annotate_snapshot(cached_events, cached_at)
+            io_events = fetch_tennis_events_as_odds_api_format()
+            if io_events:
+                fetched_at = datetime.now(timezone.utc).isoformat()
+                odds_cache.set(
+                    cache_key, _wrap_snapshot(io_events, fetched_at), _cache_storage_ttl_seconds()
+                )
+                _log.info("[runtime-odds] tennis odds-api.io: %d events cached", len(io_events))
+                return _annotate_snapshot(io_events, fetched_at)
+            _log.warning(
+                "[runtime-odds] odds-api.io returned no tennis events — falling back to The Odds API"
+            )
     except Exception as exc:
         _log.warning("[runtime-odds] odds-api.io tennis failed: %s — falling back", exc)
 
@@ -94,17 +189,23 @@ def get_tennis_h2h_events(api_key: str) -> list[dict[str, Any]]:
 
     for sport_key in keys:
         cache_key = f"odds:tennis:{sport_key}:regions={','.join(regions)}:markets=h2h"
-        cached = odds_cache.get(cache_key)
-        if isinstance(cached, list):
-            data = cached
+        cached_events, cached_at = _unwrap_snapshot(odds_cache.get(cache_key))
+        if cached_events and _freshness_tier(cached_at) == "priority":
+            data = _annotate_snapshot(cached_events, cached_at)
             _log.info("[runtime-odds] tennis cache hit %s (%d events)", sport_key, len(data))
         else:
             try:
                 data, headers = _fetch_odds(sport_key, api_key, regions, ["h2h"])
-                odds_cache.set(cache_key, data, _ttl_seconds())
+                fetched_at = datetime.now(timezone.utc).isoformat()
+                odds_cache.set(
+                    cache_key, _wrap_snapshot(data, fetched_at), _cache_storage_ttl_seconds()
+                )
+                data = _annotate_snapshot(data, fetched_at)
                 _log_quota("tennis", sport_key, headers, len(data))
             except Exception as exc:
-                _log.warning("[runtime-odds] tennis %s fetch failed (IP allowlist?): %s", sport_key, exc)
+                _log.warning(
+                    "[runtime-odds] tennis %s fetch failed (IP allowlist?): %s", sport_key, exc
+                )
                 continue
 
         for event in data:
@@ -171,6 +272,10 @@ def _fetch_odds(
     regions: list[str],
     markets: list[str],
 ) -> tuple[list[dict[str, Any]], dict[str, str]]:
+    from src.monitoring.api_quota_monitor import can_make_odds_api_request
+
+    if not can_make_odds_api_request(priority_refresh=True):
+        raise RuntimeError("The Odds API priority refresh blocked by quota hard stop")
     query = (
         f"apiKey={api_key}&regions={','.join(regions)}&markets={','.join(markets)}"
         "&oddsFormat=decimal&dateFormat=iso"
@@ -190,6 +295,7 @@ def _fetch_odds(
             # Record quota usage
             try:
                 from src.monitoring.api_quota_monitor import record_odds_api_request
+
                 record_odds_api_request(1)
             except Exception:
                 pass

@@ -57,9 +57,8 @@ def main(dry_run: bool = True) -> None:
 
     # Compute dataset hash for anti-leakage
     import hashlib
-    df_hash = "sha256:" + hashlib.sha256(
-        df.to_csv(index=False).encode("utf-8")
-    ).hexdigest()
+
+    df_hash = "sha256:" + hashlib.sha256(df.to_csv(index=False).encode("utf-8")).hexdigest()
 
     # Settle any open signals against completed results
     ledger = SignalLedger.load_or_create(ledger_path)
@@ -92,7 +91,8 @@ def main(dry_run: bool = True) -> None:
             continue
 
         sigs = predictor.signals(
-            home, away,
+            home,
+            away,
             odds_1x2=(odds_h, odds_d, odds_a),
             min_edge_pct=3.0,
             min_model_prob=0.40,
@@ -120,7 +120,9 @@ def main(dry_run: bool = True) -> None:
 
     if new_signals:
         result = ledger.add_signals(new_signals)
-        print(f"[signals] Added {len(result.added)} new signal(s), {len(result.duplicates)} duplicates")
+        print(
+            f"[signals] Added {len(result.added)} new signal(s), {len(result.duplicates)} duplicates"
+        )
     else:
         print("[signals] No value signals found above threshold.")
 
@@ -132,7 +134,8 @@ def main(dry_run: bool = True) -> None:
     report_path.write_text(
         json.dumps(
             {"date": date.today().isoformat(), "signals": new_signals, "summary": ledger.summary()},
-            indent=2, ensure_ascii=False,
+            indent=2,
+            ensure_ascii=False,
         ),
         encoding="utf-8",
     )
@@ -147,6 +150,7 @@ def main(dry_run: bool = True) -> None:
 
 def _find_upcoming(df: "pd.DataFrame") -> "pd.DataFrame":
     import pandas as pd
+
     df = df.copy()
     df["Date"] = pd.to_datetime(df["Date"], dayfirst=True, errors="coerce")
     today = pd.Timestamp.today().normalize()

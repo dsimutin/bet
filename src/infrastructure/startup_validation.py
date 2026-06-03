@@ -27,6 +27,8 @@ def validate_startup() -> dict[str, Any]:
     """
     issues: list[str] = []
     warnings: list[str] = []
+    app_env = os.environ.get("APP_ENV", "development").strip().lower()
+    production = app_env == "production"
 
     # ─────────────────────────────────────────────────────────────────────
     # CRITICAL: THE_ODDS_API_KEY (blocks signal generation)
@@ -42,6 +44,16 @@ def validate_startup() -> dict[str, Any]:
             f"⚠️  THE_ODDS_API_KEY looks too short ({len(odds_key)} chars, expect 32+). "
             "Check if value was copied correctly."
         )
+
+    if production:
+        if not os.environ.get("DATABASE_URL", "").strip():
+            issues.append("DATABASE_URL is required when APP_ENV=production")
+        if not os.environ.get("ADMIN_API_TOKEN", "").strip():
+            issues.append("ADMIN_API_TOKEN is required when APP_ENV=production")
+        if not os.environ.get("TELEGRAM_WEBHOOK_SECRET", "").strip():
+            issues.append("TELEGRAM_WEBHOOK_SECRET is required when APP_ENV=production")
+        if not os.environ.get("TELEGRAM_ALLOWED_CHAT_IDS", "").strip():
+            issues.append("TELEGRAM_ALLOWED_CHAT_IDS is required when APP_ENV=production")
 
     # ─────────────────────────────────────────────────────────────────────
     # RECOMMENDED: TELEGRAM (affects alert delivery)
@@ -111,9 +123,7 @@ def validate_startup() -> dict[str, Any]:
                 "With 07:00 and 15:00 UTC scans, recommend 28800s to share cache."
             )
     except ValueError:
-        issues.append(
-            f"❌ ODDS_CACHE_TTL_SECONDS='{cache_ttl_raw}' is not a valid integer."
-        )
+        issues.append(f"❌ ODDS_CACHE_TTL_SECONDS='{cache_ttl_raw}' is not a valid integer.")
 
     # ─────────────────────────────────────────────────────────────────────
     # STORAGE: Verify paths exist

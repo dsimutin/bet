@@ -101,9 +101,7 @@ class FeedbackPolicy:
         return [
             e
             for e in self.entries.values()
-            if str(e.get("sport") or "football").lower() == sport
-            and e.get("ledger_status") == "settled"
-            and e.get("result") in {"win", "loss"}
+            if str(e.get("sport") or "football").lower() == sport and is_feedback_eligible(e)
         ]
 
     def expired_rate(self, sport: str) -> float:
@@ -113,11 +111,11 @@ class FeedbackPolicy:
         the settled sample may be biased toward easy-to-match fixtures.
         """
         sport_entries = [
-            e for e in self.entries.values()
-            if str(e.get("sport") or "football").lower() == sport
+            e for e in self.entries.values() if str(e.get("sport") or "football").lower() == sport
         ]
         settled_n = sum(
-            1 for e in sport_entries
+            1
+            for e in sport_entries
             if e.get("ledger_status") == "settled" and e.get("result") in {"win", "loss"}
         )
         expired_n = sum(1 for e in sport_entries if e.get("ledger_status") == "expired")
@@ -163,6 +161,21 @@ def _prob(signal: dict[str, Any]) -> float | None:
         if isinstance(signal.get(key), (int, float)):
             return float(signal[key])
     return None
+
+
+def is_feedback_eligible(entry: dict[str, Any]) -> bool:
+    """Return true only for production H2H paper entries allowed to tune thresholds."""
+    market = str(entry.get("market", entry.get("market_key", "h2h"))).lower()
+    return (
+        entry.get("ledger_status") == "settled"
+        and entry.get("result") in {"win", "loss"}
+        and entry.get("delivery_status") in {"sent", "dry_run"}
+        and entry.get("recommendation_tier") == "priority"
+        and entry.get("timestamp_verification_status") == "verified_pre_match"
+        and market == "h2h"
+        and not bool(entry.get("legacy_invalid"))
+        and not bool(entry.get("experimental") or entry.get("experimental_market"))
+    )
 
 
 def _segment(odds: float) -> str:

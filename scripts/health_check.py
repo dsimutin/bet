@@ -8,6 +8,8 @@ Run this before deploying to Render: python scripts/health_check.py
 from __future__ import annotations
 
 import sys
+import argparse
+import os
 from pathlib import Path
 
 # Add project root to path
@@ -157,9 +159,13 @@ def check_api_quota() -> bool:
     estimated_calls += 27  # admin overhead
 
     _log.info(f"Cache TTL:          {cache_ttl}s ({cache_ttl/3600:.1f}h)")
-    _log.info(f"Exotic leagues:     {len([x for x in exotic.split(',') if x.strip()]) if exotic else 'default (6)'}")
+    _log.info(
+        f"Exotic leagues:     {len([x for x in exotic.split(',') if x.strip()]) if exotic else 'default (6)'}"
+    )
     _log.info(f"Est. calls/month:   {estimated_calls} / 500")
-    _log.info(f"Buffer:             {500 - estimated_calls} calls ({100*(500-estimated_calls)/500:.0f}%)")
+    _log.info(
+        f"Buffer:             {500 - estimated_calls} calls ({100*(500-estimated_calls)/500:.0f}%)"
+    )
 
     if estimated_calls > 480:
         _log.error(f"✗ Exceeds safe quota (480/500). Disable extended features.")
@@ -169,7 +175,7 @@ def check_api_quota() -> bool:
     return True
 
 
-def check_tests() -> bool:
+def check_tests(*, collect_only: bool = False) -> bool:
     """Check that tests pass."""
     _log.info("\n" + "=" * 70)
     _log.info("6. TEST SUITE")
@@ -177,25 +183,38 @@ def check_tests() -> bool:
 
     import subprocess
 
-    _log.info("Running pytest --co -q to verify tests can be collected...")
+    cmd = ["python", "-m", "pytest", "-q"]
+    timeout = 300
+    if collect_only:
+        _log.warning("COLLECTION ONLY — NOT A DEPLOYMENT GATE")
+        cmd = ["python", "-m", "pytest", "--co", "-q"]
+        timeout = 30
+    _log.info("Running %s...", " ".join(cmd))
     try:
+        child_env = os.environ.copy()
+        for secret_name in (
+            "THE_ODDS_API_KEY",
+            "ODDS_API_IO_KEY",
+            "API_FOOTBALL_KEY",
+            "TELEGRAM_BOT_TOKEN",
+        ):
+            child_env.pop(secret_name, None)
         result = subprocess.run(
-            ["python", "-m", "pytest", "--co", "-q"],
+            cmd,
             capture_output=True,
             text=True,
-            timeout=10,
+            timeout=timeout,
+            env=child_env,
         )
         if result.returncode == 0:
-            # Count tests
-            test_count = len(
-                [line for line in result.stdout.split("\n") if "::" in line]
-            )
-            _log.info(f"✓ {test_count} tests can be collected")
-            _log.info(
-                "   To run all tests: python -m pytest tests/ -v (takes ~60s)"
-            )
+            if collect_only:
+                test_count = len([line for line in result.stdout.split("\n") if "::" in line])
+                _log.info(f"✓ {test_count} tests can be collected")
+            else:
+                _log.info("✓ pytest suite passed")
         else:
-            _log.error("✗ Tests cannot be collected:")
+            _log.error("✗ Test command failed:")
+            _log.error(result.stdout)
             _log.error(result.stderr)
             return False
     except subprocess.TimeoutExpired:
@@ -205,8 +224,11 @@ def check_tests() -> bool:
     return True
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     """Run all health checks."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--collect-only", action="store_true")
+    args = parser.parse_args(argv)
     _log.info("\n")
     _log.info("╔════════════════════════════════════════════════════════════════╗")
     _log.info("║             PRE-DEPLOYMENT HEALTH CHECK                        ║")
@@ -218,7 +240,7 @@ def main() -> int:
         ("Data Files", check_data_files),
         ("Trained Models", check_models),
         ("API Quota Budget", check_api_quota),
-        ("Test Suite", check_tests),
+        ("Test Suite", lambda: check_tests(collect_only=args.collect_only)),
     ]
 
     results = []
@@ -245,7 +267,10 @@ def main() -> int:
     _log.info("=" * 70)
 
     if all_ok:
-        _log.info("\n✅ All checks passed. System is ready for deployment.\n")
+        if args.collect_only:
+            _log.warning("\nCOLLECTION ONLY — NOT A DEPLOYMENT GATE\n")
+        else:
+            _log.info("\n✅ All checks passed. System is ready for deployment.\n")
         _log.info("Next steps:")
         _log.info("  1. Commit and push to all-the-best branch")
         _log.info("  2. Set THE_ODDS_API_KEY in Render environment")

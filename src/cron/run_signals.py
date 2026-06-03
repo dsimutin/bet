@@ -70,6 +70,11 @@ def main() -> None:
         signal["recommendation_tier"] = decision.tier
         signal["recommendation_reason"] = decision.reason
         signal["feedback_policy"] = decision.details
+        if signal.get("odds_freshness_tier") == "watchlist" and decision.tier == "priority":
+            signal["recommendation_tier"] = "watchlist"
+            signal["recommendation_reason"] = "odds snapshot is watchlist-fresh, not priority-fresh"
+            watchlist.append(signal)
+            continue
         if decision.tier == "priority":
             priority.append(signal)
         elif decision.tier == "watchlist":
@@ -140,6 +145,7 @@ def _run_exotic() -> list[dict[str, Any]]:
     if not api_key:
         return []
     from src.signals.exotic_zero_shot_scan import scan_exotic_leagues
+
     enabled_raw = os.environ.get("EXOTIC_LEAGUES", "")
     enabled = [s.strip() for s in enabled_raw.split(",") if s.strip()] if enabled_raw else None
     return scan_exotic_leagues(api_key, leagues=enabled)
@@ -161,25 +167,25 @@ def _run_tennis(model_dir: Path) -> list[dict[str, Any]]:
 def _partition_by_timestamp_policy(
     signals: list[dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], list[tuple[dict[str, Any], str]]]:
+    from src.models.timestamp_policy import verify_pre_match_timestamps
+
     allowed: list[dict[str, Any]] = []
     blocked: list[tuple[dict[str, Any], str]] = []
     for signal in signals:
-        if signal.get("sport") == "tennis":
-            allowed.append(signal)
-            continue
-        snapshot_raw = str(signal.get("snapshot_ts_utc") or "").strip()
-        event_raw = str(signal.get("event_time_utc") or "").strip()
-        if not snapshot_raw or not event_raw:
+        status = verify_pre_match_timestamps(signal)
+        signal["timestamp_verification_status"] = status
+        if status == "missing_timestamp":
             blocked.append((signal, "missing verified pre-match timestamps"))
             continue
-        try:
-            snapshot = datetime.fromisoformat(snapshot_raw.replace("Z", "+00:00"))
-            event_time = datetime.fromisoformat(event_raw.replace("Z", "+00:00"))
-        except ValueError:
+        if status == "invalid_timestamp":
             blocked.append((signal, "invalid pre-match timestamp"))
             continue
-        if snapshot >= event_time:
+        if status == "post_start":
             blocked.append((signal, "odds snapshot is not earlier than event start"))
+            continue
+        if signal.get("odds_freshness_tier") == "stale_blocked":
+            signal["timestamp_verification_status"] = "stale_snapshot"
+            blocked.append((signal, "odds snapshot is too old for paper signal"))
             continue
         allowed.append(signal)
     return allowed, blocked
@@ -192,7 +198,12 @@ def _notify_priority(signals: list[dict[str, Any]], ledger) -> tuple[int, int, i
     chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
     dry_mode = not (token and chat_id)
     sender = TelegramSender(
-        TelegramConfig(bot_token=token or "dry-run", chat_id=chat_id or "dry-run", dry_run=dry_mode)
+        TelegramConfig(
+            bot_token=token or "dry-run",
+            chat_id=chat_id or "dry-run",
+            dry_run=dry_mode,
+            max_message_length=4096,
+        )
     )
     sent = failed = dry_runs = 0
     for signal in signals:

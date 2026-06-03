@@ -55,6 +55,7 @@ def get_live_match_result(
     # Check cache first — results are immutable once matched
     cache_key = f"live_result:{sport_key}:{league}:{home_team}:{away_team}:{match_date}"
     from src.infrastructure import odds_cache
+
     cached = odds_cache.get(cache_key)
     if isinstance(cached, dict):
         _log.debug("[live_results] cache hit: %s", cache_key)
@@ -206,6 +207,7 @@ def get_live_tennis_result(
             # Record quota usage
             try:
                 from src.monitoring.api_quota_monitor import record_odds_api_request
+
                 record_odds_api_request(1)
             except Exception:
                 pass

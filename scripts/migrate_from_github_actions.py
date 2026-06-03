@@ -28,22 +28,36 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-
 MIGRATION_MANIFEST = "migration_manifest.json"
 
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Migrate data to Render Persistent Disk.")
-    p.add_argument("--source", type=Path, default=Path("data"),
-                   help="Source data directory (local repo, default: ./data)")
-    p.add_argument("--dest", type=Path, default=Path("/data"),
-                   help="Destination path (Render disk mountPath, default: /data)")
-    p.add_argument("--dry-run", action="store_true",
-                   help="Print what would be copied without doing it")
-    p.add_argument("--skip-models", action="store_true",
-                   help="Skip copying model .pkl files (large, re-train instead)")
-    p.add_argument("--skip-staging", action="store_true",
-                   help="Skip copying staging CSVs (re-download instead)")
+    p.add_argument(
+        "--source",
+        type=Path,
+        default=Path("data"),
+        help="Source data directory (local repo, default: ./data)",
+    )
+    p.add_argument(
+        "--dest",
+        type=Path,
+        default=Path("/data"),
+        help="Destination path (Render disk mountPath, default: /data)",
+    )
+    p.add_argument(
+        "--dry-run", action="store_true", help="Print what would be copied without doing it"
+    )
+    p.add_argument(
+        "--skip-models",
+        action="store_true",
+        help="Skip copying model .pkl files (large, re-train instead)",
+    )
+    p.add_argument(
+        "--skip-staging",
+        action="store_true",
+        help="Skip copying staging CSVs (re-download instead)",
+    )
     return p.parse_args()
 
 

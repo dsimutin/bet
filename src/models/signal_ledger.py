@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
-SignalResult = Literal["win", "loss", "void"]
+SignalResult = Literal["win", "loss", "push", "void"]
 DeliveryStatus = Literal["registered", "dry_run", "sent", "failed", "blocked"]
 LedgerStatus = Literal["open", "settled", "void", "expired"]
 
@@ -110,11 +110,13 @@ class SignalLedger:
         signal_id: str,
         result: SignalResult,
         closing_odds: float | None = None,
+        settlement_source: str | None = None,
+        settlement_reason: str | None = None,
     ) -> None:
         if signal_id not in self._entries:
             raise KeyError(f"Signal {signal_id} not found in ledger")
-        if result not in {"win", "loss", "void"}:
-            raise ValueError("result must be one of: win, loss, void")
+        if result not in {"win", "loss", "push", "void"}:
+            raise ValueError("result must be one of: win, loss, push, void")
 
         entry = self._entries[signal_id]
         stake = float(entry.get("stake_units", 1.0))
@@ -125,6 +127,9 @@ class SignalLedger:
             status = "settled"
         elif result == "loss":
             pnl = -stake
+            status = "settled"
+        elif result == "push":
+            pnl = 0.0
             status = "settled"
         else:
             pnl = 0.0
@@ -141,6 +146,9 @@ class SignalLedger:
                 "closing_odds": closing_odds,
                 "pnl_units": round(pnl, 4),
                 "clv_pct": round(clv_pct, 4) if clv_pct is not None else None,
+                "settlement_source": settlement_source,
+                "settlement_reason": settlement_reason,
+                "settled_at_utc": datetime.now(timezone.utc).isoformat(),
                 "ledger_updated_at_utc": datetime.now(timezone.utc).isoformat(),
             }
         )
@@ -157,9 +165,7 @@ class SignalLedger:
         for signal_id, entry in self._entries.items():
             if entry.get("ledger_status") != "open":
                 continue
-            raw_event = str(
-                entry.get("event_time_utc") or entry.get("commence_time") or ""
-            ).strip()
+            raw_event = str(entry.get("event_time_utc") or entry.get("commence_time") or "").strip()
             if not raw_event:
                 continue
             try:
@@ -192,8 +198,15 @@ class SignalLedger:
         settled = [item for item in entries if item.get("ledger_status") == "settled"]
         open_entries = [item for item in entries if item.get("ledger_status") == "open"]
         wins = [item for item in settled if item.get("result") == "win"]
-        total_pnl = sum(float(item.get("pnl_units") or 0.0) for item in settled)
-        turnover = sum(float(item.get("stake_units") or 0.0) for item in settled)
+        roi_entries = [
+            item for item in settled if item.get("result") in {"win", "loss", "push", "void"}
+        ]
+        total_pnl = sum(float(item.get("pnl_units") or 0.0) for item in roi_entries)
+        turnover = sum(
+            float(item.get("stake_units") or 0.0)
+            for item in roi_entries
+            if item.get("result") in {"win", "loss"}
+        )
         mean_edge = (
             sum(float(item.get("edge_pct") or 0.0) for item in entries) / len(entries)
             if entries

@@ -27,7 +27,7 @@ _log = logging.getLogger(__name__)
 _BASE = "https://v3.football.api-sports.io"
 
 
-def _should_retry_apifootball(exc: Exception) -> bool:
+def _should_retry_apifootball(exc: BaseException) -> bool:
     """Retry on transient errors, but not on quota exhaustion (429) or auth (403)."""
     if isinstance(exc, urllib.error.HTTPError):
         return exc.code not in (429, 403)
@@ -112,7 +112,7 @@ def get_injuries_for_match(
     away_team: str,
     match_date: str,
     league: str,
-) -> dict[str, list[dict[str, Any]]]:
+) -> dict[str, Any]:
     """High-level: fetch injuries for both teams. Returns {home: [...], away: [...]}.
 
     Caches results aggressively (24 hours) since injury data updates ~daily.
@@ -127,6 +127,7 @@ def get_injuries_for_match(
     cache_key = f"injuries:{league}:{home_team}:{away_team}:{match_date}"
     try:
         from src.infrastructure import odds_cache
+
         cached = odds_cache.get(cache_key)
         if isinstance(cached, dict) and cached.get("available"):
             _log.debug("[injuries] cache hit: %s", cache_key)
@@ -206,6 +207,7 @@ def _get(url: str, api_key: str) -> dict[str, Any]:
         # Record quota usage
         try:
             from src.monitoring.api_quota_monitor import record_apifootball_request
+
             record_apifootball_request(1)
         except Exception:
             pass

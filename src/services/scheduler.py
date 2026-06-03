@@ -53,10 +53,6 @@ def start(loop: asyncio.AbstractEventLoop | None = None) -> None:
 
     scan_hours = _hours("RUNTIME_SCAN_HOURS_UTC", "7,15")
     settlement_hours = _hours("SETTLEMENT_HOURS_UTC", "7,15,22")
-    keep_alive_hours = _hours(
-        "KEEP_ALIVE_HOURS_UTC", "6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22"
-    )
-
     sched.add_job(
         _job_signal_scan,
         "cron",
@@ -103,14 +99,6 @@ def start(loop: asyncio.AbstractEventLoop | None = None) -> None:
         misfire_grace_time=1800,
     )
     sched.add_job(
-        _job_keep_alive,
-        "cron",
-        hour=keep_alive_hours,
-        minute="*/14",
-        id="keep_alive",
-        replace_existing=True,
-    )
-    sched.add_job(
         _job_tennis_refresh,
         "cron",
         hour=6,
@@ -148,6 +136,20 @@ def stop() -> None:
 
 
 async def _run_in_executor(fn: Callable[[], Any], job_name: str) -> None:
+    from src.services.job_guard import job_guard
+
+    with job_guard(job_name) as acquired:
+        if not acquired:
+            _log.info("[scheduler] %s skipped: already_running", job_name)
+            return
+        try:
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, fn)
+        except Exception as exc:
+            _log.exception("[scheduler] %s failed: %s", job_name, exc)
+
+
+async def _run_in_executor_unguarded(fn: Callable[[], Any], job_name: str) -> None:
     try:
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, fn)
@@ -206,14 +208,3 @@ async def _job_tennis_retrain() -> None:
         )
 
     await _run_in_executor(_run, "tennis_retrain")
-
-
-async def _job_keep_alive() -> None:
-    port = os.environ.get("PORT", "10000")
-    try:
-        import urllib.request
-
-        with urllib.request.urlopen(f"http://localhost:{port}/health", timeout=5):
-            pass
-    except Exception:
-        pass

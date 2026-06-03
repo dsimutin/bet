@@ -135,7 +135,7 @@ def _to_signal(
 ) -> dict[str, Any]:
     event_id = _event_id(row)
     edge_vs_fair_pct = round(value.edge_vs_fair * 100.0, 4)
-    return {
+    signal = {
         "signal_id": f"production_dc_{event_id}_{value.selection}_{_bookmaker_key(row, bookmaker_prefix)}",
         "strategy_id": "production_dixon_coles_value_v1",
         "model_id": value.model_id,
@@ -146,6 +146,12 @@ def _to_signal(
         "bookmaker": _bookmaker_key(row, bookmaker_prefix),
         "bookmaker_title": _optional_row_str(row, "source_bookmaker_title") or bookmaker_prefix,
         "market_key": "h2h",
+        "source_event_id": _optional_row_str(row, "source_event_id") or event_id,
+        "source_sport_key": _optional_row_str(row, "source_sport_key") or "",
+        "source_bookmaker_key": _optional_row_str(row, "source_bookmaker_key") or "",
+        "source_bookmaker_title": _optional_row_str(row, "source_bookmaker_title") or "",
+        "source_market_key": _optional_row_str(row, "source_market_key") or "h2h",
+        "source_last_update_utc": _optional_row_str(row, "source_last_update_utc") or "",
         "selection": value.selection,
         "selection_ru": ProductionDixonColesSignalEngine.SELECTION_RU[value.selection],
         "entry_odds": value.odds,
@@ -174,6 +180,69 @@ def _to_signal(
         ),
         "status": "paper",
     }
+    from src.models.timestamp_policy import verify_pre_match_timestamps
+
+    signal["timestamp_verification_status"] = verify_pre_match_timestamps(signal)
+    age = _age_seconds(signal.get("snapshot_ts_utc"), generated_at)
+    signal["odds_snapshot_age_seconds"] = age
+    signal["odds_freshness_tier"] = _odds_freshness_tier(age)
+    return signal
+
+
+def recompute_signal_metrics(
+    signal: dict[str, Any],
+    *,
+    adjusted_probability: float | None = None,
+    kelly_fraction: float = 0.25,
+    max_stake_units: float = 2.0,
+    bankroll_units: float = 100.0,
+) -> dict[str, Any]:
+    """Recompute probability-derived paper metrics after post-model adjustments.
+
+    `edge_pct` and `edge_vs_fair_pct` are ROI edge percentages:
+    `(entry_odds * model_probability - 1) * 100`.
+    """
+    updated = dict(signal)
+    raw_probability = (
+        adjusted_probability
+        if adjusted_probability is not None
+        else updated.get("model_probability", updated.get("model_prob"))
+    )
+    if raw_probability is None:
+        raw_probability = 0.0
+    probability = max(0.0001, min(0.9999, float(raw_probability)))
+    odds = float(updated.get("entry_odds", 0.0) or 0.0)
+    fair_odds = 1.0 / probability
+    edge_roi_pct = (odds / fair_odds - 1.0) * 100.0 if odds > 0 else 0.0
+
+    market_probability_raw = updated.get("market_probability", updated.get("market_prob", 0.0))
+    try:
+        market_probability = float(market_probability_raw)
+    except (TypeError, ValueError):
+        market_probability = (1.0 / odds) if odds > 1.0 else 0.0
+    edge_vs_market_pct = (probability - market_probability) * 100.0
+    stake_units = _paper_stake_units(
+        model_probability=probability,
+        odds=odds,
+        bankroll_units=bankroll_units,
+        kelly_fraction=kelly_fraction,
+        max_stake_units=max_stake_units,
+    )
+
+    updated.update(
+        {
+            "model_probability": round(probability, 4),
+            "model_prob": round(probability, 4),
+            "reference_fair_odds": round(fair_odds, 4),
+            "edge_pct": round(edge_roi_pct, 4),
+            "edge_vs_fair_pct": round(edge_roi_pct, 4),
+            "edge_vs_market_pct": round(edge_vs_market_pct, 4),
+            "confidence": _confidence(probability, edge_roi_pct),
+            "stake_units": stake_units,
+            "paper_stake_units": stake_units,
+        }
+    )
+    return updated
 
 
 def _paper_stake_units(
@@ -209,6 +278,35 @@ def _optional_row_str(row: pd.Series, key: str) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _age_seconds(snapshot_raw: Any, now_raw: Any) -> int | None:
+    try:
+        snapshot = datetime.fromisoformat(str(snapshot_raw).replace("Z", "+00:00"))
+        now = datetime.fromisoformat(str(now_raw).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if snapshot.tzinfo is None:
+        snapshot = snapshot.replace(tzinfo=timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    return max(
+        0, int((now.astimezone(timezone.utc) - snapshot.astimezone(timezone.utc)).total_seconds())
+    )
+
+
+def _odds_freshness_tier(age_seconds: int | None) -> str:
+    import os
+
+    if age_seconds is None:
+        return "stale_blocked"
+    priority_max = int(os.environ.get("PRIORITY_ODDS_MAX_AGE_SECONDS", "900"))
+    watchlist_max = int(os.environ.get("WATCHLIST_ODDS_MAX_AGE_SECONDS", "3600"))
+    if age_seconds <= priority_max:
+        return "priority"
+    if age_seconds <= watchlist_max:
+        return "watchlist"
+    return "stale_blocked"
 
 
 def _confidence(model_probability: float, edge_pct: float) -> str:

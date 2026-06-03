@@ -66,6 +66,10 @@ def test_live_odds_adapter_prefers_configured_bookmaker() -> None:
     assert row["B365A"] == 4.4
     assert row["source_event_id"] == "evt_live_1"
     assert row["source_bookmaker_key"] == "bet365"
+    assert row["event_time_utc"] == "2026-06-01T18:30:00+00:00"
+    assert row["snapshot_ts_utc"]
+    assert row["source_last_update_utc"] == "2026-05-27T12:01:00Z"
+    assert row["source_market_key"] == "h2h"
 
 
 def test_live_odds_adapter_skips_incomplete_h2h_market() -> None:
@@ -83,3 +87,11 @@ def test_live_odds_adapter_skips_incomplete_h2h_market() -> None:
 
     assert result.converted_events == 0
     assert "no_complete_h2h_bookmaker" in result.skipped_events[0]
+
+
+def test_live_adapter_rejects_invalid_commence_time() -> None:
+    event = _live_event()
+    event["commence_time"] = "not-a-date"
+    result = LiveOddsFootballDataAdapter().convert([event])
+    assert result.converted_events == 0
+    assert "invalid_commence_time" in result.skipped_events[0]
