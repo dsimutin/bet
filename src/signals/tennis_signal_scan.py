@@ -22,7 +22,6 @@ from typing import Any
 
 _log = logging.getLogger(__name__)
 
-_ODDS_API_BASE = "https://api.the-odds-api.com/v4"
 # Static fallback keys — overridden at runtime by _discover_tennis_keys()
 _TENNIS_SPORT_KEYS_FALLBACK = [
     "tennis_atp_french_open",
@@ -966,11 +965,16 @@ def _discover_tennis_keys(api_key: str) -> list[str]:
 
     Falls back to _TENNIS_SPORT_KEYS_FALLBACK if the API call fails.
     """
-    url = f"{_ODDS_API_BASE}/sports?apiKey={api_key}"
     try:
-        req = _urllib.Request(url, headers={"User-Agent": "bet-analytics/1.0"})
-        with _urllib.urlopen(req, timeout=10) as resp:
-            sports = json.loads(resp.read())
+        from src.services.odds_gateway import fetch_the_odds_api_json
+
+        response = fetch_the_odds_api_json(
+            "/sports",
+            api_key=api_key,
+            query={},
+            source="tennis_signal_scan.discover",
+        )
+        sports = response.payload
         active_tennis = [
             s["key"] for s in sports if s.get("active") and "tennis" in s.get("key", "").lower()
         ]
@@ -994,14 +998,24 @@ def _fetch_atp_events(api_key: str) -> list[dict[str, Any]] | None:
     sport_keys = _discover_tennis_keys(api_key)
 
     for sport_key in sport_keys:
-        url = (
-            f"{_ODDS_API_BASE}/sports/{sport_key}/odds"
-            f"?apiKey={api_key}&regions=eu,uk,us,us2,au&markets=h2h,spreads,totals&oddsFormat=decimal&dateFormat=iso"
-        )
         try:
-            req = _urllib.Request(url, headers={"User-Agent": "bet-analytics/1.0"})
-            with _urllib.urlopen(req, timeout=15) as resp:
-                data = json.loads(resp.read())
+            from src.services.odds_gateway import fetch_the_odds_api_json
+
+            response = fetch_the_odds_api_json(
+                f"/sports/{sport_key}/odds",
+                api_key=api_key,
+                query={
+                    "regions": "eu,uk,us,us2,au",
+                    "markets": "h2h,spreads,totals",
+                    "oddsFormat": "decimal",
+                    "dateFormat": "iso",
+                },
+                source="tennis_signal_scan.fetch_events",
+                sport_key=sport_key,
+                markets=["h2h", "spreads", "totals"],
+                regions=["eu", "uk", "us", "us2", "au"],
+            )
+            data = response.payload
             if isinstance(data, list):
                 for event in data:
                     eid = event.get("id", "")

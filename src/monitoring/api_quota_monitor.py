@@ -53,6 +53,14 @@ class APIQuotaMonitor:
         used, limit = self.monthly_usage(api_name)
         return (limit - used) >= min_remaining
 
+    def record_provider_headers(self, record: dict[str, Any]) -> None:
+        data = self._load()
+        records = data.setdefault("_provider_records", [])
+        if isinstance(records, list):
+            records.append(record)
+            data["_provider_records"] = records[-200:]
+            self._save(data)
+
     def monthly_usage(self, api_name: str, month: str = "") -> tuple[int, int]:
         """Get (used, limit) for month (YYYY-MM)."""
         if not month:
@@ -77,7 +85,7 @@ class APIQuotaMonitor:
             }
         return result
 
-    def _load(self) -> dict[str, dict[str, int]]:
+    def _load(self) -> dict[str, Any]:
         """Load quota data from file."""
         if not self.quota_file.exists():
             return {}
@@ -113,6 +121,10 @@ def can_make_odds_api_request(*, priority_refresh: bool = False) -> bool:
     )
     min_remaining = int(os.environ.get(threshold_name, "50" if priority_refresh else "25"))
     return _monitor.can_request("the_odds_api", min_remaining)
+
+
+def record_odds_api_provider_headers(record: dict[str, Any]) -> None:
+    _monitor.record_provider_headers(record)
 
 
 def record_apifootball_request(calls: int = 1) -> None:

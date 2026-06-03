@@ -11,7 +11,6 @@ import json
 import logging
 import os
 import urllib.error
-import urllib.request
 from datetime import datetime, timezone
 from typing import Any
 
@@ -20,7 +19,6 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 from src.infrastructure import odds_cache
 
 _log = logging.getLogger(__name__)
-_BASE = "https://api.the-odds-api.com/v4"
 
 
 def _should_retry_request(exc: BaseException) -> bool:
@@ -228,12 +226,16 @@ def get_tennis_h2h_events(api_key: str) -> list[dict[str, Any]]:
 )
 def _fetch_active_sports(api_key: str) -> list[dict[str, Any]]:
     """Fetch active sports list from The Odds API with exponential backoff."""
-    req = urllib.request.Request(
-        f"{_BASE}/sports?apiKey={api_key}",
-        headers={"User-Agent": "bet-analytics/1.0"},
+    from src.services.odds_gateway import fetch_the_odds_api_json
+
+    result = fetch_the_odds_api_json(
+        "/sports",
+        api_key=api_key,
+        query={},
+        source="runtime_odds.active_sports",
+        priority_refresh=False,
     )
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        return json.loads(resp.read())
+    return result.payload if isinstance(result.payload, list) else []
 
 
 def get_active_tennis_keys(api_key: str) -> list[str]:
@@ -272,33 +274,32 @@ def _fetch_odds(
     regions: list[str],
     markets: list[str],
 ) -> tuple[list[dict[str, Any]], dict[str, str]]:
-    from src.monitoring.api_quota_monitor import can_make_odds_api_request
+    from src.services.odds_gateway import fetch_the_odds_api_json
 
-    if not can_make_odds_api_request(priority_refresh=True):
-        raise RuntimeError("The Odds API priority refresh blocked by quota hard stop")
-    query = (
-        f"apiKey={api_key}&regions={','.join(regions)}&markets={','.join(markets)}"
-        "&oddsFormat=decimal&dateFormat=iso"
-    )
-    req = urllib.request.Request(
-        f"{_BASE}/sports/{sport_key}/odds?{query}",
-        headers={"User-Agent": "bet-analytics/1.0"},
-    )
     try:
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            payload = json.loads(resp.read())
-            headers = {
-                "remaining": resp.headers.get("x-requests-remaining", "?"),
-                "used": resp.headers.get("x-requests-used", "?"),
-                "last": resp.headers.get("x-requests-last", "?"),
-            }
-            # Record quota usage
-            try:
-                from src.monitoring.api_quota_monitor import record_odds_api_request
+        result = fetch_the_odds_api_json(
+            f"/sports/{sport_key}/odds",
+            api_key=api_key,
+            query={
+                "regions": ",".join(regions),
+                "markets": ",".join(markets),
+                "oddsFormat": "decimal",
+                "dateFormat": "iso",
+            },
+            source="runtime_odds.fetch_odds",
+            sport_key=sport_key,
+            markets=markets,
+            regions=regions,
+            priority_refresh=True,
+        )
+        payload = result.payload
+        headers = result.headers
+        try:
+            from src.monitoring.api_quota_monitor import record_odds_api_request
 
-                record_odds_api_request(1)
-            except Exception:
-                pass
+            record_odds_api_request(1)
+        except Exception:
+            pass
     except urllib.error.HTTPError as exc:
         if exc.code == 429:
             raise RuntimeError("The Odds API quota exhausted (HTTP 429)") from exc

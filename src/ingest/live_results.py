@@ -6,17 +6,13 @@ Useful for paper trading where settlement needs live match outcomes.
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import urllib.error
-import urllib.request
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Literal
 
 _log = logging.getLogger(__name__)
-_BASE = "https://api.the-odds-api.com/v4"
-
 # Map league codes to The Odds API sport keys
 _LEAGUE_TO_SPORT = {
     "EPL": "soccer_epl",
@@ -68,20 +64,23 @@ def get_live_match_result(
         start_date = (match_date - timedelta(days=1)).isoformat()
         end_date = (match_date + timedelta(days=2)).isoformat()
 
-        query = (
-            f"apiKey={api_key}&sport={sport_key}"
-            f"&date_format=iso&commenceTimeFrom={start_date}T00:00:00Z"
-            f"&commenceTimeTo={end_date}T23:59:59Z"
-        )
-        url = f"{_BASE}/sports/{sport_key}/odds?{query}"
+        from src.services.odds_gateway import fetch_the_odds_api_json
 
-        req = urllib.request.Request(
-            url,
-            headers={"User-Agent": "bet-analytics/1.0"},
-            method="GET",
+        response = fetch_the_odds_api_json(
+            f"/sports/{sport_key}/odds",
+            api_key=api_key,
+            query={
+                "sport": sport_key,
+                "date_format": "iso",
+                "commenceTimeFrom": f"{start_date}T00:00:00Z",
+                "commenceTimeTo": f"{end_date}T23:59:59Z",
+            },
+            source="live_results.football",
+            sport_key=sport_key,
+            markets=["h2h"],
+            priority_refresh=False,
         )
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read())
+        data = response.payload
 
         if not isinstance(data, list):
             odds_cache.set(cache_key, "NOT_FOUND", 6 * 3600)
@@ -190,27 +189,23 @@ def get_live_tennis_result(
         start_date = (match_date - timedelta(days=1)).isoformat()
         end_date = (match_date + timedelta(days=2)).isoformat()
 
-        query = (
-            f"apiKey={api_key}&sport={sport_key}"
-            f"&date_format=iso&commenceTimeFrom={start_date}T00:00:00Z"
-            f"&commenceTimeTo={end_date}T23:59:59Z"
-        )
-        url = f"{_BASE}/sports/{sport_key}/odds?{query}"
+        from src.services.odds_gateway import fetch_the_odds_api_json
 
-        req = urllib.request.Request(
-            url,
-            headers={"User-Agent": "bet-analytics/1.0"},
-            method="GET",
+        response = fetch_the_odds_api_json(
+            f"/sports/{sport_key}/odds",
+            api_key=api_key,
+            query={
+                "sport": sport_key,
+                "date_format": "iso",
+                "commenceTimeFrom": f"{start_date}T00:00:00Z",
+                "commenceTimeTo": f"{end_date}T23:59:59Z",
+            },
+            source="live_results.tennis",
+            sport_key=sport_key,
+            markets=["h2h"],
+            priority_refresh=False,
         )
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read())
-            # Record quota usage
-            try:
-                from src.monitoring.api_quota_monitor import record_odds_api_request
-
-                record_odds_api_request(1)
-            except Exception:
-                pass
+        data = response.payload
 
         if not isinstance(data, list):
             odds_cache.set(cache_key, "NOT_FOUND", 6 * 3600)

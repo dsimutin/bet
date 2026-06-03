@@ -885,9 +885,6 @@ def debug_tennis_raw():
     Диагностика: есть ли вообще теннисные события в API.
     curl https://your-app.onrender.com/debug/tennis-raw
     """
-    import json as _json
-    import urllib.request as _urllib
-
     api_key = os.environ.get("THE_ODDS_API_KEY", "")
     odds_io_key = os.environ.get("ODDS_API_IO_KEY", "")
 
@@ -910,14 +907,19 @@ def debug_tennis_raw():
         results["the_odds_api_status"] = "skipped (THE_ODDS_API_KEY not set)"
         return results
 
+    from src.services.odds_gateway import fetch_the_odds_api_json
+
     sport_keys = ["tennis_atp", "tennis_wta"]
 
     # Also check which sports are active
     try:
-        url = f"https://api.the-odds-api.com/v4/sports?apiKey={api_key}"
-        req = _urllib.Request(url, headers={"User-Agent": "bet-analytics/1.0"})
-        with _urllib.urlopen(req, timeout=15) as resp:
-            all_sports = _json.loads(resp.read())
+        sports_resp = fetch_the_odds_api_json(
+            "/sports",
+            api_key=api_key,
+            query={},
+            source="health_app.debug_tennis_raw.sports",
+        )
+        all_sports = sports_resp.payload
         tennis_sports = [
             s
             for s in all_sports
@@ -936,15 +938,21 @@ def debug_tennis_raw():
     # Try each tennis sport key
     for sport_key in sport_keys:
         try:
-            url = (
-                f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds"
-                f"?apiKey={api_key}&regions=eu,uk,us&markets=h2h&oddsFormat=decimal"
-                f"&dateFormat=iso"
+            events_resp = fetch_the_odds_api_json(
+                f"/sports/{sport_key}/odds",
+                api_key=api_key,
+                query={
+                    "regions": "eu,uk,us",
+                    "markets": "h2h",
+                    "oddsFormat": "decimal",
+                    "dateFormat": "iso",
+                },
+                source="health_app.debug_tennis_raw.odds",
+                sport_key=sport_key,
+                markets=["h2h"],
+                regions=["eu", "uk", "us"],
             )
-            req = _urllib.Request(url, headers={"User-Agent": "bet-analytics/1.0"})
-            with _urllib.urlopen(req, timeout=15) as resp:
-                data = _json.loads(resp.read())
-            events = data if isinstance(data, list) else []
+            events = events_resp.payload if isinstance(events_resp.payload, list) else []
             results[sport_key] = {
                 "n_events": len(events),
                 "first_3": [
@@ -1066,18 +1074,20 @@ def debug_odds_sports():
 
     curl https://your-app.onrender.com/debug/odds-sports
     """
-    import json as _json
-    import urllib.request as _urllib
-
     api_key = os.environ.get("THE_ODDS_API_KEY", "")
     if not api_key:
         return {"error": "THE_ODDS_API_KEY not set"}
 
     try:
-        url = f"https://api.the-odds-api.com/v4/sports?apiKey={api_key}"
-        req = _urllib.Request(url, headers={"User-Agent": "bet-analytics/1.0"})
-        with _urllib.urlopen(req, timeout=15) as resp:
-            sports = _json.loads(resp.read())
+        from src.services.odds_gateway import fetch_the_odds_api_json
+
+        response = fetch_the_odds_api_json(
+            "/sports",
+            api_key=api_key,
+            query={},
+            source="health_app.debug_odds_sports",
+        )
+        sports = response.payload
         active = [s for s in sports if s.get("active")]
         return {
             "total": len(sports),
