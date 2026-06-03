@@ -12,7 +12,19 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 
-def main() -> None:
+def main() -> dict[str, Any]:
+    return run_signal_job()
+
+
+def run_signal_job(
+    *,
+    run_league_func=None,
+    run_tennis_func=None,
+    run_exotic_func=None,
+    load_ledger_func=None,
+    save_ledger_func=None,
+    notify_priority_func=None,
+) -> dict[str, Any]:
     started = time.perf_counter()
     model_dir = Path(os.environ.get("MODEL_DIR", "data/models"))
     ledger_path = Path(os.environ.get("LEDGER_PATH", "data/core/paper_signal_ledger.json"))
@@ -24,34 +36,69 @@ def main() -> None:
     ]
     today = date.today()
     candidates: list[dict[str, Any]] = []
+    steps: dict[str, dict[str, Any]] = {}
     print(f"[signals] unified scan started {datetime.now(timezone.utc).isoformat()}")
+    run_league_func = run_league_func or _run_league
+    run_tennis_func = run_tennis_func or _run_tennis
+    run_exotic_func = run_exotic_func or _run_exotic
 
     for league in leagues:
+        step_name = f"football_{league}"
         try:
-            rows = _run_league(league, model_dir, staging_dir, today)
+            rows = run_league_func(league, model_dir, staging_dir, today)
             candidates.extend(rows)
+            steps[step_name] = {"status": "success", "candidates": len(rows)}
             print(f"[signals] football {league}: {len(rows)} candidate(s)")
         except Exception as exc:
-            print(f"[signals] football {league}: FAILED {exc}", file=sys.stderr)
+            steps[step_name] = {"status": "failed", "error": _sanitize_error(exc)}
+            print(f"[signals] football {league}: FAILED {_sanitize_error(exc)}", file=sys.stderr)
 
     try:
-        tennis = _run_tennis(model_dir)
+        tennis = run_tennis_func(model_dir)
         candidates.extend(tennis)
+        steps["tennis"] = {"status": "success", "candidates": len(tennis)}
         print(f"[signals] tennis: {len(tennis)} candidate(s)")
     except Exception as exc:
-        print(f"[signals] tennis: FAILED {exc}", file=sys.stderr)
+        steps["tennis"] = {"status": "failed", "error": _sanitize_error(exc)}
+        print(f"[signals] tennis: FAILED {_sanitize_error(exc)}", file=sys.stderr)
 
     try:
-        exotic = _run_exotic()
+        exotic = run_exotic_func()
         candidates.extend(exotic)
+        steps["exotic"] = {"status": "success", "candidates": len(exotic)}
         print(f"[signals] exotic: {len(exotic)} candidate(s)")
     except Exception as exc:
-        print(f"[signals] exotic: FAILED {exc}", file=sys.stderr)
+        steps["exotic"] = {"status": "failed", "error": _sanitize_error(exc)}
+        print(f"[signals] exotic: FAILED {_sanitize_error(exc)}", file=sys.stderr)
 
     from src.infrastructure.persistent_ledger import load_ledger, save_ledger
     from src.models.feedback_policy import FeedbackPolicy
 
-    ledger = load_ledger(ledger_path)
+    load_ledger_func = load_ledger_func or load_ledger
+    save_ledger_func = save_ledger_func or save_ledger
+    notify_priority_func = notify_priority_func or _notify_priority
+
+    try:
+        ledger = load_ledger_func(ledger_path)
+        steps["ledger_load"] = {"status": "success"}
+    except Exception as exc:
+        elapsed = round(time.perf_counter() - started, 1)
+        steps["ledger_load"] = {"status": "failed", "error": _sanitize_error(exc)}
+        result = _signal_job_result(
+            status="failed",
+            elapsed=elapsed,
+            candidates=len(candidates),
+            priority=0,
+            watchlist=0,
+            blocked=0,
+            new_priority=0,
+            sent=0,
+            failed=0,
+            dry_run=0,
+            steps=steps,
+        )
+        _record_signal_job_result(result)
+        return result
 
     # Expire signals whose event passed >24h ago without settlement result.
     # Runs before policy evaluation so stale signals don't skew segment stats.
@@ -93,30 +140,82 @@ def main() -> None:
         except Exception as exc:
             print(f"[signals] blocked registration failed: {exc}", file=sys.stderr)
 
-    save_ledger(ledger, ledger_path)
-    sent, failed, dry_run = _notify_priority(new_priority, ledger)
-    save_ledger(ledger, ledger_path)
+    try:
+        save_ledger_func(ledger, ledger_path)
+        steps["ledger_save_before_delivery"] = {"status": "success"}
+    except Exception as exc:
+        elapsed = round(time.perf_counter() - started, 1)
+        steps["ledger_save_before_delivery"] = {"status": "failed", "error": _sanitize_error(exc)}
+        result = _signal_job_result(
+            status="failed",
+            elapsed=elapsed,
+            candidates=len(candidates),
+            priority=len(priority),
+            watchlist=len(watchlist),
+            blocked=len(blocked),
+            new_priority=len(new_priority),
+            sent=0,
+            failed=0,
+            dry_run=0,
+            steps=steps,
+        )
+        _record_signal_job_result(result)
+        return result
+    try:
+        sent, failed, dry_run = notify_priority_func(new_priority, ledger)
+        steps["telegram"] = {
+            "status": "success" if failed == 0 else "partial",
+            "sent": sent,
+            "failed": failed,
+            "dry_run": dry_run,
+        }
+    except Exception as exc:
+        sent, failed, dry_run = 0, len(new_priority), 0
+        steps["telegram"] = {"status": "failed", "error": _sanitize_error(exc)}
+    try:
+        save_ledger_func(ledger, ledger_path)
+        steps["ledger_save_after_delivery"] = {"status": "success"}
+    except Exception as exc:
+        elapsed = round(time.perf_counter() - started, 1)
+        steps["ledger_save_after_delivery"] = {"status": "failed", "error": _sanitize_error(exc)}
+        result = _signal_job_result(
+            status="failed",
+            elapsed=elapsed,
+            candidates=len(candidates),
+            priority=len(priority),
+            watchlist=len(watchlist),
+            blocked=len(blocked),
+            new_priority=len(new_priority),
+            sent=sent,
+            failed=failed,
+            dry_run=dry_run,
+            steps=steps,
+        )
+        _record_signal_job_result(result)
+        return result
 
     elapsed = round(time.perf_counter() - started, 1)
     print(
         f"[signals] done {elapsed}s candidates={len(candidates)} priority={len(priority)} watchlist={len(watchlist)} blocked={len(blocked)} new_priority={len(new_priority)} sent={sent} failed={failed}"
     )
-    _log_run(
-        "signal-pipeline",
-        "success" if failed == 0 else "partial",
+    status = _derive_signal_job_status(steps)
+    if failed:
+        status = "partial"
+    result = _signal_job_result(
+        status,
         elapsed,
-        f"priority={len(priority)} watchlist={len(watchlist)} blocked={len(blocked)} sent={sent} failed={failed}",
-        {
-            "candidates": len(candidates),
-            "priority": len(priority),
-            "watchlist": len(watchlist),
-            "blocked": len(blocked),
-            "new_priority": len(new_priority),
-            "sent": sent,
-            "failed": failed,
-            "dry_run": dry_run,
-        },
+        len(candidates),
+        len(priority),
+        len(watchlist),
+        len(blocked),
+        len(new_priority),
+        sent,
+        failed,
+        dry_run,
+        steps,
     )
+    _record_signal_job_result(result)
+    return result
 
 
 def _run_league(
@@ -255,6 +354,76 @@ def _html_text(value: Any) -> str:
     return escape(str(value), quote=False)
 
 
+def _signal_job_result(
+    status: str,
+    elapsed: float,
+    candidates: int,
+    priority: int,
+    watchlist: int,
+    blocked: int,
+    new_priority: int,
+    sent: int,
+    failed: int,
+    dry_run: int,
+    steps: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    now = datetime.now(timezone.utc).isoformat()
+    return {
+        "job_name": "signal-pipeline",
+        "status": status,
+        "finished_at_utc": now,
+        "duration_s": elapsed,
+        "candidates": candidates,
+        "priority": priority,
+        "watchlist": watchlist,
+        "blocked": blocked,
+        "new_priority": new_priority,
+        "sent": sent,
+        "failed": failed,
+        "dry_run": dry_run,
+        "steps": steps,
+    }
+
+
+def _derive_signal_job_status(steps: dict[str, dict[str, Any]]) -> str:
+    statuses = [str(step.get("status", "")) for step in steps.values()]
+    if not statuses:
+        return "skipped"
+    if any(status == "failed" for status in statuses):
+        source_statuses = [
+            str(step.get("status", ""))
+            for name, step in steps.items()
+            if name.startswith("football_") or name in {"tennis", "exotic"}
+        ]
+        if source_statuses and all(status == "failed" for status in source_statuses):
+            return "failed"
+        return "partial"
+    if any(status == "partial" for status in statuses):
+        return "partial"
+    return "success"
+
+
+def _record_signal_job_result(result: dict[str, Any]) -> None:
+    _log_run(
+        str(result["job_name"]),
+        str(result["status"]),
+        float(result["duration_s"]),
+        (
+            f"priority={result['priority']} watchlist={result['watchlist']} "
+            f"blocked={result['blocked']} sent={result['sent']} failed={result['failed']}"
+        ),
+        result,
+    )
+
+
+def _sanitize_error(exc: Exception) -> str:
+    text = str(exc)
+    for key, value in os.environ.items():
+        if value and ("KEY" in key or "TOKEN" in key or "SECRET" in key or "DATABASE_URL" == key):
+            text = text.replace(value, f"[REDACTED_{key}]")
+    return text
+
+
 def _log_run(
     job: str, status: str, duration_s: float, message: str, meta: dict[str, Any] | None = None
 ) -> None:
@@ -267,4 +436,6 @@ def _log_run(
 
 
 if __name__ == "__main__":
-    main()
+    result = main()
+    if result.get("status") == "failed":
+        raise SystemExit(1)
