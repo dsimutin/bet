@@ -1,11 +1,14 @@
 """Surface-specific ELO model for ATP tennis match probability estimation.
 
 V2 enhancements over V1:
-- Time-decayed ELO: recent matches weighted more (half-life ~180 days)
 - Rolling serve/return statistics per surface (hold%, break%, serve win%)
 - H2H record weighted by recency and surface match
 - Combined prediction blending ELO + serve/return stats
 - Days-since-last-match feature (fatigue/rest signal)
+
+Rating updates are chronological but not time-decayed. Do not claim ELO rating
+decay in metadata unless a dated decay update is explicitly implemented and
+backtested.
 """
 
 from __future__ import annotations
@@ -28,7 +31,6 @@ _log = logging.getLogger(__name__)
 ELO_K = 32.0
 ELO_START = 1500.0
 ELO_SCALE = 400.0
-ELO_DECAY_HALF_LIFE_DAYS = 180  # recent matches count ~2x more than 6-month-old ones
 MIN_MATCHES_FOR_SIGNAL = 15
 SURFACES = ("clay", "grass", "hard", "carpet")
 
@@ -62,11 +64,13 @@ class TennisEloModel:
         k: float = ELO_K,
         start: float = ELO_START,
         scale: float = ELO_SCALE,
-        decay_half_life: float = ELO_DECAY_HALF_LIFE_DAYS,
+        decay_half_life: float | None = None,
     ) -> None:
         self.k = k
         self.start = start
         self.scale = scale
+        # Backward-compatible attribute for older pickles. Current ELO rating
+        # updates are not time-decayed; only H2H adjustment uses recency weights.
         self.decay_half_life = decay_half_life
 
         # ELO ratings
@@ -335,8 +339,9 @@ class TennisEloModel:
             "elo_k": self.k,
             "elo_start": self.start,
             "elo_scale": self.scale,
-            "decay_half_life_days": self.decay_half_life,
-            "features": ["surface_elo", "serve_return_stats", "h2h_recency"],
+            "rating_decay_applied": False,
+            "h2h_half_life_days": H2H_HALF_LIFE_DAYS,
+            "features": ["surface_elo", "serve_return_stats", "h2h_recency", "schedule_fatigue"],
         }
         meta_path.parent.mkdir(parents=True, exist_ok=True)
         meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")

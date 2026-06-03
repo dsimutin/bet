@@ -14,6 +14,11 @@ calibration, and historical backtesting.
 Tennis H2H is the only production paper market. Spreads and totals remain experimental
 and disabled by default until calibration and settlement backtests are complete.
 
+The ATP ELO model is chronological and surface-aware, with recency-weighted H2H
+and schedule-fatigue features. ELO rating updates themselves are not time-decayed;
+metadata must keep `rating_decay_applied=false` until a dated rating-decay scheme
+is implemented, calibrated, and backtested.
+
 ## Exotic Leagues
 
 Exotic football uses a Bayesian prior for research watchlist only. It is not a trained
