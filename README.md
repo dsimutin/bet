@@ -406,29 +406,36 @@ paper-сигнал с `paper_stake_units`, предварительно закр
 по synthetic результатам, пишет `paper_signal_ledger.json` и сохраняет dry-run
 Telegram payload. Это быстрый sanity check перед включением scheduled delivery.
 
-### GitHub Actions automation
+### Automation
 
-В репозитории есть четыре workflow:
+Render Cron владеет регулярными production-запусками:
+
+- `daily-trainer` — 06:00 UTC обучает/промоутит Dixon-Coles production-модель.
+- `signal-pipeline` — 08:15 UTC генерирует paper-сигналы.
+- `settle-ledger` — 23:00 UTC закрывает open-сигналы результатами матчей.
+
+GitHub Actions остаются для CI, manual/emergency запусков и артефактов:
 
 - `CI` — на каждый push/PR проверяет тесты, типы и форматирование.
-- `Daily Model Trainer` — ежедневно в 06:00 UTC обучает/промоутит
-  Dixon-Coles production-модель; по умолчанию берёт OpenFootball GitHub raw,
-  а football-data можно выбрать вручную через `history_source=football-data`.
+- `Daily Model Trainer` — `workflow_dispatch`/`workflow_call`, без daily schedule,
+  чтобы не дублировать Render Cron и не писать модели конкурентно.
 - `Model Benchmark` — раз в неделю и вручную строит walk-forward benchmark на
   football-data и сохраняет отчёты как artifact.
-- `Live Signal Pipeline` — ежедневно запускает dry-run на live odds, если в
-  GitHub Secrets задан `THE_ODDS_API_KEY`, или на файлах
-  `data/staging/free_sources/*.csv|*.json|*.jsonl|*.ndjson|*.txt`, если
-  API-ключа нет.
+- `Live Signal Pipeline` — `workflow_dispatch` и integration push, без daily
+  schedule; использует live odds только при заданном `THE_ODDS_API_KEY`, иначе
+  может работать с `data/staging/free_sources/*.csv|*.json|*.jsonl|*.ndjson|*.txt`.
+- `Wake Render free service` — точечно будит Render перед cron-окнами. Постоянный
+  14-минутный keep-alive отключён; `Keep Render Alive` оставлен manual-only.
 
 Для реальной доставки из GitHub Actions добавьте `TELEGRAM_BOT_TOKEN` и
 `TELEGRAM_CHAT_ID`; `THE_ODDS_API_KEY` нужен только для live odds, а free-source
 inbox может работать без него. Затем запустите `Live Signal Pipeline` вручную с
-`send_telegram=true`. Scheduled-запуск по умолчанию остаётся dry-run: он
-сохраняет артефакты и ledger, но не отправляет сообщения без явного ручного
-разрешения. Чтобы бот действительно отправлял сигналы сам по расписанию,
-добавьте Repository Variable `SCHEDULED_SEND_TELEGRAM=true`; workflow всё равно
-потребует Telegram secrets и продолжит писать paper ledger перед отправкой.
+`send_telegram=true`. GitHub manual/emergency запуск по умолчанию остаётся
+dry-run: он сохраняет артефакты и ledger, но не отправляет сообщения без явного
+ручного разрешения. Чтобы GitHub manual/emergency workflow действительно
+отправлял сигналы, добавьте Repository Variable `SCHEDULED_SEND_TELEGRAM=true`;
+workflow всё равно потребует Telegram secrets и продолжит писать paper ledger
+перед отправкой.
 Production-модели, calibration sidecar, `paper_signal_ledger.json` и ключевые
 quality-gate отчёты коммитятся обратно в репозиторий, поэтому следующий
 scheduled run стартует с накопленной памятью, а не с пустого checkout.

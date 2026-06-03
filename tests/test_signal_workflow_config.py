@@ -71,3 +71,14 @@ def test_gitignore_allows_persisted_bot_state_and_public_free_sources() -> None:
     assert "!data/models/calibration_*.pkl" in gitignore
     assert "!data/staging/free_sources/*.jsonl" in gitignore
     assert "!data/staging/free_sources/*.txt" in gitignore
+
+
+def test_render_keep_alive_is_manual_only() -> None:
+    keep_alive = Path(".github/workflows/keep-alive.yml").read_text(encoding="utf-8")
+    wakeup = Path(".github/workflows/render-wakeup.yml").read_text(encoding="utf-8")
+
+    assert "workflow_dispatch:" in keep_alive
+    assert "cron:" not in keep_alive
+    assert "*/14" not in keep_alive
+    assert "schedule:" in wakeup
+    assert "/health" in wakeup

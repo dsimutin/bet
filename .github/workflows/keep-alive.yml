@@ -1,8 +1,9 @@
 name: Keep Render Alive
 
 on:
-  schedule:
-    - cron: "*/14 * * * *"   # every 14 min — Render sleeps after 15 min inactivity
+  # Manual-only fallback. Production wakeups are owned by render-wakeup.yml,
+  # which pings the service shortly before cron windows instead of burning
+  # GitHub/Render free-tier minutes around the clock.
   workflow_dispatch:
 
 jobs:
