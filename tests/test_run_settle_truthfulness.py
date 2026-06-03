@@ -90,6 +90,10 @@ def test_settlement_save_failure_reports_failed(monkeypatch, tmp_path) -> None:
     assert result["steps"]["ledger_save"]["status"] == "failed"
 
 
+def test_settlement_reports_failed_when_authoritative_save_fails(monkeypatch, tmp_path) -> None:
+    test_settlement_save_failure_reports_failed(monkeypatch, tmp_path)
+
+
 def test_settlement_skipped_when_no_open_signals(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("REPORTS_DIR", str(tmp_path / "reports"))
     monkeypatch.setenv("STAGING_DIR", str(tmp_path / "staging"))

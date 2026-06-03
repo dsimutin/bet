@@ -39,6 +39,24 @@ def test_ready_returns_503_when_database_required_but_unavailable(monkeypatch, t
     assert response.json()["ledger"]["ok"] is False
 
 
+def test_health_reports_database_unavailable(monkeypatch, tmp_path) -> None:
+    _write_model(tmp_path / "models", league="EPL")
+    _write_staging(tmp_path)
+    monkeypatch.setenv("LEAGUES", "EPL")
+    monkeypatch.setattr(health_app, "MODEL_DIR", tmp_path / "models")
+    monkeypatch.setattr(health_app, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(health_app, "LEDGER_PATH", tmp_path / "ledger.json")
+    monkeypatch.setattr(
+        "src.infrastructure.persistent_ledger.ledger_healthcheck",
+        lambda path=None: {"backend": "unavailable", "ok": False},
+    )
+
+    response = TestClient(health_app.app).get("/ready")
+
+    assert response.status_code == 503
+    assert response.json()["ledger"] == {"backend": "unavailable", "ok": False}
+
+
 def test_ready_returns_503_when_required_model_missing(monkeypatch, tmp_path) -> None:
     _write_model(tmp_path / "models", league="EPL")
     _write_staging(tmp_path)
@@ -55,6 +73,24 @@ def test_ready_returns_503_when_required_model_missing(monkeypatch, tmp_path) ->
 
     assert response.status_code == 503
     assert response.json()["checks"]["model"]["ready"] is False
+
+
+def test_missing_required_model_marks_readiness_failed(monkeypatch, tmp_path) -> None:
+    _write_model(tmp_path / "models", league="EPL")
+    _write_staging(tmp_path)
+    monkeypatch.setenv("LEAGUES", "EPL,LALIGA")
+    monkeypatch.setattr(health_app, "MODEL_DIR", tmp_path / "models")
+    monkeypatch.setattr(health_app, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(health_app, "LEDGER_PATH", tmp_path / "ledger.json")
+    monkeypatch.setattr(
+        "src.infrastructure.persistent_ledger.ledger_healthcheck",
+        lambda path=None: {"backend": "supabase", "ok": True},
+    )
+
+    body = TestClient(health_app.app).get("/ready").json()
+
+    assert body["status"] == "not_ready"
+    assert body["checks"]["model"]["ready"] is False
 
 
 def test_ready_returns_503_when_production_config_missing(monkeypatch, tmp_path) -> None:
@@ -101,3 +137,7 @@ def test_ready_output_redacts_secrets(monkeypatch, tmp_path) -> None:
     assert "admin-secret" not in body
     assert "webhook-secret" not in body
     assert "password" not in body
+
+
+def test_health_output_redacts_secrets(monkeypatch, tmp_path) -> None:
+    test_ready_output_redacts_secrets(monkeypatch, tmp_path)

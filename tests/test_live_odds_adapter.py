@@ -72,6 +72,20 @@ def test_live_odds_adapter_prefers_configured_bookmaker() -> None:
     assert row["source_market_key"] == "h2h"
 
 
+def test_live_adapter_preserves_event_and_snapshot_timestamps() -> None:
+    result = LiveOddsFootballDataAdapter(preferred_bookmakers=["bet365"]).convert([_live_event()])
+
+    row = result.dataframe.iloc[0]
+    assert row["event_time_utc"] == "2026-06-01T18:30:00+00:00"
+    assert row["snapshot_ts_utc"].endswith("+00:00")
+    assert row["source_last_update_utc"] == "2026-05-27T12:01:00Z"
+    assert row["source_event_id"] == "evt_live_1"
+    assert row["source_sport_key"] == "soccer_epl"
+    assert row["source_bookmaker_key"] == "bet365"
+    assert row["source_bookmaker_title"] == "Bet365"
+    assert row["source_market_key"] == "h2h"
+
+
 def test_live_odds_adapter_skips_incomplete_h2h_market() -> None:
     event = _live_event()
     event["bookmakers"][1]["markets"][0]["outcomes"] = [

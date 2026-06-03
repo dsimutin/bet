@@ -26,3 +26,13 @@ def test_integer_total_push() -> None:
 def test_retirement_total_is_void() -> None:
     row = {"score": "6-4 RET"}
     assert _settle_total(row, {"selection": "under", "total_threshold": 20.5}) == "void"
+
+
+def test_tennis_retirement_is_void() -> None:
+    row = {"score": "6-4 RET"}
+    assert _settle_total(row, {"selection": "over", "total_threshold": 20.5}) == "void"
+
+
+def test_tennis_walkover_is_void() -> None:
+    row = {"score": "W/O"}
+    assert _settle_total(row, {"selection": "under", "total_threshold": 20.5}) == "void"

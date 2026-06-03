@@ -26,11 +26,34 @@ def test_tennis_verified_pre_match_signal_is_allowed() -> None:
     assert allowed[0]["timestamp_verification_status"] == "verified_pre_match"
 
 
+def test_live_football_signal_passes_timestamp_policy() -> None:
+    allowed, blocked = _partition_by_timestamp_policy([_signal(sport="football")])
+    assert len(allowed) == 1
+    assert blocked == []
+    assert allowed[0]["timestamp_verification_status"] == "verified_pre_match"
+
+
 def test_started_tennis_event_is_rejected() -> None:
     snapshot = datetime.now(timezone.utc).replace(microsecond=0)
     event_time = snapshot - timedelta(minutes=5)
     allowed, blocked = _partition_by_timestamp_policy(
         [_signal(snapshot_ts_utc=snapshot.isoformat(), event_time_utc=event_time.isoformat())]
+    )
+    assert allowed == []
+    assert blocked[0][1] == "odds snapshot is not earlier than event start"
+
+
+def test_started_football_match_is_rejected() -> None:
+    snapshot = datetime.now(timezone.utc).replace(microsecond=0)
+    event_time = snapshot - timedelta(minutes=5)
+    allowed, blocked = _partition_by_timestamp_policy(
+        [
+            _signal(
+                sport="football",
+                snapshot_ts_utc=snapshot.isoformat(),
+                event_time_utc=event_time.isoformat(),
+            )
+        ]
     )
     assert allowed == []
     assert blocked[0][1] == "odds snapshot is not earlier than event start"

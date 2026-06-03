@@ -20,6 +20,8 @@ def main() -> None:
         else {"entries": {}}
     )
     migrated, migration_report = migrate_ledger_payload(payload)
+    ledger_path.parent.mkdir(parents=True, exist_ok=True)
+    ledger_path.write_text(json.dumps(migrated, indent=2, ensure_ascii=False), encoding="utf-8")
     entries = migrated.get("entries", {})
     report = {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
