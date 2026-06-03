@@ -385,9 +385,9 @@ def _format_pick(item: dict[str, Any], priority: bool) -> list[str]:
 
 
 def _load_entries() -> list[dict[str, Any]]:
-    from src.models.signal_ledger import SignalLedger
+    from src.infrastructure.history_ledger import load_history_ledger
 
-    return list(SignalLedger.load_or_create(LEDGER_PATH).entries().values())
+    return list(load_history_ledger(LEDGER_PATH).entries().values())
 
 
 def _event_day(item: dict[str, Any]) -> date | None:
