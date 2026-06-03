@@ -13,10 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import requests
 from pydantic import BaseModel, Field
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 
 # Настройка логгера модуля
 logger = logging.getLogger(__name__)
@@ -70,7 +67,7 @@ class OddsSnapshot(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def _build_session(max_retries: int = 3, backoff_factor: float = 1.5) -> requests.Session:
+def _build_session(max_retries: int = 3, backoff_factor: float = 1.5) -> None:
     """
     Создаёт HTTP-сессию с настроенной логикой повторных попыток.
 
@@ -83,21 +80,11 @@ def _build_session(max_retries: int = 3, backoff_factor: float = 1.5) -> request
 
     Возвращает
     ----------
-    requests.Session
-        Настроенная сессия.
+    None
+        Deprecated placeholder retained for import compatibility. Runtime requests go
+        through src.services.odds_gateway for quota accounting and redaction.
     """
-    retry_strategy = Retry(
-        total=max_retries,
-        backoff_factor=backoff_factor,
-        status_forcelist=[429, 500, 502, 503, 504],
-        allowed_methods=["GET"],
-        raise_on_status=False,
-    )
-    adapter = HTTPAdapter(max_retries=retry_strategy)
-    session = requests.Session()
-    session.mount("https://", adapter)
-    session.mount("http://", adapter)
-    return session
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -132,7 +119,6 @@ class OddsAPIClient:
         self.base_url = base_url.rstrip("/")
         self.request_delay_sec = request_delay_sec
         self.timeout_sec = timeout_sec
-        self._session = _build_session()
         logger.info("OddsAPIClient инициализирован. Базовый URL: %s", self.base_url)
 
     # ------------------------------------------------------------------
@@ -162,34 +148,43 @@ class OddsAPIClient:
         RuntimeError
             При исчерпании лимита запросов (429) после всех попыток.
         """
-        url = f"{self.base_url}/{endpoint.lstrip('/')}"
-        query: dict[str, Any] = {"apiKey": self.api_key}
+        query: dict[str, Any] = {}
         if params:
             query.update(params)
 
         logger.debug(
-            "Запрос: GET %s | параметры: %s", url, {k: v for k, v in query.items() if k != "apiKey"}
+            "Запрос Odds API gateway: endpoint=%s | параметры: %s",
+            endpoint,
+            query,
         )
 
         # Пауза для соблюдения ограничений частоты запросов
         time.sleep(self.request_delay_sec)
 
-        response = self._session.get(url, params=query, timeout=self.timeout_sec)
+        from src.services.odds_gateway import fetch_the_odds_api_json
 
-        # Логируем остаток квоты из заголовков ответа
-        remaining = response.headers.get("x-requests-remaining")
-        used = response.headers.get("x-requests-used")
+        markets = str(query.get("markets", "")).split(",") if query.get("markets") else []
+        regions = str(query.get("regions", "")).split(",") if query.get("regions") else []
+        sport_key = ""
+        endpoint_clean = endpoint.strip("/")
+        if endpoint_clean.startswith("sports/") and endpoint_clean.endswith("/odds"):
+            sport_key = endpoint_clean.split("/")[1]
+        response = fetch_the_odds_api_json(
+            "/" + endpoint_clean,
+            api_key=self.api_key,
+            query={key: str(value) for key, value in query.items()},
+            source="ingest.odds_api",
+            sport_key=sport_key,
+            markets=[item for item in markets if item],
+            regions=[item for item in regions if item],
+            priority_refresh=True,
+        )
+        remaining = response.headers.get("remaining")
+        used = response.headers.get("used")
         if remaining is not None:
             logger.info("Осталось запросов: %s | использовано: %s", remaining, used)
 
-        if response.status_code == 429:
-            # Попытки уже исчерпаны адаптером — сообщаем об ошибке
-            raise RuntimeError(
-                "Превышен лимит запросов к The Odds API (429). " "Повторные попытки исчерпаны."
-            )
-
-        response.raise_for_status()
-        return response.json()
+        return response.payload
 
     # ------------------------------------------------------------------
     # Публичные методы

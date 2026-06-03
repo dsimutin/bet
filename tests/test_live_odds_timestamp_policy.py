@@ -1,16 +1,18 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from src.cron.run_signals import _partition_by_timestamp_policy
 
 
 def _signal(**overrides):
+    snapshot = datetime.now(timezone.utc).replace(microsecond=0)
+    event_time = snapshot + timedelta(hours=2)
     base = {
         "signal_id": "s1",
         "sport": "tennis",
-        "snapshot_ts_utc": "2026-06-03T10:00:00+00:00",
-        "event_time_utc": "2026-06-03T12:00:00+00:00",
+        "snapshot_ts_utc": snapshot.isoformat(),
+        "event_time_utc": event_time.isoformat(),
         "dataset_hash": "sha256:test",
     }
     base.update(overrides)
@@ -25,8 +27,10 @@ def test_tennis_verified_pre_match_signal_is_allowed() -> None:
 
 
 def test_started_tennis_event_is_rejected() -> None:
+    snapshot = datetime.now(timezone.utc).replace(microsecond=0)
+    event_time = snapshot - timedelta(minutes=5)
     allowed, blocked = _partition_by_timestamp_policy(
-        [_signal(snapshot_ts_utc="2026-06-03T13:00:00+00:00")]
+        [_signal(snapshot_ts_utc=snapshot.isoformat(), event_time_utc=event_time.isoformat())]
     )
     assert allowed == []
     assert blocked[0][1] == "odds snapshot is not earlier than event start"
