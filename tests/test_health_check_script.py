@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 
 import scripts.health_check as health_check
 
@@ -45,3 +46,9 @@ def test_health_script_next_steps_do_not_push_directly_to_production(monkeypatch
 
     assert "push to all-the-best branch" not in caplog.text
     assert "Open a PR into all-the-best" in caplog.text
+
+
+def test_render_requirements_include_runtime_retry_dependency() -> None:
+    requirements = Path("requirements-render.txt").read_text(encoding="utf-8")
+
+    assert "tenacity" in requirements
