@@ -14,6 +14,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import sys
 import time
 from datetime import date, datetime, timezone
@@ -230,7 +231,7 @@ def send_morning_digest() -> str:
                 _log.error("[digest] Telegram API error: %s", body.get("description"))
                 return "failed"
     except Exception as exc:
-        _log.error("[digest] Telegram send failed: %s", exc)
+        _log.error("[digest] Telegram send failed: %s", _sanitize_error_text(str(exc)))
         return "failed"
 
 
@@ -1041,6 +1042,17 @@ def _mask_chat_id(chat_id: str) -> str:
     return "***" if chat_id else "(empty)"
 
 
+def _sanitize_error_text(text: str) -> str:
+    safe = re.sub(r"(?i)(apiKey|api_key|key)=([^&\s]+)", r"\1=[REDACTED]", str(text))
+    safe = re.sub(r"/bot[^/\s]+/", "/bot[REDACTED]/", safe)
+    for name, value in os.environ.items():
+        if not value or len(value) < 4:
+            continue
+        if any(marker in name.upper() for marker in ("KEY", "TOKEN", "SECRET", "DATABASE_URL")):
+            safe = safe.replace(value, "[REDACTED]")
+    return safe
+
+
 def _save_tg_delivery_status(status: str, error: str | None = None) -> None:
     """Persist last Telegram delivery status for /health/active."""
     try:
@@ -1050,7 +1062,7 @@ def _save_tg_delivery_status(status: str, error: str | None = None) -> None:
                 {
                     "last_status": status,
                     "last_at": datetime.now(timezone.utc).isoformat(),
-                    "last_error": error,
+                    "last_error": _sanitize_error_text(error) if error else None,
                 },
                 indent=2,
             ),
@@ -1128,7 +1140,7 @@ def _send_status_report(
                     _save_tg_delivery_status("sent")
                     return "sent"
                 else:
-                    desc = body.get("description", str(body))
+                    desc = _sanitize_error_text(str(body.get("description", str(body))))
                     _log.error("[active] Telegram API not-ok: %s", desc)
                     last_error = f"api_error: {desc}"
                     _save_tg_delivery_status("failed", last_error)
@@ -1140,8 +1152,9 @@ def _send_status_report(
                 err_desc = json.loads(body_raw).get("description", body_raw)
             except Exception:
                 err_desc = body_raw or str(e)
-            last_error = f"http_{e.code}: {err_desc}"
-            _log.error("[active] Telegram HTTP %d: %s (attempt %d)", e.code, err_desc, attempt + 1)
+            safe_desc = _sanitize_error_text(str(err_desc))
+            last_error = f"http_{e.code}: {safe_desc}"
+            _log.error("[active] Telegram HTTP %d: %s (attempt %d)", e.code, safe_desc, attempt + 1)
             # 4xx are permanent errors — do not retry
             if 400 <= e.code < 500:
                 _save_tg_delivery_status("failed", last_error)
@@ -1149,8 +1162,11 @@ def _send_status_report(
             if attempt < 2:
                 time.sleep(2**attempt)
         except OSError as e:
-            last_error = f"network: {e}"
-            _log.warning("[active] Telegram network error (attempt %d): %s", attempt + 1, e)
+            safe_error = _sanitize_error_text(str(e))
+            last_error = f"network: {safe_error}"
+            _log.warning(
+                "[active] Telegram network error (attempt %d): %s", attempt + 1, safe_error
+            )
             if attempt < 2:
                 time.sleep(2**attempt)
 

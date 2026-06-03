@@ -46,4 +46,13 @@ def test_public_health_does_not_expose_secrets(monkeypatch) -> None:
     client = TestClient(app)
     response = client.get("/health")
     assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
     assert "secret" not in response.text
+
+
+def test_deep_readiness_requires_admin_token(monkeypatch) -> None:
+    monkeypatch.setenv("ADMIN_API_TOKEN", "secret")
+    from src.web.health_app import app
+
+    client = TestClient(app)
+    assert client.get("/health/readiness").status_code == 401

@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import sys
 import hmac
 from contextlib import asynccontextmanager
@@ -155,7 +156,9 @@ def _send_startup_telegram(msg: str) -> None:
             pass
         _log.info("[health_app] Startup Telegram notification sent")
     except Exception as exc:
-        _log.warning("[health_app] Startup Telegram notification failed: %s", exc)
+        _log.warning(
+            "[health_app] Startup Telegram notification failed: %s", _sanitize_error_text(str(exc))
+        )
 
 
 @asynccontextmanager
@@ -200,6 +203,17 @@ def _utcnow() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _sanitize_error_text(text: str) -> str:
+    safe = re.sub(r"(?i)(apiKey|api_key|key)=([^&\s]+)", r"\1=[REDACTED]", str(text))
+    safe = re.sub(r"/bot[^/\s]+/", "/bot[REDACTED]/", safe)
+    for name, value in os.environ.items():
+        if not value or len(value) < 4:
+            continue
+        if any(marker in name.upper() for marker in ("KEY", "TOKEN", "SECRET", "DATABASE_URL")):
+            safe = safe.replace(value, "[REDACTED]")
+    return safe
+
+
 def _debug_routes_enabled() -> bool:
     return _env_bool("ENABLE_DEBUG_ROUTES", False)
 
@@ -232,7 +246,7 @@ def require_debug_enabled() -> None:
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "ts": _utcnow()}
+    return {"status": "ok"}
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -370,7 +384,7 @@ def health_disk():
 # ──────────────────────────────────────────────────────────────────
 
 
-@app.get("/health/readiness")
+@app.get("/health/readiness", dependencies=[Depends(require_admin)])
 def health_readiness():
     """Check whether the system is ready to generate and deliver signals."""
     checks: dict[str, dict] = {}
@@ -597,7 +611,10 @@ def _read_tg_delivery_status() -> dict:
     path = REPORTS_DIR / "tg_delivery_status.json"
     if path.exists():
         try:
-            return json.loads(path.read_text(encoding="utf-8"))
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if data.get("last_error"):
+                data["last_error"] = _sanitize_error_text(str(data["last_error"]))
+            return data
         except Exception:
             pass
     return {}
@@ -762,10 +779,11 @@ def health_quota():
             "timestamp_utc": datetime.now(timezone.utc).isoformat(),
         }
     except Exception as exc:
-        _log.warning("[quota] health check failed: %s", exc)
+        safe_error = _sanitize_error_text(str(exc))
+        _log.warning("[quota] health check failed: %s", safe_error)
         return {
             "status": "unknown",
-            "error": str(exc),
+            "error": safe_error,
             "timestamp_utc": datetime.now(timezone.utc).isoformat(),
         }
 
@@ -1141,4 +1159,4 @@ def debug_odds_sports():
             "ts": _utcnow(),
         }
     except Exception as exc:
-        return {"error": str(exc), "ts": _utcnow()}
+        return {"error": _sanitize_error_text(str(exc)), "ts": _utcnow()}

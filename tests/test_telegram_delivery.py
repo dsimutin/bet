@@ -308,6 +308,42 @@ class TestSendStatusReport:
         assert status == "failed"
         assert call_count == 1
 
+    def test_delivery_error_status_redacts_tokens(self, tmp_path) -> None:
+        def side_effect(*a, **kw):
+            raise _make_http_error(
+                401,
+                {
+                    "ok": False,
+                    "description": "failed https://api.telegram.org/botsecret-token/sendMessage?apiKey=odds-secret",
+                },
+            )
+
+        with patch.dict(
+            os.environ,
+            {
+                "TELEGRAM_BOT_TOKEN": "secret-token",
+                "THE_ODDS_API_KEY": "odds-secret",
+                "TELEGRAM_CHAT_ID": "-1001234",
+                "REPORTS_DIR": str(tmp_path),
+            },
+            clear=False,
+        ):
+            status = self._call(
+                {
+                    "TELEGRAM_BOT_TOKEN": "secret-token",
+                    "THE_ODDS_API_KEY": "odds-secret",
+                    "TELEGRAM_CHAT_ID": "-1001234",
+                    "REPORTS_DIR": str(tmp_path),
+                },
+                urlopen_side_effect=side_effect,
+            )
+
+        saved = json.loads((tmp_path / "tg_delivery_status.json").read_text())
+        assert status == "failed"
+        assert "secret-token" not in saved["last_error"]
+        assert "odds-secret" not in saved["last_error"]
+        assert "[REDACTED]" in saved["last_error"]
+
     def test_parse_mode_not_empty_string_in_payload(self, tmp_path) -> None:
         """Verify the fixed payload never sends parse_mode='' (causes 400)."""
         captured_payloads: list[dict] = []
@@ -560,6 +596,42 @@ class TestHealthActiveEndpoint:
             ).json()
         assert data["telegram"]["last_delivery_status"] == "sent"
 
+    def test_last_delivery_error_is_redacted(self, tmp_path) -> None:
+        status_file = tmp_path / "tg_delivery_status.json"
+        status_file.write_text(
+            json.dumps(
+                {
+                    "last_status": "failed",
+                    "last_at": "2026-05-29T20:00:00+00:00",
+                    "last_error": "failed https://api.telegram.org/botsecret-token/sendMessage?apiKey=odds-secret",
+                }
+            )
+        )
+        with patch.dict(
+            os.environ,
+            {
+                "ADMIN_API_TOKEN": "test-admin",
+                "TELEGRAM_BOT_TOKEN": "secret-token",
+                "THE_ODDS_API_KEY": "odds-secret",
+            },
+            clear=False,
+        ):
+            from fastapi.testclient import TestClient
+            import importlib
+            import src.web.health_app as ha
+
+            importlib.reload(ha)
+            with patch("src.web.health_app.REPORTS_DIR", tmp_path):
+                client = TestClient(ha.app)
+                data = client.get(
+                    "/health/active", headers={"Authorization": "Bearer test-admin"}
+                ).json()
+
+        last_error = data["telegram"]["last_error"]
+        assert "secret-token" not in last_error
+        assert "odds-secret" not in last_error
+        assert "[REDACTED]" in last_error
+
 
 # ---------------------------------------------------------------------------
 # 7. /health/readiness degraded states
@@ -570,6 +642,7 @@ class TestHealthReadinessDegraded:
     def _get_readiness(self, env_overrides: dict, tmp_path: Path) -> dict:
         # Inject REPORTS_DIR via env so module reload picks it up correctly
         overrides = {
+            "ADMIN_API_TOKEN": "test-admin-token",
             "REPORTS_DIR": str(tmp_path),
             "DATA_DIR": str(tmp_path),
             "MODEL_DIR": str(tmp_path / "models"),
@@ -583,7 +656,10 @@ class TestHealthReadinessDegraded:
 
             importlib.reload(ha)
             client = TestClient(ha.app)
-            return client.get("/health/readiness").json()
+            return client.get(
+                "/health/readiness",
+                headers={"Authorization": "Bearer test-admin-token"},
+            ).json()
 
     def test_degraded_when_failed_telegram_delivery(self, tmp_path) -> None:
         status_file = tmp_path / "tg_delivery_status.json"
