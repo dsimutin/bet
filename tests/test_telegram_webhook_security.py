@@ -140,3 +140,28 @@ def test_manual_refresh_error_is_sanitized(monkeypatch) -> None:
 
     assert any("Подробности скрыты" in text for text in sent)
     assert all("secret-token" not in text for text in sent)
+
+
+def test_tennis_diagnostics_error_is_sanitized(monkeypatch) -> None:
+    import src.web.telegram_bot as bot
+
+    class InlineThread:
+        def __init__(self, target, daemon=False):
+            self.target = target
+
+        def start(self):
+            self.target()
+
+    def scan_fails(*args, **kwargs):
+        raise ModuleNotFoundError("No module named 'tenacity'")
+
+    sent: list[str] = []
+    monkeypatch.setattr(bot.threading, "Thread", InlineThread)
+    monkeypatch.setattr(bot, "_send", lambda chat_id, text, reply_markup=None: sent.append(text))
+    monkeypatch.setattr("src.signals.tennis_runtime_scan.scan_tennis_h2h_runtime", scan_fails)
+
+    bot._debug_tennis("123")
+
+    assert any("Подробности скрыты" in text for text in sent)
+    assert all("tenacity" not in text for text in sent)
+    assert all("No module named" not in text for text in sent)

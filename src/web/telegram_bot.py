@@ -237,13 +237,34 @@ def _debug_tennis(chat_id: str) -> None:
             )
             _send(chat_id, text, _back_button())
         except Exception as exc:
-            _send(chat_id, f"❌ Диагностика: {escape(str(exc))}", _back_button())
+            _log.exception("[bot] tennis diagnostics failed: %s", _sanitize_error(exc))
+            _send(
+                chat_id,
+                "❌ Диагностика завершилась ошибкой. Подробности скрыты из соображений безопасности.",
+                _back_button(),
+            )
 
     threading.Thread(target=_run, daemon=True).start()
 
 
 def _back_button() -> dict[str, Any]:
     return {"inline_keyboard": [[{"text": "← Главное меню", "callback_data": "main_menu"}]]}
+
+
+def _sanitize_error(exc: Exception) -> str:
+    text = str(exc)
+    for key in (
+        "TELEGRAM_BOT_TOKEN",
+        "TELEGRAM_WEBHOOK_SECRET",
+        "ADMIN_API_TOKEN",
+        "THE_ODDS_API_KEY",
+        "ODDS_API_IO_KEY",
+        "DATABASE_URL",
+    ):
+        value = os.environ.get(key, "")
+        if value:
+            text = text.replace(value, "[REDACTED]")
+    return text
 
 
 def _send(chat_id: str, text: str, reply_markup: dict[str, Any] | None = None) -> dict[str, Any]:
