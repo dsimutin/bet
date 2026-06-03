@@ -246,8 +246,8 @@ def _log_run(
         from src.infrastructure.render_db import get_db
 
         get_db().log_cron_run(job, status, duration_s, message, meta)
-    except Exception:
-        pass
+    except Exception as exc:
+        print(f"[signals] audit log failed (non-critical): {exc}", file=sys.stderr)
 
 
 if __name__ == "__main__":

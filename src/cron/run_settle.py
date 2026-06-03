@@ -16,7 +16,7 @@ def main() -> None:
     t0 = time.perf_counter()
     leagues = [
         x.strip()
-        for x in os.environ.get("LEAGUES", "EPL,BUNDESLIGA,LALIGA,SERIEA").split(",")
+        for x in os.environ.get("LEAGUES", "EPL,BUNDESLIGA,LALIGA,SERIEA,LIGUE1").split(",")
         if x.strip()
     ]
     seasons = [
@@ -140,8 +140,8 @@ def _log_run(
         from src.infrastructure.render_db import get_db
 
         get_db().log_cron_run(job, status, duration_s, message, meta)
-    except Exception:
-        pass
+    except Exception as exc:
+        print(f"[settle] audit log failed (non-critical): {exc}", file=sys.stderr)
 
 
 if __name__ == "__main__":

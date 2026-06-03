@@ -41,7 +41,10 @@ def _pg_cursor() -> Generator:
     except ImportError as e:
         raise RuntimeError("psycopg2-binary not installed. Run: pip install psycopg2-binary") from e
 
-    conn = psycopg2.connect(os.environ["DATABASE_URL"])
+    database_url = os.environ.get("DATABASE_URL", "").strip()
+    if not database_url:
+        raise RuntimeError("DATABASE_URL is not configured")
+    conn = psycopg2.connect(database_url)
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             yield cur
