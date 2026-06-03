@@ -5,6 +5,7 @@ import os
 import sys
 import time
 from datetime import date, datetime, timezone
+from html import escape
 from pathlib import Path
 from typing import Any
 
@@ -228,26 +229,30 @@ def _notify_priority(signals: list[dict[str, Any]], ledger) -> tuple[int, int, i
 
 def _format_priority_alert(signal: dict[str, Any]) -> str:
     sport = signal.get("sport", "football")
-    odds = signal.get("entry_odds", "?")
-    edge = signal.get("edge_pct", signal.get("edge_vs_fair_pct", "?"))
+    odds = _html_text(signal.get("entry_odds", "?"))
+    edge = _html_text(signal.get("edge_pct", signal.get("edge_vs_fair_pct", "?")))
     prob = signal.get("model_probability", signal.get("model_prob"))
     prob_text = f"{float(prob):.1%}" if isinstance(prob, (int, float)) else "?"
     is_exotic = signal.get("model_source") == "bayesian_zero_shot"
 
     if sport == "tennis":
-        title = f"🎾 <b>ПРИОРИТЕТНЫЙ PAPER-СИГНАЛ</b>\nПобеда: <b>{signal.get('player', '?')}</b>\nСоперник: {signal.get('opponent', '?')}"
-        extras = f"\nПокрытие: {signal.get('surface', '?')}\nФорма: {signal.get('recent_form', '?')} | Отдых: {signal.get('days_since_last_match', '?')} дн."
+        title = f"🎾 <b>ПРИОРИТЕТНЫЙ PAPER-СИГНАЛ</b>\nПобеда: <b>{_html_text(signal.get('player', '?'))}</b>\nСоперник: {_html_text(signal.get('opponent', '?'))}"
+        extras = f"\nПокрытие: {_html_text(signal.get('surface', '?'))}\nФорма: {_html_text(signal.get('recent_form', '?'))} | Отдых: {_html_text(signal.get('days_since_last_match', '?'))} дн."
         disclaimer = "📄 Бумажный сигнал. Проверьте линию перед любым самостоятельным решением."
     elif is_exotic:
-        league_name = signal.get("league_name", signal.get("league", "?"))
-        title = f"🌍 <b>WATCHLIST (экзотика)</b> — {league_name}\nМатч: <b>{signal.get('home_team', '?')} — {signal.get('away_team', '?')}</b>\nИсход: <b>{signal.get('selection_ru', signal.get('selection', '?'))}</b>"
-        extras = f"\nМаржа БК: {signal.get('margin_pct', '?')}%"
+        league_name = _html_text(signal.get("league_name", signal.get("league", "?")))
+        title = f"🌍 <b>WATCHLIST (экзотика)</b> — {league_name}\nМатч: <b>{_html_text(signal.get('home_team', '?'))} — {_html_text(signal.get('away_team', '?'))}</b>\nИсход: <b>{_html_text(signal.get('selection_ru', signal.get('selection', '?')))}</b>"
+        extras = f"\nМаржа БК: {_html_text(signal.get('margin_pct', '?'))}%"
         disclaimer = "⚠️ Байесовская модель без истории лиги. Только Watchlist. Проверьте вручную."
     else:
-        title = f"⚽ <b>ПРИОРИТЕТНЫЙ PAPER-СИГНАЛ</b>\nМатч: <b>{signal.get('home_team', '?')} — {signal.get('away_team', '?')}</b>\nИсход: <b>{signal.get('selection_ru', signal.get('selection', '?'))}</b>"
-        extras = f"\nМодель: {signal.get('model_id', '?')}"
+        title = f"⚽ <b>ПРИОРИТЕТНЫЙ PAPER-СИГНАЛ</b>\nМатч: <b>{_html_text(signal.get('home_team', '?'))} — {_html_text(signal.get('away_team', '?'))}</b>\nИсход: <b>{_html_text(signal.get('selection_ru', signal.get('selection', '?')))}</b>"
+        extras = f"\nМодель: {_html_text(signal.get('model_id', '?'))}"
         disclaimer = "📄 Бумажный сигнал. Проверьте линию перед любым самостоятельным решением."
     return f"{title}\nКоэффициент: <b>{odds}</b>\nВероятность модели: <b>{prob_text}</b>\nEdge: <b>{edge}%</b>{extras}\n\n{disclaimer}"
+
+
+def _html_text(value: Any) -> str:
+    return escape(str(value), quote=False)
 
 
 def _log_run(
