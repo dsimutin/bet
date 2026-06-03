@@ -59,6 +59,20 @@ class APIQuotaMonitor:
         if isinstance(records, list):
             records.append(record)
             data["_provider_records"] = records[-200:]
+        api_name = _provider_api_name(str(record.get("provider", "")))
+        used = _parse_int(record.get("x_requests_used"))
+        if api_name and used is not None:
+            month = str(record.get("requested_at_utc") or datetime.now(timezone.utc).isoformat())[
+                :7
+            ]
+            provider_usage = data.setdefault("_provider_monthly_usage", {})
+            if isinstance(provider_usage, dict):
+                month_usage = provider_usage.setdefault(month, {})
+                if isinstance(month_usage, dict):
+                    month_usage[api_name] = max(int(month_usage.get(api_name, 0) or 0), used)
+                    provider_usage[month] = month_usage
+                data["_provider_monthly_usage"] = provider_usage
+        if isinstance(records, list) or api_name:
             self._save(data)
 
     def monthly_usage(self, api_name: str, month: str = "") -> tuple[int, int]:
@@ -67,7 +81,18 @@ class APIQuotaMonitor:
             month = datetime.now(timezone.utc).date().isoformat()[:7]
 
         data = self._load()
-        used = sum(v.get(api_name, 0) for k, v in data.items() if k.startswith(month))
+        local_used = sum(
+            v.get(api_name, 0)
+            for k, v in data.items()
+            if k.startswith(month) and isinstance(v, dict)
+        )
+        provider_usage = data.get("_provider_monthly_usage", {})
+        provider_used = 0
+        if isinstance(provider_usage, dict):
+            month_usage = provider_usage.get(month, {})
+            if isinstance(month_usage, dict):
+                provider_used = int(month_usage.get(api_name, 0) or 0)
+        used = max(local_used, provider_used)
         limit = self.LIMITS.get(api_name, {}).get("free", 0)
         return used, limit
 
@@ -135,3 +160,20 @@ def record_apifootball_request(calls: int = 1) -> None:
 def get_usage_summary() -> dict[str, Any]:
     """Get monthly usage summary for all APIs."""
     return _monitor.usage_summary()
+
+
+def _provider_api_name(provider: str) -> str:
+    aliases = {
+        "the_odds_api": "the_odds_api",
+        "oddsapi": "the_odds_api",
+        "api-football": "apifootball",
+        "apifootball": "apifootball",
+    }
+    return aliases.get(provider.strip().lower(), "")
+
+
+def _parse_int(value: Any) -> int | None:
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
