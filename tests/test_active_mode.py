@@ -725,6 +725,28 @@ class TestRunActiveReportImport:
         r = _empty_settlement_result()
         assert r["settled_count"] == 0
 
+    def test_active_report_uses_authoritative_ledger_backend(self):
+        source = Path("src/cron/run_active_report.py").read_text(encoding="utf-8")
+        assert "SignalLedger.load_or_create" not in source
+        assert "load_ledger(LEDGER_PATH)" in source
+        assert "save_ledger(" in source
+
+    def test_odds_key_validation_does_not_spend_quota_on_cache_miss(self, monkeypatch):
+        import src.cron.run_active_report as rar
+
+        providers_ok = ["Odds API"]
+        providers_skip: list[str] = []
+        monkeypatch.setattr("src.infrastructure.odds_cache.get", lambda _key: None)
+        monkeypatch.setattr(
+            "src.services.runtime_odds._fetch_active_sports",
+            lambda _api_key: (_ for _ in ()).throw(AssertionError("must not fetch")),
+        )
+
+        rar._validate_odds_api_key_in_background("secret-key", providers_ok, providers_skip)
+
+        assert providers_ok == ["Odds API"]
+        assert providers_skip == []
+
 
 # ---------------------------------------------------------------------------
 # 10. Scheduler module importable (ACTIVE_MODE=false)

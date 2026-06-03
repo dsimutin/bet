@@ -15,10 +15,10 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 # Leagues to bootstrap on first deploy. Each gets its own Dixon-Coles model.
 # RPL not in OpenFootball — add when an alternative data source is available.
 BOOTSTRAP_LEAGUES = [
-    ("EPL",        ["2021-22", "2022-23", "2023-24", "2024-25"]),
+    ("EPL", ["2021-22", "2022-23", "2023-24", "2024-25"]),
     ("BUNDESLIGA", ["2021-22", "2022-23", "2023-24", "2024-25"]),
-    ("LALIGA",     ["2021-22", "2022-23", "2023-24", "2024-25"]),
-    ("SERIEA",     ["2021-22", "2022-23", "2023-24", "2024-25"]),
+    ("LALIGA", ["2021-22", "2022-23", "2023-24", "2024-25"]),
+    ("SERIEA", ["2021-22", "2022-23", "2023-24", "2024-25"]),
 ]
 
 

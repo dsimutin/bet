@@ -308,6 +308,42 @@ class TestSendStatusReport:
         assert status == "failed"
         assert call_count == 1
 
+    def test_delivery_error_status_redacts_tokens(self, tmp_path) -> None:
+        def side_effect(*a, **kw):
+            raise _make_http_error(
+                401,
+                {
+                    "ok": False,
+                    "description": "failed https://api.telegram.org/botsecret-token/sendMessage?apiKey=odds-secret",
+                },
+            )
+
+        with patch.dict(
+            os.environ,
+            {
+                "TELEGRAM_BOT_TOKEN": "secret-token",
+                "THE_ODDS_API_KEY": "odds-secret",
+                "TELEGRAM_CHAT_ID": "-1001234",
+                "REPORTS_DIR": str(tmp_path),
+            },
+            clear=False,
+        ):
+            status = self._call(
+                {
+                    "TELEGRAM_BOT_TOKEN": "secret-token",
+                    "THE_ODDS_API_KEY": "odds-secret",
+                    "TELEGRAM_CHAT_ID": "-1001234",
+                    "REPORTS_DIR": str(tmp_path),
+                },
+                urlopen_side_effect=side_effect,
+            )
+
+        saved = json.loads((tmp_path / "tg_delivery_status.json").read_text())
+        assert status == "failed"
+        assert "secret-token" not in saved["last_error"]
+        assert "odds-secret" not in saved["last_error"]
+        assert "[REDACTED]" in saved["last_error"]
+
     def test_parse_mode_not_empty_string_in_payload(self, tmp_path) -> None:
         """Verify the fixed payload never sends parse_mode='' (causes 400)."""
         captured_payloads: list[dict] = []
@@ -440,8 +476,8 @@ class TestSchedulerStates:
             running, n_jobs = asyncio.run(_check())
             assert running is True
             assert (
-                n_jobs == 8
-            )  # signal_scan, settlement, today_digest, today_digest_refresh, training_check, keep_alive, tennis_refresh, tennis_retrain
+                n_jobs == 7
+            )  # signal_scan, settlement, today digests, training_check, tennis_refresh, tennis_retrain
 
     def test_scheduler_logs_next_run_times(self, caplog) -> None:
         import asyncio
@@ -495,6 +531,7 @@ class TestHealthActiveEndpoint:
                 "TELEGRAM_CHAT_ID": "-1001234" if active_mode == "true" else "",
                 "TELEGRAM_STATUS_REPORTS_ENABLED": "true",
                 "TELEGRAM_SIGNAL_ALERTS_ENABLED": "true",
+                "ADMIN_API_TOKEN": "test-admin",
             },
             clear=False,
         ):
@@ -504,7 +541,9 @@ class TestHealthActiveEndpoint:
 
             importlib.reload(ha)
             client = TestClient(ha.app)
-            return client.get("/health/active").json()
+            return client.get(
+                "/health/active", headers={"Authorization": "Bearer test-admin"}
+            ).json()
 
     def test_returns_telegram_section(self, tmp_path) -> None:
         data = self._get_active()
@@ -521,13 +560,16 @@ class TestHealthActiveEndpoint:
     def test_telegram_token_present_false_when_missing(self) -> None:
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("TELEGRAM_BOT_TOKEN", None)
+            os.environ["ADMIN_API_TOKEN"] = "test-admin"
             from fastapi.testclient import TestClient
             import importlib
             import src.web.health_app as ha
 
             importlib.reload(ha)
             client = TestClient(ha.app)
-            data = client.get("/health/active").json()
+            data = client.get(
+                "/health/active", headers={"Authorization": "Bearer test-admin"}
+            ).json()
         assert data["telegram"]["bot_token_present"] is False
 
     def test_last_delivery_status_from_file(self, tmp_path) -> None:
@@ -542,14 +584,53 @@ class TestHealthActiveEndpoint:
             )
         )
         with patch("src.web.health_app.REPORTS_DIR", tmp_path):
+            os.environ["ADMIN_API_TOKEN"] = "test-admin"
             from fastapi.testclient import TestClient
             import importlib
             import src.web.health_app as ha
 
             importlib.reload(ha)
             client = TestClient(ha.app)
-            data = client.get("/health/active").json()
+            data = client.get(
+                "/health/active", headers={"Authorization": "Bearer test-admin"}
+            ).json()
         assert data["telegram"]["last_delivery_status"] == "sent"
+
+    def test_last_delivery_error_is_redacted(self, tmp_path) -> None:
+        status_file = tmp_path / "tg_delivery_status.json"
+        status_file.write_text(
+            json.dumps(
+                {
+                    "last_status": "failed",
+                    "last_at": "2026-05-29T20:00:00+00:00",
+                    "last_error": "failed https://api.telegram.org/botsecret-token/sendMessage?apiKey=odds-secret",
+                }
+            )
+        )
+        with patch.dict(
+            os.environ,
+            {
+                "ADMIN_API_TOKEN": "test-admin",
+                "TELEGRAM_BOT_TOKEN": "secret-token",
+                "THE_ODDS_API_KEY": "odds-secret",
+            },
+            clear=False,
+        ):
+            from fastapi.testclient import TestClient
+            import importlib
+            import src.web.health_app as ha
+
+            importlib.reload(ha)
+            with patch("src.web.health_app.REPORTS_DIR", tmp_path):
+                client = TestClient(ha.app)
+                data = client.get(
+                    "/health/active", headers={"Authorization": "Bearer test-admin"}
+                ).json()
+
+        last_error = data["telegram"]["last_error"]
+        assert "secret-token" not in last_error
+        assert "odds-secret" not in last_error
+        assert "[REDACTED]" in last_error
 
 
 # ---------------------------------------------------------------------------
@@ -561,6 +642,7 @@ class TestHealthReadinessDegraded:
     def _get_readiness(self, env_overrides: dict, tmp_path: Path) -> dict:
         # Inject REPORTS_DIR via env so module reload picks it up correctly
         overrides = {
+            "ADMIN_API_TOKEN": "test-admin-token",
             "REPORTS_DIR": str(tmp_path),
             "DATA_DIR": str(tmp_path),
             "MODEL_DIR": str(tmp_path / "models"),
@@ -574,7 +656,10 @@ class TestHealthReadinessDegraded:
 
             importlib.reload(ha)
             client = TestClient(ha.app)
-            return client.get("/health/readiness").json()
+            return client.get(
+                "/health/readiness",
+                headers={"Authorization": "Bearer test-admin-token"},
+            ).json()
 
     def test_degraded_when_failed_telegram_delivery(self, tmp_path) -> None:
         status_file = tmp_path / "tg_delivery_status.json"

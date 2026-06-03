@@ -186,15 +186,12 @@ class DailyReportBuilder:
 
     def load_performance(self, ledger_path: Path) -> dict:
         """
-        Загружает метрики эффективности из бумажного журнала (paper ledger).
-
-        Ожидается JSON-файл со структурой:
-        ``{"strategies": {strategy_id: {метрики}}, "summary": {...}}``.
+        Загружает метрики эффективности из авторитетного paper ledger backend.
 
         Параметры
         ----------
         ledger_path : Path
-            Путь к JSON-файлу с агрегированными метриками журнала.
+            Путь к локальному fallback-файлу или идентификатору ledger backend.
 
         Возвращает
         ----------
@@ -202,16 +199,13 @@ class DailyReportBuilder:
             Словарь с метриками по стратегиям и итоговой сводкой.
         """
         ledger_path = Path(ledger_path)
-        if not ledger_path.exists():
-            logger.warning("Файл журнала не найден: %s", ledger_path)
-            return {"strategies": {}, "summary": {}}
-
         try:
-            with ledger_path.open("r", encoding="utf-8") as fh:
-                data: dict = json.load(fh)
-            logger.info("Метрики журнала загружены из: %s", ledger_path)
-            return data
-        except (json.JSONDecodeError, OSError) as exc:
+            from src.infrastructure.persistent_ledger import load_ledger
+
+            ledger = load_ledger(ledger_path)
+            logger.info("Метрики журнала загружены через persistent ledger backend")
+            return {"strategies": {}, "summary": ledger.summary()}
+        except Exception as exc:
             logger.error("Ошибка чтения журнала %s: %s", ledger_path, exc)
             return {"strategies": {}, "summary": {}}
 

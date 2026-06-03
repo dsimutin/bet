@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 import hashlib
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 import pandas as pd
@@ -63,10 +63,17 @@ def generate_football_signals_runtime(
 
             enriched = []
             for signal in signals:
+                match_date = scan_date
+                raw_event_time = str(signal.get("event_time_utc") or "").replace("Z", "+00:00")
+                if raw_event_time:
+                    try:
+                        match_date = datetime.fromisoformat(raw_event_time).date()
+                    except ValueError:
+                        match_date = scan_date
                 ctx = compute_match_context(
                     home_team=str(signal.get("home_team", "")),
                     away_team=str(signal.get("away_team", "")),
-                    match_date=scan_date,
+                    match_date=match_date,
                     staging_dir=staging_dir,
                     league=league,
                 )
@@ -74,11 +81,18 @@ def generate_football_signals_runtime(
             signals = enriched
         except Exception as exc:
             import logging
-            logging.getLogger(__name__).warning("[football_scan] context enrichment failed: %s", exc)
+
+            logging.getLogger(__name__).warning(
+                "[football_scan] context enrichment failed: %s", exc
+            )
 
     # Optionally enrich with injuries from API-Football (if API_FOOTBALL_KEY configured)
     try:
-        from src.ingest.apifootball_injuries import format_injuries_for_signal, get_injuries_for_match, is_configured
+        from src.ingest.apifootball_injuries import (
+            format_injuries_for_signal,
+            get_injuries_for_match,
+            is_configured,
+        )
 
         if is_configured():
             match_date_str = scan_date.isoformat()
@@ -93,8 +107,10 @@ def generate_football_signals_runtime(
                 inj_line = format_injuries_for_signal(inj)
                 if inj_line:
                     signal["injuries_text"] = inj_line
+                signal["injuries_context_mode"] = "informational_only"
     except Exception as exc:
         import logging
+
         logging.getLogger(__name__).warning("[football_scan] injuries enrichment failed: %s", exc)
 
     for signal in signals:

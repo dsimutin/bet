@@ -128,8 +128,8 @@ def settle_ledger_from_results(
             actual = result_row["actual_selection"]
             # Tennis signals back the player by default, so selection is "H"
             signal_selection = entry.get("selection", "H")
-            result: Literal["win", "loss"] = "win" if signal_selection == actual else "loss"
-            ledger.update_result(signal_id, result=result, closing_odds=None)
+            tennis_result: Literal["win", "loss"] = "win" if signal_selection == actual else "loss"
+            ledger.update_result(signal_id, result=tennis_result, closing_odds=None)
             settled_signals.append(ledger.get(signal_id))
 
     settled_count = len(settled_signals)
@@ -215,9 +215,7 @@ def _get_live_result_fallback(entry: dict[str, Any], api_key: str) -> dict[str, 
 
         # Parse event date
         try:
-            event_date = datetime.fromisoformat(
-                str(event_date_str).replace("Z", "+00:00")
-            ).date()
+            event_date = datetime.fromisoformat(str(event_date_str).replace("Z", "+00:00")).date()
         except ValueError:
             return None
 
@@ -259,9 +257,7 @@ def _get_live_tennis_result_fallback(entry: dict[str, Any], api_key: str) -> dic
 
         # Parse event date
         try:
-            event_date = datetime.fromisoformat(
-                str(event_date_str).replace("Z", "+00:00")
-            ).date()
+            event_date = datetime.fromisoformat(str(event_date_str).replace("Z", "+00:00")).date()
         except ValueError:
             return None
 

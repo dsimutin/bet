@@ -76,6 +76,26 @@ def test_signal_ledger_marks_void_without_turnover() -> None:
     assert ledger.summary()["settled_signals"] == 0
 
 
+def test_ledger_pnl_for_win_loss_push_void() -> None:
+    ledger = SignalLedger()
+    for signal_id in ("win", "loss", "push", "void"):
+        ledger.add_signal(_signal(signal_id, event_time_utc="2026-12-31T15:00:00Z"))
+
+    ledger.update_result("win", result="win")
+    ledger.update_result("loss", result="loss")
+    ledger.update_result("push", result="push")
+    ledger.update_result("void", result="void")
+
+    assert ledger.get("win")["pnl_units"] == 0.8
+    assert ledger.get("loss")["pnl_units"] == -1.0
+    assert ledger.get("push")["pnl_units"] == 0.0
+    assert ledger.get("void")["pnl_units"] == 0.0
+    summary = ledger.summary()
+    assert summary["settled_signals"] == 3
+    assert summary["void_signals"] == 1
+    assert summary["turnover_units"] == 2.0
+
+
 def test_signal_ledger_marks_delivery_and_reports_quality() -> None:
     ledger = SignalLedger()
     ledger.add_signal(_signal("sig_win"))

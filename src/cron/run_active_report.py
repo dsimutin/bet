@@ -14,6 +14,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import sys
 import time
 from datetime import date, datetime, timezone
@@ -230,7 +231,7 @@ def send_morning_digest() -> str:
                 _log.error("[digest] Telegram API error: %s", body.get("description"))
                 return "failed"
     except Exception as exc:
-        _log.error("[digest] Telegram send failed: %s", exc)
+        _log.error("[digest] Telegram send failed: %s", _sanitize_error_text(str(exc)))
         return "failed"
 
 
@@ -384,9 +385,9 @@ def _format_tennis_pick(sig: dict, n: int) -> str:
 
 def _run_signal_scan() -> dict[str, Any]:
     """Run signal scan across all configured leagues. Returns summary dict."""
+    from src.infrastructure.persistent_ledger import load_ledger, save_ledger
     from src.models.model_registry import ModelRegistry
     from src.signals.run_signal_scan import generate_signals_for_league
-    from src.models.signal_ledger import SignalLedger
 
     started = datetime.now(timezone.utc)
     t0 = time.perf_counter()
@@ -490,7 +491,7 @@ def _run_signal_scan() -> dict[str, Any]:
     # Save new signals to ledger and Telegram
     if all_signals:
         try:
-            ledger = SignalLedger.load_or_create(LEDGER_PATH)
+            ledger = load_ledger(LEDGER_PATH)
             for sig in all_signals:
                 try:
                     if "opening_odds" not in sig:
@@ -498,7 +499,7 @@ def _run_signal_scan() -> dict[str, Any]:
                     ledger.add_signal(sig)
                 except Exception:
                     dupes_skipped += 1
-            ledger.save(LEDGER_PATH)
+            save_ledger(ledger, LEDGER_PATH)
         except Exception as e:
             source_errors.append(f"ledger_save: {e}")
 
@@ -561,6 +562,7 @@ def _run_signal_scan() -> dict[str, Any]:
 
 def _run_tennis_scan() -> dict[str, Any]:
     """Run ATP tennis signal scan. Returns summary dict."""
+    from src.infrastructure.persistent_ledger import load_ledger, save_ledger
     from src.signals.tennis_signal_scan import scan_tennis_signals
 
     api_key = os.environ.get("THE_ODDS_API_KEY", "")
@@ -589,9 +591,7 @@ def _run_tennis_scan() -> dict[str, Any]:
     tennis_signals = result.get("all_signals", [])
     if tennis_signals:
         try:
-            from src.models.signal_ledger import SignalLedger
-
-            ledger = SignalLedger.load_or_create(LEDGER_PATH)
+            ledger = load_ledger(LEDGER_PATH)
             saved = 0
             for sig in tennis_signals:
                 try:
@@ -602,7 +602,7 @@ def _run_tennis_scan() -> dict[str, Any]:
                         "[active] Tennis signal ledger skip (%s): %s", sig.get("signal_id", "?"), e
                     )
             if saved:
-                ledger.save(LEDGER_PATH)
+                save_ledger(ledger, LEDGER_PATH)
                 _log.info("[active] Tennis: saved %d new signals to ledger", saved)
         except Exception as e:
             _log.error("[active] Tennis ledger save failed: %s", e)
@@ -622,7 +622,9 @@ def _send_tennis_alerts(signals: list[dict]) -> None:
     chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
     dry_run = not (token and chat_id)
 
-    config = TelegramConfig(bot_token=token, chat_id=chat_id, dry_run=dry_run)
+    config = TelegramConfig(
+        bot_token=token, chat_id=chat_id, dry_run=dry_run, max_message_length=4096
+    )
     sender = TelegramSender(config)
 
     for sig in signals[:5]:  # cap to 5 per scan to avoid spam
@@ -651,9 +653,9 @@ def _send_tennis_alerts(signals: list[dict]) -> None:
 
 def _run_settlement() -> dict[str, Any]:
     """Run settlement and drift check. Returns summary dict."""
+    from src.infrastructure.persistent_ledger import load_ledger, save_ledger
     from src.ingest.openfootball import OpenFootballLoader
     from src.models.settle_signal_ledger import settle_ledger_from_results
-    from src.models.signal_ledger import SignalLedger
     from src.monitoring.drift_detector import CUSUMDriftDetector
     import pandas as pd
 
@@ -706,10 +708,10 @@ def _run_settlement() -> dict[str, Any]:
 
     try:
         results_csv = STAGING_DIR / "latest_results.csv"
-        ledger = SignalLedger.load_or_create(LEDGER_PATH)
+        ledger = load_ledger(LEDGER_PATH)
         results_df = pd.read_csv(results_csv, encoding="latin-1")
         report = settle_ledger_from_results(ledger, results_df)
-        ledger.save(LEDGER_PATH)
+        save_ledger(ledger, LEDGER_PATH)
 
         today_iso = date.today().isoformat()
         (REPORTS_DIR / f"settlement_{today_iso}.json").write_text(
@@ -734,9 +736,8 @@ def _run_settlement() -> dict[str, Any]:
     # Settle tennis signals
     try:
         from src.ingest.atp_results import fetch_recent_results
-        from src.models.signal_ledger import SignalLedger as _SL2
 
-        _ledger2 = _SL2.load_or_create(LEDGER_PATH)
+        _ledger2 = load_ledger(LEDGER_PATH)
         tennis_open = [
             e
             for e in _ledger2.entries().values()
@@ -770,7 +771,7 @@ def _run_settlement() -> dict[str, Any]:
                         tennis_settled_count += 1
                         break
             if tennis_settled_count:
-                _ledger2.save(LEDGER_PATH)
+                save_ledger(_ledger2, LEDGER_PATH)
                 result["settled_count"] = result.get("settled_count", 0) + tennis_settled_count
                 _log.info("[settlement] Tennis: settled %d bets", tennis_settled_count)
     except Exception as e:
@@ -804,7 +805,6 @@ def _run_settlement() -> dict[str, Any]:
 def _run_training_check() -> dict[str, Any]:
     """Check if enough new data exists; retrain only if warranted."""
     from src.models.run_history import read_last_run
-    from src.models.signal_ledger import SignalLedger
     from src.models.model_registry import ModelRegistry
 
     started = datetime.now(timezone.utc)
@@ -1018,7 +1018,9 @@ def _send_signal_alerts(signals: list[dict]) -> int:
             )
         return 0
 
-    config = TelegramConfig(bot_token=token, chat_id=chat_id, dry_run=False)
+    config = TelegramConfig(
+        bot_token=token, chat_id=chat_id, dry_run=False, max_message_length=4096
+    )
     sender = TelegramSender(config)
     sent = 0
     for sig in signals:
@@ -1037,6 +1039,17 @@ def _mask_chat_id(chat_id: str) -> str:
     return "***" if chat_id else "(empty)"
 
 
+def _sanitize_error_text(text: str) -> str:
+    safe = re.sub(r"(?i)(apiKey|api_key|key)=([^&\s]+)", r"\1=[REDACTED]", str(text))
+    safe = re.sub(r"/bot[^/\s]+/", "/bot[REDACTED]/", safe)
+    for name, value in os.environ.items():
+        if not value or len(value) < 4:
+            continue
+        if any(marker in name.upper() for marker in ("KEY", "TOKEN", "SECRET", "DATABASE_URL")):
+            safe = safe.replace(value, "[REDACTED]")
+    return safe
+
+
 def _save_tg_delivery_status(status: str, error: str | None = None) -> None:
     """Persist last Telegram delivery status for /health/active."""
     try:
@@ -1046,7 +1059,7 @@ def _save_tg_delivery_status(status: str, error: str | None = None) -> None:
                 {
                     "last_status": status,
                     "last_at": datetime.now(timezone.utc).isoformat(),
-                    "last_error": error,
+                    "last_error": _sanitize_error_text(error) if error else None,
                 },
                 indent=2,
             ),
@@ -1124,7 +1137,7 @@ def _send_status_report(
                     _save_tg_delivery_status("sent")
                     return "sent"
                 else:
-                    desc = body.get("description", str(body))
+                    desc = _sanitize_error_text(str(body.get("description", str(body))))
                     _log.error("[active] Telegram API not-ok: %s", desc)
                     last_error = f"api_error: {desc}"
                     _save_tg_delivery_status("failed", last_error)
@@ -1136,8 +1149,9 @@ def _send_status_report(
                 err_desc = json.loads(body_raw).get("description", body_raw)
             except Exception:
                 err_desc = body_raw or str(e)
-            last_error = f"http_{e.code}: {err_desc}"
-            _log.error("[active] Telegram HTTP %d: %s (attempt %d)", e.code, err_desc, attempt + 1)
+            safe_desc = _sanitize_error_text(str(err_desc))
+            last_error = f"http_{e.code}: {safe_desc}"
+            _log.error("[active] Telegram HTTP %d: %s (attempt %d)", e.code, safe_desc, attempt + 1)
             # 4xx are permanent errors — do not retry
             if 400 <= e.code < 500:
                 _save_tg_delivery_status("failed", last_error)
@@ -1145,8 +1159,11 @@ def _send_status_report(
             if attempt < 2:
                 time.sleep(2**attempt)
         except OSError as e:
-            last_error = f"network: {e}"
-            _log.warning("[active] Telegram network error (attempt %d): %s", attempt + 1, e)
+            safe_error = _sanitize_error_text(str(e))
+            last_error = f"network: {safe_error}"
+            _log.warning(
+                "[active] Telegram network error (attempt %d): %s", attempt + 1, safe_error
+            )
             if attempt < 2:
                 time.sleep(2**attempt)
 
@@ -1189,24 +1206,24 @@ def _validate_odds_api_key_in_background(
     providers_ok: list[str],
     providers_skip: list[str],
 ) -> None:
-    """Quick check: verify Odds API key via cached sports list (no extra quota cost)."""
+    """Classify Odds API availability from cache without spending extra quota."""
     try:
-        from src.services.runtime_odds import _fetch_active_sports
         from src.infrastructure import odds_cache
 
         cache_key = "sports:active-soccer"
         cached = odds_cache.get(cache_key)
         if cached is None:
-            _fetch_active_sports(api_key)  # warms cache as side effect
+            _log.info("[active] Odds API key validation skipped — sports cache unavailable")
+            return
 
-        _log.info("[active] Odds API key is VALID — no upcoming matches today")
+        _log.info("[active] Odds API key treated as valid from cached sports probe")
         if "Odds API" not in providers_ok:
             providers_ok.append("Odds API ✅ (ключ верный)")
     except Exception as exc:
-        _log.warning("[active] Odds API key validation failed: %s", exc)
+        _log.warning("[active] Odds API key validation failed: %s", _sanitize_error_text(str(exc)))
         if "Odds API" in providers_ok:
             providers_ok.remove("Odds API")
-        providers_skip.append(f"Odds API ❌ ошибка ключа ({code})")
+        providers_skip.append("Odds API ❌ ошибка ключа")
 
 
 def _determine_no_signal_reason(api_key: str, providers_skip: list[str]) -> str:

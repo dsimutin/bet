@@ -48,14 +48,19 @@ services:
       - key: OPENFOOTBALL_SEASONS
         value: "2022-23,2023-24,2024-25,2025-26"
 
-      # Supabase PostgreSQL persistent runtime state (optional)
-      # If DATABASE_URL is not configured, app falls back to local JSON ledger
+      # Supabase PostgreSQL persistent runtime state (required in production)
       - key: DATABASE_URL
         sync: false
+      - key: APP_ENV
+        value: "production"
       - key: SUPABASE_LEDGER_ENABLED
         value: "true"
       - key: REQUIRE_DATABASE
+        value: "true"
+      - key: ALLOW_LOCAL_LEDGER_FALLBACK
         value: "false"
+      - key: WRITE_LOCAL_LEDGER_MIRROR
+        value: "true"
 
       # Shared low-quota Odds API cache
       - key: FOOTBALL_ODDS_REGIONS
@@ -66,15 +71,26 @@ services:
         value: "2"
       - key: ODDS_CACHE_TTL_SECONDS
         value: "28800"
+      - key: CACHE_STORAGE_TTL_SECONDS
+        value: "28800"
+      - key: PRIORITY_ODDS_MAX_AGE_SECONDS
+        value: "900"
+      - key: WATCHLIST_ODDS_MAX_AGE_SECONDS
+        value: "3600"
+      - key: EXOTIC_WATCHLIST_ODDS_MAX_AGE_SECONDS
+        value: "14400"
+      - key: THE_ODDS_API_MIN_REMAINING_HARD_STOP
+        value: "25"
+      - key: THE_ODDS_API_MIN_REMAINING_PRIORITY_REFRESH
+        value: "50"
+      - key: QUOTA_STATE_BACKEND
+        value: "database"
 
       # Unified runtime schedule (UTC)
       - key: RUNTIME_SCAN_HOURS_UTC
         value: "7,15"
       - key: SETTLEMENT_HOURS_UTC
         value: "7,15,22"
-      - key: KEEP_ALIVE_HOURS_UTC
-        value: "6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22"
-
       # Runtime mode
       - key: ACTIVE_MODE
         value: "true"
@@ -88,12 +104,26 @@ services:
         value: "true"
       - key: SPORTS
         value: "football,tennis"
+      - key: ENABLE_TENNIS_SPREADS
+        value: "false"
+      - key: ENABLE_TENNIS_TOTALS
+        value: "false"
 
       # Configure secrets in Render Dashboard -> Environment
       - key: TELEGRAM_BOT_TOKEN
         sync: false
       - key: TELEGRAM_CHAT_ID
         sync: false
+      - key: TELEGRAM_WEBHOOK_SECRET
+        sync: false
+      - key: TELEGRAM_ALLOWED_CHAT_IDS
+        sync: false
+      - key: TELEGRAM_MANUAL_REFRESH_COOLDOWN_SECONDS
+        value: "300"
+      - key: ADMIN_API_TOKEN
+        sync: false
+      - key: ENABLE_DEBUG_ROUTES
+        value: "false"
       - key: THE_ODDS_API_KEY
         sync: false
       # Tennis: odds-api.io (free, no IP restrictions). Register at https://odds-api.io/

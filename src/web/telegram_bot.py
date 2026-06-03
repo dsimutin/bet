@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 import threading
 import urllib.request
 from html import escape
@@ -11,9 +12,18 @@ from pathlib import Path
 from typing import Any
 
 _log = logging.getLogger(__name__)
+_seen_updates: set[int] = set()
+_refresh_last_by_chat: dict[str, float] = {}
 
 
 def handle_update(update: dict[str, Any]) -> None:
+    update_id = update.get("update_id")
+    if isinstance(update_id, int):
+        if update_id in _seen_updates:
+            return
+        _seen_updates.add(update_id)
+        if len(_seen_updates) > 1000:
+            _seen_updates.clear()
     try:
         if "callback_query" in update:
             _handle_callback(update["callback_query"])
@@ -28,6 +38,9 @@ def _handle_message(message: dict[str, Any]) -> None:
     text = str(message.get("text", "")).strip()
     first_name = str(message.get("from", {}).get("first_name", ""))
     if not chat_id:
+        return
+    if not _chat_allowed(chat_id):
+        _log.warning("[bot] ignoring non-allowlisted chat_id=%s", chat_id)
         return
     if text.startswith("/today"):
         _send_today(chat_id)
@@ -45,6 +58,9 @@ def _handle_callback(callback: dict[str, Any]) -> None:
     chat_id = str(callback.get("message", {}).get("chat", {}).get("id", ""))
     _answer_callback(str(callback.get("id", "")))
     if not chat_id:
+        return
+    if not _chat_allowed(chat_id):
+        _log.warning("[bot] ignoring non-allowlisted callback chat_id=%s", chat_id)
         return
     action = callback.get("data")
     if action == "picks_today":
@@ -104,17 +120,43 @@ def send_today_digest_default_chat() -> str:
 
 
 def _refresh(chat_id: str) -> None:
+    cooldown = int(os.environ.get("TELEGRAM_MANUAL_REFRESH_COOLDOWN_SECONDS", "300"))
+    now = time.monotonic()
+    last = _refresh_last_by_chat.get(chat_id, 0.0)
+    if now - last < cooldown:
+        remaining = int(cooldown - (now - last))
+        _send(
+            chat_id,
+            f"⏳ Обновление недавно запускалось. Повторите через {remaining} сек.",
+            _back_button(),
+        )
+        return
+    _refresh_last_by_chat[chat_id] = now
     _send(chat_id, "🔄 Обновляю общий cached-скан футбола и тенниса. Это займёт до минуты.")
 
     def _run() -> None:
-        try:
-            from src.cron.run_signals import main
+        from src.services.job_guard import job_guard
 
-            main()
-            _send_today(chat_id)
-        except Exception as exc:
-            _log.exception("[bot] manual refresh failed: %s", exc)
-            _send(chat_id, f"❌ Обновление завершилось ошибкой: {escape(str(exc))}", _back_button())
+        with job_guard("signal_scan") as acquired:
+            if not acquired:
+                _send(
+                    chat_id,
+                    "⏳ Скан уже выполняется. Покажу свежие ставки после завершения.",
+                    _back_button(),
+                )
+                return
+            try:
+                from src.cron.run_signals import main
+
+                main()
+                _send_today(chat_id)
+            except Exception as exc:
+                _log.exception("[bot] manual refresh failed: %s", exc)
+                _send(
+                    chat_id,
+                    "❌ Обновление завершилось ошибкой. Подробности скрыты из соображений безопасности.",
+                    _back_button(),
+                )
 
     threading.Thread(target=_run, daemon=True).start()
 
@@ -171,7 +213,9 @@ def _debug_tennis(chat_id: str) -> None:
                 "h2h_low_quota_cached": "эконом (h2h, кэш)",
                 "h2h_low_quota": "эконом (h2h)",
             }
-            mode_text = modes.get(str(result.get("runtime_mode", "")), str(result.get("runtime_mode", "?")))
+            mode_text = modes.get(
+                str(result.get("runtime_mode", "")), str(result.get("runtime_mode", "?"))
+            )
             top = result.get("top_signals", [])
             top_lines = ""
             if top:
@@ -249,7 +293,11 @@ def setup_webhook(app_url: str) -> dict[str, Any]:
     if not token:
         return {"error": "TELEGRAM_BOT_TOKEN not set"}
     try:
-        data = json.dumps({"url": f"{app_url.rstrip('/')}/webhook/telegram"}).encode("utf-8")
+        payload = {"url": f"{app_url.rstrip('/')}/webhook/telegram"}
+        secret = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "").strip()
+        if secret:
+            payload["secret_token"] = secret
+        data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(
             _telegram_url(token, "setWebhook"),
             data=data,
@@ -274,3 +322,11 @@ def get_webhook_info() -> dict[str, Any]:
 
 def _telegram_url(token: str, method: str) -> str:
     return "https://api.telegram.org/bot" + token + "/" + method
+
+
+def _chat_allowed(chat_id: str) -> bool:
+    allowed_raw = os.environ.get("TELEGRAM_ALLOWED_CHAT_IDS", "").strip()
+    if not allowed_raw:
+        return os.environ.get("APP_ENV", "development").lower() != "production"
+    allowed = {item.strip() for item in allowed_raw.split(",") if item.strip()}
+    return chat_id in allowed

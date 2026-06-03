@@ -82,8 +82,7 @@ class QuotaTracker:
             )
         elif pct >= QUOTA_WARN_THRESHOLD:
             _log.warning(
-                "[quota] 🟡 WARNING: {:.0f}% quota used ({}/{} calls). "
-                "Monitor usage closely.",
+                "[quota] 🟡 WARNING: {:.0f}% quota used ({}/{} calls). " "Monitor usage closely.",
                 pct,
                 used,
                 QUOTA_LIMIT,

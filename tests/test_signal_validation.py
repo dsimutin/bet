@@ -124,7 +124,7 @@ def test_update_result_invalid_result_raises() -> None:
     ledger = SignalLedger()
     ledger.add_signal(_signal())
     with pytest.raises(ValueError):
-        ledger.update_result("sig_20250615_000001", result="push")  # type: ignore[arg-type]
+        ledger.update_result("sig_20250615_000001", result="bad")  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------

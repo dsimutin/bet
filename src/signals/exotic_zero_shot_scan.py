@@ -185,7 +185,6 @@ def _fetch_events(sport_key: str, api_key: str) -> list[dict[str, Any]]:
     """Fetch upcoming h2h odds for an exotic league with caching."""
     from src.infrastructure import odds_cache
     from src.services.runtime_odds import _fetch_odds
-    from src.monitoring.api_quota_monitor import record_odds_api_request
 
     cache_key = f"exotic_odds:{sport_key}"
     cached = odds_cache.get(cache_key)
@@ -195,6 +194,7 @@ def _fetch_events(sport_key: str, api_key: str) -> list[dict[str, Any]]:
 
     try:
         from src.services.runtime_odds import _csv_env
+
         regions = _csv_env("FOOTBALL_ODDS_REGIONS", "eu")
         data, _headers = _fetch_odds(sport_key, api_key, regions, ["h2h"])
         odds_cache.set(cache_key, data, 8 * 3600)  # 8h cache — covers both daily scans
@@ -252,7 +252,7 @@ def _score_event(
 
     # Extract h2h odds from bookmakers
     h_odds, d_odds, a_odds, bookmaker_name = _best_h2h_odds(event)
-    if h_odds is None:
+    if h_odds is None or d_odds is None or a_odds is None:
         return None
 
     # Devig: compute fair market probabilities (multiplicative)
@@ -284,9 +284,12 @@ def _score_event(
     if edge_pct < _MIN_EDGE_PCT:
         return None
 
-    dataset_hash = "sha256:" + hashlib.sha256(
-        f"{sport_key}:{home_team}:{away_team}:{commence_time_raw}".encode()
-    ).hexdigest()[:12]
+    dataset_hash = (
+        "sha256:"
+        + hashlib.sha256(
+            f"{sport_key}:{home_team}:{away_team}:{commence_time_raw}".encode()
+        ).hexdigest()[:12]
+    )
 
     _RU = {"home": f"П1 ({home_team})", "draw": "Ничья", "away": f"П2 ({away_team})"}
 
@@ -307,6 +310,8 @@ def _score_event(
         "edge_vs_fair_pct": round(edge_pct, 2),
         "margin_pct": round(margin_pct, 2),
         "model_source": "bayesian_zero_shot",
+        "experimental": True,
+        "feedback_eligible": False,
         "confidence": "low",
         "confidence_note": "Нет исторических данных по лиге. Байесовский прайор на основе глобальной статистики.",
         "bookmaker": bookmaker_name,
@@ -315,14 +320,17 @@ def _score_event(
         "snapshot_ts_utc": now.isoformat(),
         "stake_units": 0.5,  # Half stake due to low confidence
         "dataset_hash": dataset_hash,
+        "odds_freshness_tier": "watchlist",
         "recommendation_tier": "watchlist",  # Never auto-priority for exotic
         "recommendation_reason": "exotic league: low confidence signal",
     }
 
 
 def _best_h2h_odds(event: dict[str, Any]) -> tuple[float | None, float | None, float | None, str]:
-    """Extract best available h2h odds from bookmakers. Returns (h, d, a, bookmaker_name)."""
+    """Extract h2h odds by outcome name, not provider array position."""
     bookmakers = event.get("bookmakers", [])
+    home_team = str(event.get("home_team", "")).strip()
+    away_team = str(event.get("away_team", "")).strip()
     # Prefer pinnacle > bet365 > first available
     preferred = ["pinnacle", "betfair", "bet365"]
     ordered = sorted(
@@ -339,12 +347,45 @@ def _best_h2h_odds(event: dict[str, Any]) -> tuple[float | None, float | None, f
             outcomes = market.get("outcomes", [])
             if len(outcomes) < 3:
                 continue
-            try:
-                h = float(outcomes[0].get("price", 0))
-                d = float(outcomes[1].get("price", 0))
-                a = float(outcomes[2].get("price", 0))
-                if h > 1.0 and d > 1.0 and a > 1.0:
-                    return h, d, a, str(bm.get("title", bm.get("key", "unknown")))
-            except (TypeError, ValueError):
+            prices = _h2h_prices_by_name(outcomes, home_team, away_team)
+            if prices is None:
                 continue
+            h, d, a = prices
+            if h > 1.0 and d > 1.0 and a > 1.0:
+                return h, d, a, str(bm.get("title", bm.get("key", "unknown")))
     return None, None, None, ""
+
+
+def _h2h_prices_by_name(
+    outcomes: list[dict[str, Any]],
+    home_team: str,
+    away_team: str,
+) -> tuple[float, float, float] | None:
+    prices: dict[str, float] = {}
+    for outcome in outcomes:
+        name = _normalize_outcome_name(str(outcome.get("name", "")))
+        side = _outcome_side(name, home_team, away_team)
+        if not side:
+            continue
+        try:
+            price = float(outcome.get("price", 0))
+        except (TypeError, ValueError):
+            continue
+        prices[side] = price
+    if {"home", "draw", "away"}.issubset(prices):
+        return prices["home"], prices["draw"], prices["away"]
+    return None
+
+
+def _outcome_side(name: str, home_team: str, away_team: str) -> str:
+    if name in {"draw", "x", "tie", "ничья"}:
+        return "draw"
+    if name == _normalize_outcome_name(home_team):
+        return "home"
+    if name == _normalize_outcome_name(away_team):
+        return "away"
+    return ""
+
+
+def _normalize_outcome_name(value: str) -> str:
+    return " ".join(value.lower().strip().split())

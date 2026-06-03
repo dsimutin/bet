@@ -241,12 +241,11 @@ def _section_ledger_pnl() -> list[str]:
     """Show paper ledger P&L summary."""
     lines = ["💰 P&L / Results"]
     try:
-        if not LEDGER_PATH.exists():
-            lines.append("Леджер не найден")
-            return lines + [""]
-        data = json.loads(LEDGER_PATH.read_text(encoding="utf-8"))
-        summary = data.get("summary", {})
-        entries = list(data.get("entries", {}).values())
+        from src.infrastructure.persistent_ledger import load_ledger
+
+        ledger = load_ledger(LEDGER_PATH)
+        summary = ledger.summary()
+        entries = list(ledger.entries().values())
         total = len(entries)
         settled = [e for e in entries if e.get("ledger_status") == "settled"]
         open_ = [e for e in entries if e.get("ledger_status") == "open"]

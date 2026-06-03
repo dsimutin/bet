@@ -105,6 +105,38 @@ CREATE TABLE IF NOT EXISTS cron_run_log (
     meta_json  JSONB,
     started_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE TABLE IF NOT EXISTS api_quota_daily (
+    usage_date DATE    NOT NULL,
+    api_name   TEXT    NOT NULL,
+    calls      INTEGER NOT NULL DEFAULT 0,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (usage_date, api_name)
+);
+
+CREATE TABLE IF NOT EXISTS api_quota_provider_records (
+    id                 SERIAL PRIMARY KEY,
+    provider           TEXT,
+    endpoint           TEXT,
+    sport_key          TEXT,
+    markets            TEXT,
+    regions            TEXT,
+    response_status    INTEGER,
+    x_requests_used    INTEGER,
+    x_requests_remaining INTEGER,
+    x_requests_last    INTEGER,
+    source             TEXT,
+    record_json        JSONB,
+    requested_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS api_quota_provider_monthly_usage (
+    month      TEXT    NOT NULL,
+    api_name   TEXT    NOT NULL,
+    used       INTEGER NOT NULL DEFAULT 0,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (month, api_name)
+);
 """
 
 _DDL_SQLITE = """
@@ -143,6 +175,38 @@ CREATE TABLE IF NOT EXISTS cron_run_log (
     message    TEXT,
     meta_json  TEXT,
     started_at TEXT    NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS api_quota_daily (
+    usage_date TEXT    NOT NULL,
+    api_name   TEXT    NOT NULL,
+    calls      INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT    NOT NULL,
+    PRIMARY KEY (usage_date, api_name)
+);
+
+CREATE TABLE IF NOT EXISTS api_quota_provider_records (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider           TEXT,
+    endpoint           TEXT,
+    sport_key          TEXT,
+    markets            TEXT,
+    regions            TEXT,
+    response_status    INTEGER,
+    x_requests_used    INTEGER,
+    x_requests_remaining INTEGER,
+    x_requests_last    INTEGER,
+    source             TEXT,
+    record_json        TEXT,
+    requested_at       TEXT    NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS api_quota_provider_monthly_usage (
+    month      TEXT    NOT NULL,
+    api_name   TEXT    NOT NULL,
+    used       INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT    NOT NULL,
+    PRIMARY KEY (month, api_name)
 );
 """
 
@@ -324,13 +388,173 @@ class RenderDB:
                 cur.execute(q_pg, (job_name,))
                 row = cur.fetchone()
                 return dict(row) if row else None
+        with _sqlite_cursor(self._sqlite_path) as cur:
+            cur.execute(q_sq, (job_name,))
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+    # ── API quota state ─────────────────────────────────────────────
+
+    def record_api_quota_request(self, api_name: str, calls: int, usage_date: str) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        if self._postgres:
+            with _pg_cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO api_quota_daily (usage_date, api_name, calls, updated_at)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (usage_date, api_name) DO UPDATE SET
+                        calls = api_quota_daily.calls + EXCLUDED.calls,
+                        updated_at = EXCLUDED.updated_at
+                    """,
+                    (usage_date, api_name, calls, now),
+                )
         else:
             with _sqlite_cursor(self._sqlite_path) as cur:
-                cur.execute(q_sq, (job_name,))
+                cur.execute(
+                    """
+                    INSERT INTO api_quota_daily (usage_date, api_name, calls, updated_at)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT (usage_date, api_name) DO UPDATE SET
+                        calls = calls + excluded.calls,
+                        updated_at = excluded.updated_at
+                    """,
+                    (usage_date, api_name, calls, now),
+                )
+
+    def record_api_quota_provider_headers(self, record: dict[str, Any]) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        requested_at = str(record.get("requested_at_utc") or now)
+        api_name = str(record.get("api_name") or "")
+        month = requested_at[:7]
+        used = _parse_int(record.get("x_requests_used"))
+        if self._postgres:
+            import psycopg2.extras
+
+            with _pg_cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO api_quota_provider_records
+                    (provider, endpoint, sport_key, markets, regions, response_status,
+                     x_requests_used, x_requests_remaining, x_requests_last, source,
+                     record_json, requested_at)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    """,
+                    _provider_record_values(record, psycopg2.extras.Json(record), requested_at),
+                )
+                if api_name and used is not None:
+                    cur.execute(
+                        """
+                        INSERT INTO api_quota_provider_monthly_usage
+                        (month, api_name, used, updated_at)
+                        VALUES (%s, %s, %s, %s)
+                        ON CONFLICT (month, api_name) DO UPDATE SET
+                            used = GREATEST(api_quota_provider_monthly_usage.used, EXCLUDED.used),
+                            updated_at = EXCLUDED.updated_at
+                        """,
+                        (month, api_name, used, now),
+                    )
+        else:
+            with _sqlite_cursor(self._sqlite_path) as cur:
+                cur.execute(
+                    """
+                    INSERT INTO api_quota_provider_records
+                    (provider, endpoint, sport_key, markets, regions, response_status,
+                     x_requests_used, x_requests_remaining, x_requests_last, source,
+                     record_json, requested_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    _provider_record_values(
+                        record, json.dumps(record, ensure_ascii=False), requested_at
+                    ),
+                )
+                if api_name and used is not None:
+                    cur.execute(
+                        """
+                        INSERT INTO api_quota_provider_monthly_usage
+                        (month, api_name, used, updated_at)
+                        VALUES (?, ?, ?, ?)
+                        ON CONFLICT (month, api_name) DO UPDATE SET
+                            used = max(used, excluded.used),
+                            updated_at = excluded.updated_at
+                        """,
+                        (month, api_name, used, now),
+                    )
+
+    def fetch_api_quota_monthly_usage(self, api_name: str, month: str) -> int:
+        if self._postgres:
+            with _pg_cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT COALESCE(SUM(calls), 0) AS used
+                    FROM api_quota_daily
+                    WHERE api_name=%s AND usage_date::text LIKE %s
+                    """,
+                    (api_name, f"{month}%"),
+                )
                 row = cur.fetchone()
-                return dict(row) if row else None
+                local_used = int(row["used"] or 0) if row else 0
+                cur.execute(
+                    """
+                    SELECT COALESCE(MAX(used), 0) AS used
+                    FROM api_quota_provider_monthly_usage
+                    WHERE api_name=%s AND month=%s
+                    """,
+                    (api_name, month),
+                )
+                row = cur.fetchone()
+                provider_used = int(row["used"] or 0) if row else 0
+                return max(local_used, provider_used)
+        with _sqlite_cursor(self._sqlite_path) as cur:
+            cur.execute(
+                """
+                SELECT COALESCE(SUM(calls), 0) AS used
+                FROM api_quota_daily
+                WHERE api_name=? AND usage_date LIKE ?
+                """,
+                (api_name, f"{month}%"),
+            )
+            row = cur.fetchone()
+            local_used = int(row["used"] or 0) if row else 0
+            cur.execute(
+                """
+                SELECT COALESCE(MAX(used), 0) AS used
+                FROM api_quota_provider_monthly_usage
+                WHERE api_name=? AND month=?
+                """,
+                (api_name, month),
+            )
+            row = cur.fetchone()
+            provider_used = int(row["used"] or 0) if row else 0
+            return max(local_used, provider_used)
 
 
 def get_db() -> RenderDB:
     """Module-level factory — returns the appropriate DB for the environment."""
     return RenderDB()
+
+
+def _parse_int(value: Any) -> int | None:
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _provider_record_values(
+    record: dict[str, Any], record_json: Any, requested_at: str
+) -> tuple[Any, ...]:
+    return (
+        record.get("provider"),
+        record.get("endpoint"),
+        record.get("sport_key"),
+        record.get("markets"),
+        record.get("regions"),
+        _parse_int(record.get("response_status")),
+        _parse_int(record.get("x_requests_used")),
+        _parse_int(record.get("x_requests_remaining")),
+        _parse_int(record.get("x_requests_last")),
+        record.get("source"),
+        record_json,
+        requested_at,
+    )

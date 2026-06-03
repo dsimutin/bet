@@ -27,9 +27,9 @@ def main(dry_run: bool = True) -> None:
     import pandas as pd
 
     from src.ingest.football_data_co_uk import FootballDataLoader as FootballDataCoUkLoader
+    from src.infrastructure.persistent_ledger import load_ledger, save_ledger
     from src.models.model_registry import ModelRegistry
     from src.models.predictor import ModelValuePredictor
-    from src.models.signal_ledger import SignalLedger
     from src.models.settle_signal_ledger import settle_ledger_from_results
 
     registry = ModelRegistry(_ROOT / "data" / "models")
@@ -57,14 +57,13 @@ def main(dry_run: bool = True) -> None:
 
     # Compute dataset hash for anti-leakage
     import hashlib
-    df_hash = "sha256:" + hashlib.sha256(
-        df.to_csv(index=False).encode("utf-8")
-    ).hexdigest()
+
+    df_hash = "sha256:" + hashlib.sha256(df.to_csv(index=False).encode("utf-8")).hexdigest()
 
     # Settle any open signals against completed results
-    ledger = SignalLedger.load_or_create(ledger_path)
+    ledger = load_ledger(ledger_path)
     settlement = settle_ledger_from_results(ledger, df)
-    ledger.save(ledger_path)
+    save_ledger(ledger, ledger_path)
     print(f"[signals] Settled {settlement['settled']} signal(s)")
 
     # Find upcoming matches (no result yet)
@@ -92,7 +91,8 @@ def main(dry_run: bool = True) -> None:
             continue
 
         sigs = predictor.signals(
-            home, away,
+            home,
+            away,
             odds_1x2=(odds_h, odds_d, odds_a),
             min_edge_pct=3.0,
             min_model_prob=0.40,
@@ -120,11 +120,13 @@ def main(dry_run: bool = True) -> None:
 
     if new_signals:
         result = ledger.add_signals(new_signals)
-        print(f"[signals] Added {len(result.added)} new signal(s), {len(result.duplicates)} duplicates")
+        print(
+            f"[signals] Added {len(result.added)} new signal(s), {len(result.duplicates)} duplicates"
+        )
     else:
         print("[signals] No value signals found above threshold.")
 
-    ledger.save(ledger_path)
+    save_ledger(ledger, ledger_path)
 
     # Save JSON report
     report_path = _ROOT / "data" / "reports" / f"{date.today()}_signals.json"
@@ -132,7 +134,8 @@ def main(dry_run: bool = True) -> None:
     report_path.write_text(
         json.dumps(
             {"date": date.today().isoformat(), "signals": new_signals, "summary": ledger.summary()},
-            indent=2, ensure_ascii=False,
+            indent=2,
+            ensure_ascii=False,
         ),
         encoding="utf-8",
     )
@@ -147,6 +150,7 @@ def main(dry_run: bool = True) -> None:
 
 def _find_upcoming(df: "pd.DataFrame") -> "pd.DataFrame":
     import pandas as pd
+
     df = df.copy()
     df["Date"] = pd.to_datetime(df["Date"], dayfirst=True, errors="coerce")
     today = pd.Timestamp.today().normalize()

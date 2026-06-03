@@ -17,13 +17,15 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import sys
+import hmac
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from glob import glob
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 # Configure root logger so all app INFO messages appear in Render / uvicorn logs.
@@ -94,6 +96,23 @@ def _has_production_models() -> bool:
     return False
 
 
+def _required_leagues() -> list[str]:
+    raw = os.environ.get("LEAGUES", "EPL,BUNDESLIGA,LALIGA,SERIEA,LIGUE1")
+    return [item.strip().upper() for item in raw.split(",") if item.strip()]
+
+
+def _production_model_leagues() -> set[str]:
+    leagues: set[str] = set()
+    for f in MODEL_DIR.glob("dc_*.meta.json"):
+        try:
+            meta = json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if meta.get("status") == "production" and meta.get("league"):
+            leagues.add(str(meta["league"]).upper())
+    return leagues
+
+
 def _bootstrap_models_in_background() -> None:
     """Run run_trainer in a daemon thread so the web service starts immediately."""
     import threading
@@ -137,7 +156,9 @@ def _send_startup_telegram(msg: str) -> None:
             pass
         _log.info("[health_app] Startup Telegram notification sent")
     except Exception as exc:
-        _log.warning("[health_app] Startup Telegram notification failed: %s", exc)
+        _log.warning(
+            "[health_app] Startup Telegram notification failed: %s", _sanitize_error_text(str(exc))
+        )
 
 
 @asynccontextmanager
@@ -182,6 +203,42 @@ def _utcnow() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _sanitize_error_text(text: str) -> str:
+    safe = re.sub(r"(?i)(apiKey|api_key|key)=([^&\s]+)", r"\1=[REDACTED]", str(text))
+    safe = re.sub(r"/bot[^/\s]+/", "/bot[REDACTED]/", safe)
+    for name, value in os.environ.items():
+        if not value or len(value) < 4:
+            continue
+        if any(marker in name.upper() for marker in ("KEY", "TOKEN", "SECRET", "DATABASE_URL")):
+            safe = safe.replace(value, "[REDACTED]")
+    return safe
+
+
+def _debug_routes_enabled() -> bool:
+    return _env_bool("ENABLE_DEBUG_ROUTES", False)
+
+
+def require_admin(
+    authorization: str | None = Header(default=None),
+    x_admin_token: str | None = Header(default=None),
+) -> None:
+    expected = os.environ.get("ADMIN_API_TOKEN", "").strip()
+    if not expected:
+        raise HTTPException(status_code=401, detail="admin auth is not configured")
+    token = ""
+    if authorization and authorization.lower().startswith("bearer "):
+        token = authorization.split(" ", 1)[1].strip()
+    elif x_admin_token:
+        token = x_admin_token.strip()
+    if not token or not hmac.compare_digest(token, expected):
+        raise HTTPException(status_code=401, detail="invalid admin token")
+
+
+def require_debug_enabled() -> None:
+    if not _debug_routes_enabled():
+        raise HTTPException(status_code=404, detail="not found")
+
+
 # ──────────────────────────────────────────────────────────────────
 # /health — liveness
 # ──────────────────────────────────────────────────────────────────
@@ -189,7 +246,7 @@ def _utcnow() -> str:
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "ts": _utcnow()}
+    return {"status": "ok"}
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -197,14 +254,13 @@ def health():
 # ──────────────────────────────────────────────────────────────────
 
 
-@app.get("/health/ledger")
+@app.get("/health/ledger", dependencies=[Depends(require_admin)])
 def health_ledger():
-    if not LEDGER_PATH.exists():
-        return JSONResponse({"status": "no_ledger", "ts": _utcnow()}, status_code=404)
-
     try:
-        data = json.loads(LEDGER_PATH.read_text(encoding="utf-8"))
-        entries = list(data.get("entries", {}).values())
+        from src.infrastructure.persistent_ledger import load_ledger
+
+        ledger = load_ledger(LEDGER_PATH)
+        entries = list(ledger.entries().values())
         settled = [e for e in entries if e.get("ledger_status") == "settled"]
         open_ = [e for e in entries if e.get("ledger_status") == "open"]
         wins = sum(1 for e in settled if e.get("result") == "win")
@@ -235,7 +291,7 @@ def health_ledger():
 # ──────────────────────────────────────────────────────────────────
 
 
-@app.get("/health/model")
+@app.get("/health/model", dependencies=[Depends(require_admin)])
 def health_model():
     meta_files = sorted(glob(str(MODEL_DIR / "dc_*.meta.json")))
     if not meta_files:
@@ -272,7 +328,7 @@ def health_model():
 # ──────────────────────────────────────────────────────────────────
 
 
-@app.get("/health/drift")
+@app.get("/health/drift", dependencies=[Depends(require_admin)])
 def health_drift():
     drift_path = REPORTS_DIR / "drift_report.json"
     if not drift_path.exists():
@@ -305,7 +361,7 @@ def health_drift():
 # ──────────────────────────────────────────────────────────────────
 
 
-@app.get("/health/disk")
+@app.get("/health/disk", dependencies=[Depends(require_admin)])
 def health_disk():
     def _mb(p: Path) -> float:
         if not p.exists():
@@ -328,29 +384,31 @@ def health_disk():
 # ──────────────────────────────────────────────────────────────────
 
 
-@app.get("/health/readiness")
+@app.get("/health/readiness", dependencies=[Depends(require_admin)])
 def health_readiness():
     """Check whether the system is ready to generate and deliver signals."""
     checks: dict[str, dict] = {}
 
-    # 1. Production model exists
-    meta_files = sorted(glob(str(MODEL_DIR / "dc_*.meta.json")))
-    prod_models = [
-        p for p in meta_files if json.loads(Path(p).read_text()).get("status") == "production"
-    ]
+    # 1. Production model exists for every enabled league
+    required_leagues = _required_leagues()
+    prod_model_leagues = _production_model_leagues()
+    missing_model_leagues = sorted(set(required_leagues) - prod_model_leagues)
     checks["model"] = {
-        "ready": bool(prod_models),
+        "ready": bool(required_leagues) and not missing_model_leagues,
         "detail": (
-            f"{len(prod_models)} production model(s) found"
-            if prod_models
-            else "No production model — run daily-trainer cron first"
+            f"production models present for {', '.join(required_leagues)}"
+            if required_leagues and not missing_model_leagues
+            else f"missing production model(s): {', '.join(missing_model_leagues)}"
         ),
     }
 
-    # 2. Ledger exists
+    # 2. Authoritative ledger backend reachable
+    from src.infrastructure.persistent_ledger import ledger_healthcheck
+
+    ledger_health = ledger_healthcheck(LEDGER_PATH)
     checks["ledger"] = {
-        "ready": LEDGER_PATH.exists(),
-        "detail": str(LEDGER_PATH) if LEDGER_PATH.exists() else "Ledger file not found",
+        "ready": bool(ledger_health.get("ok")),
+        "detail": str(ledger_health.get("backend", "unknown")),
     }
 
     # 3. Staging data exists
@@ -458,7 +516,26 @@ def health_readiness():
             ),
         }
 
-    # 10. Active report overdue (> 4 hours since last run)
+    # 10. Production control-plane config must be present, but never echoed.
+    app_env = os.environ.get("APP_ENV", "development").strip().lower()
+    if app_env == "production":
+        required_env = [
+            "DATABASE_URL",
+            "ADMIN_API_TOKEN",
+            "TELEGRAM_WEBHOOK_SECRET",
+            "TELEGRAM_ALLOWED_CHAT_IDS",
+        ]
+        missing = [name for name in required_env if not os.environ.get(name, "").strip()]
+        checks["production_config"] = {
+            "ready": not missing,
+            "detail": (
+                "required production control-plane config present"
+                if not missing
+                else f"missing required production config: {', '.join(missing)}"
+            ),
+        }
+
+    # 11. Active report overdue (> 4 hours since last run)
     if ACTIVE_MODE:
         try:
             from src.models.run_history import read_last_run
@@ -481,7 +558,7 @@ def health_readiness():
         except Exception:
             pass
 
-    # 11. Repeated Telegram delivery failures
+    # 12. Repeated Telegram delivery failures
     tg_delivery = _read_tg_delivery_status()
     if tg_delivery.get("last_status") == "failed":
         checks["telegram_delivery"] = {
@@ -489,7 +566,11 @@ def health_readiness():
             "detail": f"Last Telegram delivery failed: {tg_delivery.get('last_error', 'unknown')}",
         }
 
-    ready_for_signals = all(checks[k]["ready"] for k in ("model", "ledger", "staging_data"))
+    critical_checks = ["model", "ledger", "staging_data"]
+    for optional_critical in ("scheduler", "telegram_config", "production_config"):
+        if optional_critical in checks:
+            critical_checks.append(optional_critical)
+    ready_for_signals = all(checks[k]["ready"] for k in critical_checks)
     degraded = not all(c.get("ready", True) for c in checks.values())
 
     return {
@@ -498,6 +579,26 @@ def health_readiness():
         "checks": checks,
         "ts": _utcnow(),
     }
+
+
+@app.get("/ready")
+def ready():
+    from src.infrastructure.persistent_ledger import ledger_healthcheck
+
+    readiness = health_readiness()
+    ledger = ledger_healthcheck(LEDGER_PATH)
+    ready_ok = bool(readiness.get("ready_for_signals")) and bool(ledger.get("ok"))
+    payload = {
+        "status": "ok" if ready_ok else "not_ready",
+        "ledger": {"backend": ledger.get("backend"), "ok": ledger.get("ok")},
+        "degraded": readiness.get("degraded"),
+        "checks": {
+            name: {"ready": bool(check.get("ready"))}
+            for name, check in dict(readiness.get("checks", {})).items()
+        },
+        "ts": _utcnow(),
+    }
+    return JSONResponse(payload, status_code=200 if ready_ok else 503)
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -510,13 +611,16 @@ def _read_tg_delivery_status() -> dict:
     path = REPORTS_DIR / "tg_delivery_status.json"
     if path.exists():
         try:
-            return json.loads(path.read_text(encoding="utf-8"))
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if data.get("last_error"):
+                data["last_error"] = _sanitize_error_text(str(data["last_error"]))
+            return data
         except Exception:
             pass
     return {}
 
 
-@app.get("/health/active")
+@app.get("/health/active", dependencies=[Depends(require_admin)])
 def health_active():
     """Active mode status: scheduler, Telegram, per-job next_run, 24h stats."""
     now = datetime.now(timezone.utc)
@@ -651,18 +755,21 @@ def health_active():
 # ──────────────────────────────────────────────────────────────────
 
 
-@app.get("/health/quota")
+@app.get("/health/quota", dependencies=[Depends(require_admin)])
 def health_quota():
     """Return API quota usage summary."""
     try:
         from src.monitoring.api_quota_monitor import get_usage_summary
+
         usage = get_usage_summary()
 
         # Check if any API is above warning threshold (80%)
         warnings = []
         for api_name, stats in usage.items():
             if stats["pct_used"] > 80:
-                warnings.append(f"{api_name}: {stats['pct_used']:.0f}% used ({stats['used']}/{stats['limit']})")
+                warnings.append(
+                    f"{api_name}: {stats['pct_used']:.0f}% used ({stats['used']}/{stats['limit']})"
+                )
 
         status = "warning" if warnings else "ok"
         return {
@@ -672,10 +779,11 @@ def health_quota():
             "timestamp_utc": datetime.now(timezone.utc).isoformat(),
         }
     except Exception as exc:
-        _log.warning("[quota] health check failed: %s", exc)
+        safe_error = _sanitize_error_text(str(exc))
+        _log.warning("[quota] health check failed: %s", safe_error)
         return {
             "status": "unknown",
-            "error": str(exc),
+            "error": safe_error,
             "timestamp_utc": datetime.now(timezone.utc).isoformat(),
         }
 
@@ -684,7 +792,7 @@ def health_quota():
 # ──────────────────────────────────────────────────────────────────
 
 
-@app.get("/health/all")
+@app.get("/health/all", dependencies=[Depends(require_admin)])
 def health_all():
     ledger = health_ledger()
     model = health_model()
@@ -724,7 +832,7 @@ def health_all():
 # ──────────────────────────────────────────────────────────────────
 
 
-@app.post("/trigger")
+@app.post("/trigger", dependencies=[Depends(require_admin)])
 def trigger_report():
     """Немедленно запустить active report и отправить в Telegram.
 
@@ -754,7 +862,7 @@ def trigger_report():
     }
 
 
-@app.get("/debug/tennis")
+@app.get("/debug/tennis", dependencies=[Depends(require_admin), Depends(require_debug_enabled)])
 def debug_tennis():
     """Диагностика теннисного сканера — что реально возвращает Odds API.
 
@@ -773,7 +881,10 @@ def debug_tennis():
     model_path = model_dir / "tennis_elo_atp_latest.pkl"
 
     if not api_key and not odds_io_key:
-        return {"error": "No tennis odds key configured (need THE_ODDS_API_KEY or ODDS_API_IO_KEY)", "signals": []}
+        return {
+            "error": "No tennis odds key configured (need THE_ODDS_API_KEY or ODDS_API_IO_KEY)",
+            "signals": [],
+        }
 
     if not model_path.exists():
         return {"error": f"No model at {model_path}", "signals": []}
@@ -794,7 +905,7 @@ def debug_tennis():
         return {"error": str(exc), "ts": _utcnow()}
 
 
-@app.post("/trigger/tennis-scan")
+@app.post("/trigger/tennis-scan", dependencies=[Depends(require_admin)])
 def trigger_tennis_scan():
     """Немедленно запустить теннисный скан сигналов.
 
@@ -828,16 +939,13 @@ def trigger_tennis_scan():
     }
 
 
-@app.get("/debug/tennis-raw")
+@app.get("/debug/tennis-raw", dependencies=[Depends(require_admin), Depends(require_debug_enabled)])
 def debug_tennis_raw():
     """Показывает сырой ответ Odds API для теннисных ключей.
 
     Диагностика: есть ли вообще теннисные события в API.
     curl https://your-app.onrender.com/debug/tennis-raw
     """
-    import json as _json
-    import urllib.request as _urllib
-
     api_key = os.environ.get("THE_ODDS_API_KEY", "")
     odds_io_key = os.environ.get("ODDS_API_IO_KEY", "")
 
@@ -850,6 +958,7 @@ def debug_tennis_raw():
     if odds_io_key:
         try:
             from src.ingest.oddsapiio_tennis import diagnostic_info
+
             diag = diagnostic_info()
             results["odds_api_io"] = diag
         except Exception as exc:
@@ -859,14 +968,19 @@ def debug_tennis_raw():
         results["the_odds_api_status"] = "skipped (THE_ODDS_API_KEY not set)"
         return results
 
+    from src.services.odds_gateway import fetch_the_odds_api_json
+
     sport_keys = ["tennis_atp", "tennis_wta"]
 
     # Also check which sports are active
     try:
-        url = f"https://api.the-odds-api.com/v4/sports?apiKey={api_key}"
-        req = _urllib.Request(url, headers={"User-Agent": "bet-analytics/1.0"})
-        with _urllib.urlopen(req, timeout=15) as resp:
-            all_sports = _json.loads(resp.read())
+        sports_resp = fetch_the_odds_api_json(
+            "/sports",
+            api_key=api_key,
+            query={},
+            source="health_app.debug_tennis_raw.sports",
+        )
+        all_sports = sports_resp.payload
         tennis_sports = [
             s
             for s in all_sports
@@ -885,15 +999,21 @@ def debug_tennis_raw():
     # Try each tennis sport key
     for sport_key in sport_keys:
         try:
-            url = (
-                f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds"
-                f"?apiKey={api_key}&regions=eu,uk,us&markets=h2h&oddsFormat=decimal"
-                f"&dateFormat=iso"
+            events_resp = fetch_the_odds_api_json(
+                f"/sports/{sport_key}/odds",
+                api_key=api_key,
+                query={
+                    "regions": "eu,uk,us",
+                    "markets": "h2h",
+                    "oddsFormat": "decimal",
+                    "dateFormat": "iso",
+                },
+                source="health_app.debug_tennis_raw.odds",
+                sport_key=sport_key,
+                markets=["h2h"],
+                regions=["eu", "uk", "us"],
             )
-            req = _urllib.Request(url, headers={"User-Agent": "bet-analytics/1.0"})
-            with _urllib.urlopen(req, timeout=15) as resp:
-                data = _json.loads(resp.read())
-            events = data if isinstance(data, list) else []
+            events = events_resp.payload if isinstance(events_resp.payload, list) else []
             results[sport_key] = {
                 "n_events": len(events),
                 "first_3": [
@@ -914,7 +1034,7 @@ def debug_tennis_raw():
     return results
 
 
-@app.post("/trigger/morning-digest")
+@app.post("/trigger/morning-digest", dependencies=[Depends(require_admin)])
 def trigger_morning_digest():
     """Немедленно запустить утренний дайджест и отправить в Telegram.
 
@@ -946,6 +1066,15 @@ def trigger_morning_digest():
 @app.post("/webhook/telegram")
 async def telegram_webhook(request: Request):
     """Telegram sends all updates here. Register with /webhook/telegram/setup."""
+    expected_secret = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "").strip()
+    if expected_secret:
+        actual = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+        if not hmac.compare_digest(actual, expected_secret):
+            return JSONResponse({"ok": False, "error": "invalid webhook secret"}, status_code=401)
+    elif os.environ.get("APP_ENV", "development").lower() == "production":
+        return JSONResponse(
+            {"ok": False, "error": "webhook secret not configured"}, status_code=503
+        )
     try:
         update = await request.json()
         import threading
@@ -969,7 +1098,7 @@ def _handle_bot_update(update: dict) -> None:
         _log.exception("[webhook] handle_update failed: %s", exc)
 
 
-@app.post("/webhook/telegram/setup")
+@app.post("/webhook/telegram/setup", dependencies=[Depends(require_admin)])
 def telegram_webhook_setup():
     """Register webhook URL with Telegram. Run once after deploy.
 
@@ -987,7 +1116,7 @@ def telegram_webhook_setup():
     return {"webhook_setup": result, "current_info": get_webhook_info(), "ts": _utcnow()}
 
 
-@app.get("/webhook/telegram/info")
+@app.get("/webhook/telegram/info", dependencies=[Depends(require_admin)])
 def telegram_webhook_info():
     """Check current Telegram webhook registration.
 
@@ -998,24 +1127,28 @@ def telegram_webhook_info():
     return {"webhook_info": get_webhook_info(), "ts": _utcnow()}
 
 
-@app.get("/debug/odds-sports")
+@app.get(
+    "/debug/odds-sports", dependencies=[Depends(require_admin), Depends(require_debug_enabled)]
+)
 def debug_odds_sports():
     """Все активные виды спорта в Odds API для данного ключа.
 
     curl https://your-app.onrender.com/debug/odds-sports
     """
-    import json as _json
-    import urllib.request as _urllib
-
     api_key = os.environ.get("THE_ODDS_API_KEY", "")
     if not api_key:
         return {"error": "THE_ODDS_API_KEY not set"}
 
     try:
-        url = f"https://api.the-odds-api.com/v4/sports?apiKey={api_key}"
-        req = _urllib.Request(url, headers={"User-Agent": "bet-analytics/1.0"})
-        with _urllib.urlopen(req, timeout=15) as resp:
-            sports = _json.loads(resp.read())
+        from src.services.odds_gateway import fetch_the_odds_api_json
+
+        response = fetch_the_odds_api_json(
+            "/sports",
+            api_key=api_key,
+            query={},
+            source="health_app.debug_odds_sports",
+        )
+        sports = response.payload
         active = [s for s in sports if s.get("active")]
         return {
             "total": len(sports),
@@ -1026,4 +1159,4 @@ def debug_odds_sports():
             "ts": _utcnow(),
         }
     except Exception as exc:
-        return {"error": str(exc), "ts": _utcnow()}
+        return {"error": _sanitize_error_text(str(exc)), "ts": _utcnow()}

@@ -45,14 +45,19 @@ def build_today_text() -> str:
         ]
         # Context: off-season for top leagues + WC countdown
         from datetime import date as _date
+
         wc_start = _date(2026, 6, 11)
         days_to_wc = (wc_start - today).days
         if 0 < days_to_wc <= 14:
-            lines.append(f"\n🏆 <b>ЧМ 2026 начнётся через {days_to_wc} дн.</b> — бот начнёт сканировать матчи автоматически.")
+            lines.append(
+                f"\n🏆 <b>ЧМ 2026 начнётся через {days_to_wc} дн.</b> — бот начнёт сканировать матчи автоматически."
+            )
         elif days_to_wc <= 0:
             lines.append("\n🏆 ЧМ 2026 идёт — бот сканирует матчи.")
         else:
-            lines.append("\n⚽ Топ-лиги (АПЛ, Бундеслига, и др.) в межсезонье. Сканируются: MLS, Бразилия, Аргентина, РПЛ, теннис.")
+            lines.append(
+                "\n⚽ Топ-лиги (АПЛ, Бундеслига, и др.) в межсезонье. Сканируются: MLS, Бразилия, Аргентина, РПЛ, теннис."
+            )
         return "\n".join(lines)
     if priority:
         lines.append(f"✅ <b>Приоритетные сигналы ({len(priority)})</b>")
@@ -70,7 +75,9 @@ def build_today_text() -> str:
         for item in started:
             sport = item.get("sport", "football")
             if sport == "tennis":
-                match_label = escape(str(item.get("player", "?")) + " vs " + str(item.get("opponent", "?")))
+                match_label = escape(
+                    str(item.get("player", "?")) + " vs " + str(item.get("opponent", "?"))
+                )
             else:
                 match_label = escape(f"{item.get('home_team', '?')} — {item.get('away_team', '?')}")
             lines.append(f"• {match_label} | {_event_time_text(item)}")
@@ -138,7 +145,9 @@ def _build_model_info() -> list[str]:
 
     # Football models
     try:
-        metas = sorted(model_dir.glob("dc_*.meta.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+        metas = sorted(
+            model_dir.glob("dc_*.meta.json"), key=lambda p: p.stat().st_mtime, reverse=True
+        )
         leagues_seen: set[str] = set()
         for meta_path in metas:
             import json
@@ -257,7 +266,9 @@ _SELECTION_RU_MAP = {
 }
 
 
-def _rest_line(home: str, rest_h: Any, fatigue_h: str, away: str, rest_a: Any, fatigue_a: str) -> str:
+def _rest_line(
+    home: str, rest_h: Any, fatigue_h: str, away: str, rest_a: Any, fatigue_a: str
+) -> str:
     if rest_h is None and rest_a is None:
         return ""
     _fat = {"severe": "🔴 измотан", "mild": "🟡 устал", "none": "🟢 отдохнул"}
@@ -385,9 +396,9 @@ def _format_pick(item: dict[str, Any], priority: bool) -> list[str]:
 
 
 def _load_entries() -> list[dict[str, Any]]:
-    from src.models.signal_ledger import SignalLedger
+    from src.infrastructure.persistent_ledger import load_ledger
 
-    return list(SignalLedger.load_or_create(LEDGER_PATH).entries().values())
+    return list(load_ledger(LEDGER_PATH).entries().values())
 
 
 def _event_day(item: dict[str, Any]) -> date | None:

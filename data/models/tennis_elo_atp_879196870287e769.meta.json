@@ -11,10 +11,12 @@
   "elo_k": 32.0,
   "elo_start": 1500.0,
   "elo_scale": 400.0,
-  "decay_half_life_days": 180,
+  "rating_decay_applied": false,
+  "h2h_half_life_days": 365,
   "features": [
     "surface_elo",
     "serve_return_stats",
-    "h2h_recency"
+    "h2h_recency",
+    "schedule_fatigue"
   ]
 }

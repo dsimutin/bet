@@ -171,8 +171,9 @@ def signal_scan():
 python -m src.cron.run_signals
 
 # Проверить сигналы в ledger
-python -c "from src.models.signal_ledger import SignalLedger; \
-           ledger = SignalLedger.load_or_create(); \
+python -c "from pathlib import Path; \
+           from src.infrastructure.persistent_ledger import load_ledger; \
+           ledger = load_ledger(Path('data/core/paper_signal_ledger.json')); \
            for s in ledger.entries().values(): \
                if s['ledger_status'] == 'open': \
                    print(s)"
