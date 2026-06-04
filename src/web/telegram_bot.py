@@ -64,20 +64,28 @@ def _handle_callback(callback: dict[str, Any]) -> None:
         _log.warning("[bot] ignoring non-allowlisted callback chat_id=%s", chat_id)
         return
     action = callback.get("data")
-    if action == "picks_today":
-        _send_today(chat_id)
-    elif action == "refresh":
-        _refresh(chat_id)
-    elif action == "stats":
-        _send(chat_id, _stats_text(), _back_button())
-    elif action == "history":
-        _send(chat_id, _history_text(), _back_button())
-    elif action == "how_it_works":
-        _send(chat_id, _how_it_works(), _back_button())
-    elif action == "debug_tennis":
-        _debug_tennis(chat_id)
-    else:
-        _send_main_menu(chat_id, "")
+    try:
+        if action == "picks_today":
+            _send_today(chat_id)
+        elif action == "refresh":
+            _refresh(chat_id)
+        elif action == "stats":
+            _send(chat_id, _stats_text(), _back_button())
+        elif action == "history":
+            _send(chat_id, _history_text(), _back_button())
+        elif action == "how_it_works":
+            _send(chat_id, _how_it_works(), _back_button())
+        elif action == "debug_tennis":
+            _debug_tennis(chat_id)
+        else:
+            _send_main_menu(chat_id, "")
+    except Exception as exc:
+        _log.exception("[bot] callback action=%s failed: %s", action, exc)
+        _send(
+            chat_id,
+            "❌ Не удалось загрузить данные. Попробуйте через минуту.",
+            _back_button(),
+        )
 
 
 def _send_main_menu(chat_id: str, first_name: str = "") -> None:
