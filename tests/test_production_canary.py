@@ -49,6 +49,10 @@ def test_canary_fails_when_production_database_is_unavailable(monkeypatch, tmp_p
 
     assert result["status"] == "fail"
     assert "ledger_backend" in result["summary"]["failed_critical"]
+    assert any(
+        action["check"] == "ledger_backend" and action["severity"] == "critical"
+        for action in result["next_actions"]
+    )
 
 
 def test_canary_passes_core_runtime_without_spending_quota(monkeypatch, tmp_path) -> None:
@@ -82,6 +86,8 @@ def test_canary_passes_core_runtime_without_spending_quota(monkeypatch, tmp_path
     )
 
     assert result["status"] == "pass"
+    assert result["next_actions"] == []
+    assert result["summary"]["next_action_count"] == 0
     assert result["summary"]["quota_spent"] is False
     assert result["summary"]["ledger_mutated"] is False
 

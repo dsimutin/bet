@@ -58,13 +58,16 @@ def run_production_canary(
     failed = [c for c in checks if c.status == "fail" and c.critical]
     warnings = [c for c in checks if c.status == "warn"]
     status = "fail" if failed else ("warn" if warnings else "pass")
+    next_actions = _next_actions(checks)
     return {
         "status": status,
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "checks": {check.name: check.as_dict() for check in checks},
+        "next_actions": next_actions,
         "summary": {
             "failed_critical": [c.name for c in failed],
             "warnings": [c.name for c in warnings],
+            "next_action_count": len(next_actions),
             "quota_spent": False,
             "ledger_mutated": False,
         },
@@ -213,6 +216,79 @@ def _check_last_reports(data_dir: Path) -> CanaryCheck:
         "pass",
         f"signal_reports={len(signal_reports)}, settlement_reports={len(settlement_reports)}",
         critical=False,
+    )
+
+
+def _next_actions(checks: list[CanaryCheck]) -> list[dict[str, Any]]:
+    actions: list[dict[str, Any]] = []
+    check_map = {check.name: check for check in checks}
+    _append_action(
+        actions,
+        check_map,
+        "runtime_imports",
+        "Redeploy from all-the-best and verify requirements-render.txt includes runtime dependencies.",
+    )
+    _append_action(
+        actions,
+        check_map,
+        "production_env",
+        "Set required Render environment variables and keep PAPER_TRADING_ONLY=true.",
+    )
+    _append_action(
+        actions,
+        check_map,
+        "ledger_backend",
+        "Fix DATABASE_URL/SUPABASE_LEDGER_ENABLED; production ledger authority must be Supabase.",
+    )
+    _append_action(
+        actions,
+        check_map,
+        "model_artifacts",
+        "Run bootstrap training or restore durable model artifacts before enabling scans.",
+    )
+    _append_action(
+        actions,
+        check_map,
+        "telegram",
+        "Set TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID and TELEGRAM_ALLOWED_CHAT_IDS, then test delivery.",
+    )
+    _append_action(
+        actions,
+        check_map,
+        "quota_config",
+        "Set THE_ODDS_API_KEY or ODDS_API_IO_KEY and keep priority refresh threshold above hard stop.",
+    )
+    _append_action(
+        actions,
+        check_map,
+        "scheduler_contract",
+        "Enable ACTIVE_MODE=true only after canary/readiness are acceptable.",
+    )
+    _append_action(
+        actions,
+        check_map,
+        "last_reports",
+        "Run the first protected /trigger, then confirm signal and settlement reports appear.",
+    )
+    return actions
+
+
+def _append_action(
+    actions: list[dict[str, Any]],
+    checks: dict[str, CanaryCheck],
+    name: str,
+    action: str,
+) -> None:
+    check = checks.get(name)
+    if not check or check.status == "pass":
+        return
+    actions.append(
+        {
+            "check": name,
+            "severity": "critical" if check.status == "fail" and check.critical else "warning",
+            "action": action,
+            "detail": check.detail,
+        }
     )
 
 
