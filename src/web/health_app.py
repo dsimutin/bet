@@ -8,6 +8,7 @@ Endpoints:
     GET /health/disk         — persistent disk usage
     GET /health/readiness    — deep readiness for signal generation
     GET /health/active       — active mode status, last run timestamps, 24h stats
+    GET /health/canary       — read-only production-loop verification
     GET /health/all          — all checks combined (for dashboards)
     POST /trigger            — немедленно запустить отчёт и отправить в Telegram
 """
@@ -788,6 +789,15 @@ def health_quota():
         }
 
 
+@app.get("/health/canary", dependencies=[Depends(require_admin)])
+def health_canary():
+    """Read-only production canary: verifies runtime assembly without spending quota."""
+    from src.ops.production_canary import run_production_canary
+
+    result = run_production_canary(data_dir=DATA_DIR, model_dir=MODEL_DIR, ledger_path=LEDGER_PATH)
+    return JSONResponse(result, status_code=200 if result["status"] in {"pass", "warn"} else 503)
+
+
 # /health/all — combined (для Render dashboard / внешних мониторов)
 # ──────────────────────────────────────────────────────────────────
 
@@ -801,6 +811,7 @@ def health_all():
     readiness = health_readiness()
     active = health_active()
     quota = health_quota()
+    canary = health_canary()
 
     def _body(resp):
         if hasattr(resp, "body"):
@@ -813,6 +824,7 @@ def health_all():
         "drift": _body(drift),
         "disk": _body(disk),
         "quota": _body(quota),
+        "canary": _body(canary),
     }
 
     statuses = [c.get("status", "unknown") for c in checks.values()]

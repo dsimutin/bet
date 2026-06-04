@@ -645,7 +645,14 @@ python scripts/health_check.py
 curl https://your-app.onrender.com/health
 curl https://your-app.onrender.com/ready
 curl -H "Authorization: Bearer $ADMIN_API_TOKEN" https://your-app.onrender.com/health/all
+curl -H "Authorization: Bearer $ADMIN_API_TOKEN" https://your-app.onrender.com/health/canary
 ```
+
+`/health/canary` is a read-only production canary: it checks runtime imports,
+production config, ledger authority, model artifacts, Telegram config, quota
+thresholds and recent reports without spending Odds API quota or writing ledger
+entries. Telegram pick cards include a Trust Cockpit score, so each signal shows
+timestamp/freshness/market trust context rather than raw edge alone.
 
 ### Telegram уведомления — проверка
 

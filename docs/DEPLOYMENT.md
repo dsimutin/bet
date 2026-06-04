@@ -41,8 +41,17 @@ do not use it for production paper runs because it can reset quota state.
 1. Deploy with all required env vars.
 2. Verify public liveness: `GET /health`.
 3. Verify readiness: `GET /ready`.
-4. Register Telegram webhook through protected `POST /webhook/telegram/setup`.
-5. Run protected `POST /trigger` only after quota and readiness are acceptable.
-6. Confirm settlement with the scheduled settlement job or `src.cron.run_settle`.
+4. Run protected read-only canary: `GET /health/canary` with
+   `Authorization: Bearer $ADMIN_API_TOKEN`. It verifies runtime imports,
+   production safety config, authoritative ledger backend, model artifacts,
+   Telegram config, quota thresholds and recent reports without spending provider
+   quota or mutating the ledger.
+5. Register Telegram webhook through protected `POST /webhook/telegram/setup`.
+6. Run protected `POST /trigger` only after quota, readiness and canary status are acceptable.
+7. Confirm settlement with the scheduled settlement job or `src.cron.run_settle`.
+
+Telegram pick cards include a Trust Cockpit line. This is an operational confidence
+summary built from timestamp verification, odds freshness, market type,
+recommendation tier, experimental flags and edge/stake sanity.
 
 Do not configure real-bet integrations.
