@@ -82,6 +82,8 @@ class MirroredLedgerBackend:
         try:
             return self.authority.load()
         except Exception as exc:
+            if supabase_ledger.is_required():
+                raise
             _log.warning(
                 "Supabase ledger unavailable, falling back to local mirror: %s",
                 _sanitize(str(exc)),
