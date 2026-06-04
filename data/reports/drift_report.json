@@ -1,0 +1,13 @@
+{
+  "drift_detected": false,
+  "kelly_multiplier": 1.0,
+  "reason": "no_drift: baseline=68.75% recent=71.43% Δ=-2.68% ≤ 15.00%",
+  "recent_accuracy": 0.7143,
+  "baseline_accuracy": 0.6875,
+  "cusum_value": -0.0268,
+  "threshold": 0.15,
+  "n_recent": 14,
+  "n_baseline": 16,
+  "retrain_recommended": false,
+  "generated_at_utc": "2026-05-30T03:28:11.387860+00:00"
+}

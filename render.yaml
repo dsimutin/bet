@@ -20,8 +20,10 @@ version: "1"
 services:
 
   # ──────────────────────────────────────────────────────────────────
-  # WEB SERVICE — FastAPI: health checks + Telegram webhook (optional)
-  # Бесплатный план: 750 часов/месяц, усыпает при простое
+  # WEB SERVICE — FastAPI + APScheduler (active monitoring mode)
+  # Одиночный сервис: health API + встроенный планировщик задач.
+  # plan: standard рекомендуется для production (512 MB RAM, не спит).
+  # plan: starter — для разработки/тестирования (усыпает при простое).
   # ──────────────────────────────────────────────────────────────────
   - type: web
     name: bet-api
