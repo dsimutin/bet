@@ -35,7 +35,7 @@ def run_settlement_job(
     ]
     seasons = [
         x.strip()
-        for x in os.environ.get("OPENFOOTBALL_SEASONS", "2023-24,2024-25").split(",")
+        for x in os.environ.get("OPENFOOTBALL_SEASONS", "2023-24,2024-25,2025-26").split(",")
         if x.strip()
     ]
     staging_dir = Path(os.environ.get("STAGING_DIR", "data/staging"))
@@ -140,6 +140,7 @@ def run_settlement_job(
     try:
         save_ledger_func(ledger, ledger_path)
         steps["ledger_save"] = {"status": "success", "error": ""}
+        _notify_telegram_settlement(football_report, tennis_report, ledger)
     except Exception as exc:
         print(f"[settle] Ledger save failed: {exc}", file=sys.stderr)
         elapsed = round(time.perf_counter() - t0, 1)
@@ -311,6 +312,23 @@ def _sanitize_text(text: str) -> str:
         if value:
             text = text.replace(value, "[REDACTED]")
     return text
+
+
+def _notify_telegram_settlement(
+    football_report: dict, tennis_report: dict, ledger: Any
+) -> None:
+    try:
+        all_settled = (
+            football_report.get("settled_signals", []) +
+            tennis_report.get("settled_signals", [])
+        )
+        if not all_settled:
+            return
+        from src.web.telegram_bot import notify_settlement_results
+
+        notify_settlement_results(all_settled, ledger.summary())
+    except Exception as exc:
+        print(f"[settle] Telegram notification failed (non-critical): {exc}", file=sys.stderr)
 
 
 def _log_run(

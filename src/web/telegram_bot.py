@@ -393,3 +393,52 @@ def _chat_allowed(chat_id: str) -> bool:
         return os.environ.get("APP_ENV", "development").lower() != "production"
     allowed = {item.strip() for item in allowed_raw.split(",") if item.strip()}
     return chat_id in allowed
+
+
+def notify_settlement_results(
+    settled_signals: list[dict],
+    ledger_summary: dict | None = None,
+) -> None:
+    """Send Telegram notification with newly settled signal results."""
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+    if not chat_id or not settled_signals:
+        return
+
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc).strftime("%d.%m %H:%M UTC")
+    wins = [s for s in settled_signals if s.get("result") == "win"]
+    losses = [s for s in settled_signals if s.get("result") == "loss"]
+    voids = [s for s in settled_signals if s.get("result") == "void"]
+    pnl = sum(float(s.get("pnl_units", 0)) for s in settled_signals)
+
+    lines = [f"📊 <b>Результаты — {now}</b>", ""]
+
+    for s in settled_signals[:10]:
+        result = s.get("result", "")
+        icon = {"win": "✅", "loss": "❌", "void": "↩️"}.get(result, "❓")
+        sport = s.get("sport", "football")
+        if sport == "tennis":
+            match = escape(f"{s.get('player', '?')} vs {s.get('opponent', '?')}")
+        else:
+            match = escape(f"{s.get('home_team', '?')} — {s.get('away_team', '?')}")
+        sel = escape(str(s.get("selection_ru") or s.get("selection") or "?"))
+        odds = s.get("entry_odds", "?")
+        pu = float(s.get("pnl_units", 0))
+        lines.append(f"{icon} {match} | {sel} @ {odds} → {pu:+.2f}u")
+
+    lines.append("")
+    lines.append(
+        f"Итог: {len(wins)}✅ {len(losses)}❌ {len(voids)}↩️ | P&L: {pnl:+.2f}u"
+    )
+
+    if ledger_summary:
+        total_settled = ledger_summary.get("settled", 0)
+        total_wins = ledger_summary.get("wins", 0)
+        total_pnl = float(ledger_summary.get("pnl_units", 0))
+        winrate = round(total_wins / total_settled * 100, 1) if total_settled else 0
+        lines.append(
+            f"Всего: {total_wins}/{total_settled} побед ({winrate}%) | ROI {total_pnl:+.2f}u"
+        )
+
+    _send(chat_id, "\n".join(lines))
