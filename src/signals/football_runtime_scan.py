@@ -27,7 +27,11 @@ def generate_football_signals_runtime(
 ) -> list[dict[str, Any]]:
     """Generate Dixon-Coles h2h signals from shared cached live odds."""
     sport_key = _LEAGUE_TO_SPORT_KEY.get(league.upper())
-    if not sport_key or not odds_api_key:
+    if not sport_key:
+        return []
+    if not odds_api_key:
+        import logging
+        logging.getLogger(__name__).warning("[football] %s: skipped (no THE_ODDS_API_KEY configured)", league)
         return []
     raw_events = get_football_h2h_odds(sport_key, odds_api_key)
     if not raw_events:

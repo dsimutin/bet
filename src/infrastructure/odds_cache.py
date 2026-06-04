@@ -26,7 +26,10 @@ def _db_enabled() -> bool:
 def _connect():
     import psycopg2
 
-    return psycopg2.connect(os.environ["DATABASE_URL"], connect_timeout=10)
+    database_url = os.environ.get("DATABASE_URL", "").strip()
+    if not database_url:
+        raise RuntimeError("DATABASE_URL is not configured")
+    return psycopg2.connect(database_url, connect_timeout=10)
 
 
 def _ensure_schema() -> None:
