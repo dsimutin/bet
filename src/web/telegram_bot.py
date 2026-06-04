@@ -189,10 +189,10 @@ def _debug_tennis(chat_id: str) -> None:
 
     def _run() -> None:
         try:
-            from src.signals.tennis_runtime_scan import scan_tennis_h2h_runtime
+            from src.signals.tennis_runtime_scan import scan_tennis_h2h_runtime_debug
 
             model_dir = Path(os.environ.get("MODEL_DIR", "data/models"))
-            result = scan_tennis_h2h_runtime(
+            result = scan_tennis_h2h_runtime_debug(
                 model_dir / "tennis_elo_atp_latest.pkl", os.environ.get("THE_ODDS_API_KEY", "")
             )
             events = result.get("events_checked", 0)
@@ -210,6 +210,7 @@ def _debug_tennis(chat_id: str) -> None:
             total_n = result.get("total_count", 0)
             modes = {
                 "multimarket_cached": "мультирынок (кэш)",
+                "multimarket_cached_debug": "мультирынок debug (кэш)",
                 "h2h_low_quota_cached": "эконом (h2h, кэш)",
                 "h2h_low_quota": "эконом (h2h)",
             }
@@ -225,6 +226,14 @@ def _debug_tennis(chat_id: str) -> None:
                     f"{escape(str(s.get('player','?')))} edge {s.get('edge_pct','?')}%"
                     for s in top[:3]
                 )
+            raw_edges = result.get("per_player_edges", [])
+            raw_lines = ""
+            if raw_edges:
+                raw_lines = "\n\n<b>Raw edge debug:</b>\n" + "\n".join(
+                    _format_tennis_debug_row(row) for row in raw_edges[:5]
+                )
+            no_signal_reason = escape(str(result.get("no_signal_reason", "")))
+            next_action = escape(str(result.get("tennis_next_action", "")))
             text = (
                 "🔍 <b>Диагностика тенниса</b>\n"
                 f"Событий проверено: <b>{events}</b>\n"
@@ -233,7 +242,10 @@ def _debug_tennis(chat_id: str) -> None:
                 f"Пропущено: {skipped}{skipped_note}\n"
                 f"Статус API: {api_st}\n"
                 f"Режим: {escape(mode_text)}"
+                f"\nПричина: {no_signal_reason or '—'}"
+                f"\nСледующий шаг: {next_action or '—'}"
                 f"{top_lines}"
+                f"{raw_lines}"
             )
             _send(chat_id, text, _back_button())
         except Exception as exc:
@@ -245,6 +257,22 @@ def _debug_tennis(chat_id: str) -> None:
             )
 
     threading.Thread(target=_run, daemon=True).start()
+
+
+def _format_tennis_debug_row(row: dict[str, Any]) -> str:
+    if row.get("skip"):
+        return (
+            f"• {escape(str(row.get('p1', '?')))} vs {escape(str(row.get('p2', '?')))}: "
+            f"{escape(str(row.get('skip')))} "
+            f"({row.get('p1_matches', '?')}/{row.get('p2_matches', '?')} матчей)"
+        )
+    edge = row.get("edge_p1_pct")
+    edge_text = f"{float(edge):+.2f}%" if isinstance(edge, (int, float)) else "?"
+    return (
+        f"• {escape(str(row.get('p1', '?')))} vs {escape(str(row.get('p2', '?')))}: "
+        f"edge {edge_text}, odds {row.get('best_odds_p1', '?')}, "
+        f"model {row.get('model_prob_p1', '?')}"
+    )
 
 
 def _back_button() -> dict[str, Any]:

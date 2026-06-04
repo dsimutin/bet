@@ -158,10 +158,57 @@ def test_tennis_diagnostics_error_is_sanitized(monkeypatch) -> None:
     sent: list[str] = []
     monkeypatch.setattr(bot.threading, "Thread", InlineThread)
     monkeypatch.setattr(bot, "_send", lambda chat_id, text, reply_markup=None: sent.append(text))
-    monkeypatch.setattr("src.signals.tennis_runtime_scan.scan_tennis_h2h_runtime", scan_fails)
+    monkeypatch.setattr("src.signals.tennis_runtime_scan.scan_tennis_h2h_runtime_debug", scan_fails)
 
     bot._debug_tennis("123")
 
     assert any("Подробности скрыты" in text for text in sent)
     assert all("tenacity" not in text for text in sent)
     assert all("No module named" not in text for text in sent)
+
+
+def test_tennis_diagnostics_explains_no_signal_reason(monkeypatch) -> None:
+    import src.web.telegram_bot as bot
+
+    class InlineThread:
+        def __init__(self, target, daemon=False):
+            self.target = target
+
+        def start(self):
+            self.target()
+
+    def fake_debug(*args, **kwargs):
+        return {
+            "events_checked": 2,
+            "signals_count": 0,
+            "skipped_no_data": 2,
+            "api_status": "ok",
+            "runtime_mode": "multimarket_cached_debug",
+            "h2h_count": 0,
+            "spread_count": 0,
+            "total_count": 0,
+            "no_signal_reason": "no_edge_found",
+            "tennis_next_action": "Модель видит матчи, но игроки не покрыты ELO-историей.",
+            "per_player_edges": [
+                {
+                    "p1": "Player A",
+                    "p2": "Player B",
+                    "skip": "insufficient_data",
+                    "p1_matches": 3,
+                    "p2_matches": 2,
+                }
+            ],
+        }
+
+    sent: list[str] = []
+    monkeypatch.setattr(bot.threading, "Thread", InlineThread)
+    monkeypatch.setattr(bot, "_send", lambda chat_id, text, reply_markup=None: sent.append(text))
+    monkeypatch.setattr("src.signals.tennis_runtime_scan.scan_tennis_h2h_runtime_debug", fake_debug)
+
+    bot._debug_tennis("123")
+
+    text = "\n".join(sent)
+    assert "Причина: no_edge_found" in text
+    assert "Следующий шаг:" in text
+    assert "Raw edge debug" in text
+    assert "insufficient_data" in text

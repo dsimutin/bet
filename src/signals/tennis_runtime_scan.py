@@ -42,3 +42,35 @@ def scan_tennis_h2h_runtime(model_path: Path, api_key: str) -> dict[str, Any]:
     ]
     result["runtime_mode"] = "multimarket_cached"
     return result
+
+
+def scan_tennis_h2h_runtime_debug(model_path: Path, api_key: str) -> dict[str, Any]:
+    """Run low-quota tennis diagnostics through the same cached runtime odds path."""
+    original_fetch = research_scanner._fetch_atp_events
+    research_scanner._fetch_atp_events = get_tennis_h2h_events
+    try:
+        result = research_scanner.scan_tennis_with_debug(model_path=model_path, api_key=api_key)
+    finally:
+        research_scanner._fetch_atp_events = original_fetch
+
+    result["runtime_mode"] = "multimarket_cached_debug"
+    result["diagnostic"] = True
+    result["tennis_next_action"] = _tennis_next_action(result)
+    return result
+
+
+def _tennis_next_action(result: dict[str, Any]) -> str:
+    reason = str(result.get("no_signal_reason") or result.get("error") or "")
+    if reason == "no_model":
+        return "Нужно обучить/восстановить data/models/tennis_elo_atp_latest.pkl на Render."
+    if reason in {"no_upcoming_events", "no_events"} or result.get("api_status") == "no_events":
+        return "Провайдер не вернул предстоящих теннисных матчей; проверь туры/букмекеров в odds-api.io."
+    if reason == "api_error" or result.get("api_status") in {"error", "quota"}:
+        return "Проверить ODDS_API_IO_KEY/THE_ODDS_API_KEY, quota и логи provider fetch."
+    if int(result.get("events_checked") or 0) and int(result.get("skipped_no_data") or 0):
+        return "Модель видит матчи, но игроки не покрыты ELO-историей или не сматчились по имени."
+    if int(result.get("events_checked") or 0) and not int(result.get("signals_count") or 0):
+        return "Матчи есть, но edge ниже порога или сигнал заблокирован freshness/timestamp policy."
+    if int(result.get("signals_count") or 0):
+        return "Сигналы найдены; если их нет в Telegram, проверить delivery status и priority/watchlist tier."
+    return "Запустить /health/canary и проверить tennis model/provider/report блоки."
