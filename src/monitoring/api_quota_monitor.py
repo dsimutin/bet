@@ -1,4 +1,9 @@
-"""Monitor API quota usage to prevent overspending in production."""
+"""Monitor API quota usage to prevent overspending in production.
+
+Hard stop thresholds (requests remaining, not used):
+  THE_ODDS_API_MIN_REMAINING_HARD_STOP      — refuse any new call at or below this
+  THE_ODDS_API_MIN_REMAINING_PRIORITY_REFRESH — allow only priority refreshes above this
+"""
 
 from __future__ import annotations
 

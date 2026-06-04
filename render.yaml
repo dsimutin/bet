@@ -134,6 +134,46 @@ services:
       - key: ODDS_API_IO_BOOKMAKERS
         value: "singbet,bet365"
 
+      # Runtime environment tag (used for fail-closed logic in ledger backend)
+      - key: APP_ENV
+        value: "production"
+
+      # Security — configure in Render Dashboard -> Environment (never commit values)
+      - key: ADMIN_API_TOKEN
+        sync: false
+      - key: ENABLE_DEBUG_ROUTES
+        value: "false"
+      - key: TELEGRAM_WEBHOOK_SECRET
+        sync: false
+      - key: TELEGRAM_ALLOWED_CHAT_IDS
+        sync: false
+      - key: TELEGRAM_MANUAL_REFRESH_COOLDOWN_SECONDS
+        value: "300"
+
+      # Ledger persistence
+      - key: ALLOW_LOCAL_LEDGER_FALLBACK
+        value: "false"
+      - key: WRITE_LOCAL_LEDGER_MIRROR
+        value: "true"
+
+      # Odds API quota controls
+      - key: THE_ODDS_API_MIN_REMAINING_HARD_STOP
+        value: "25"
+      - key: THE_ODDS_API_MIN_REMAINING_PRIORITY_REFRESH
+        value: "80"
+      - key: QUOTA_STATE_BACKEND
+        value: "local"
+
+      # Odds cache freshness (seconds)
+      - key: CACHE_STORAGE_TTL_SECONDS
+        value: "28800"
+      - key: PRIORITY_ODDS_MAX_AGE_SECONDS
+        value: "7200"
+      - key: WATCHLIST_ODDS_MAX_AGE_SECONDS
+        value: "14400"
+      - key: EXOTIC_WATCHLIST_ODDS_MAX_AGE_SECONDS
+        value: "28800"
+
       # Safety
       - key: PAPER_TRADING_ONLY
         value: "true"
