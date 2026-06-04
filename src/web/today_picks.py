@@ -386,6 +386,20 @@ def _format_pick(item: dict[str, Any], priority: bool) -> list[str]:
         form_line = _form_line(home, form_h, away, form_a)
         if form_line:
             context_lines.append(form_line)
+        rest_line = _rest_line(
+            home,
+            item.get("ctx_rest_days_home"),
+            item.get("ctx_fatigue_home", "none"),
+            away,
+            item.get("ctx_rest_days_away"),
+            item.get("ctx_fatigue_away", "none"),
+        )
+        if rest_line:
+            context_lines.append(rest_line)
+        adj = item.get("context_adj")
+        if adj and abs(adj) >= 0.01:
+            sign = "+" if adj > 0 else ""
+            context_lines.append(f"📐 Поправка: {sign}{adj*100:.1f}% (форма/усталость)")
         inj_text = item.get("injuries_text", "")
         if inj_text:
             context_lines.append(escape(inj_text))

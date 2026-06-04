@@ -153,6 +153,42 @@ def apply_context_to_signal(signal: dict[str, Any], ctx: dict[str, Any]) -> dict
 # ---------------------------------------------------------------------------
 
 
+_STRIP_SUFFIXES = (" fc", " afc", " cf", " sc", " ac", " bc", " bk", " fk", " sk")
+
+
+def _normalize_team(name: str) -> str:
+    """Lowercase + strip common club suffixes for fuzzy matching."""
+    n = name.lower().strip()
+    n = n.replace("&", "and").replace(".", "")
+    for suf in _STRIP_SUFFIXES:
+        if n.endswith(suf):
+            n = n[: -len(suf)].strip()
+            break
+    return n
+
+
+def _resolve_team_name(df: pd.DataFrame, team: str) -> str:
+    """Return the best-matching team name in the CSV for the given team string.
+
+    The Odds API often omits 'FC'; football-data.co.uk always includes it.
+    Falls back to the original name if no match found.
+    """
+    all_teams = set(df["HomeTeam"].dropna()) | set(df["AwayTeam"].dropna())
+    norm_lookup = _normalize_team(team)
+    # Exact match first
+    if team in all_teams:
+        return team
+    # Normalized exact match
+    for t in all_teams:
+        if _normalize_team(t) == norm_lookup:
+            return t
+    # Prefix match: "Brighton" → "Brighton & Hove Albion FC"
+    for t in all_teams:
+        if _normalize_team(t).startswith(norm_lookup) or norm_lookup.startswith(_normalize_team(t)):
+            return t
+    return team
+
+
 def _load_csv(path: Path, cutoff: date) -> pd.DataFrame:
     df = pd.read_csv(path, low_memory=False)
     df["_date"] = pd.to_datetime(df["Date"], dayfirst=True, errors="coerce").dt.date
@@ -163,7 +199,8 @@ def _load_csv(path: Path, cutoff: date) -> pd.DataFrame:
 
 
 def _days_since_last_match(df: pd.DataFrame, team: str, match_date: date) -> int | None:
-    mask = (df["HomeTeam"] == team) | (df["AwayTeam"] == team)
+    resolved = _resolve_team_name(df, team)
+    mask = (df["HomeTeam"] == resolved) | (df["AwayTeam"] == resolved)
     dates = df.loc[mask, "_date"].dropna()
     if dates.empty:
         return None
@@ -175,10 +212,11 @@ def _recent_form(
     df: pd.DataFrame, team: str, match_date: date, n: int = 5
 ) -> tuple[float | None, str]:
     """Return (form_score 0-1, form_string e.g. 'WWDLW') for last n matches."""
+    resolved = _resolve_team_name(df, team)
     rows = []
     for _, row in df.iterrows():
-        is_home = row["HomeTeam"] == team
-        is_away = row["AwayTeam"] == team
+        is_home = row["HomeTeam"] == resolved
+        is_away = row["AwayTeam"] == resolved
         if not is_home and not is_away:
             continue
         ftr = str(row.get("FTR", "")).strip().upper()
