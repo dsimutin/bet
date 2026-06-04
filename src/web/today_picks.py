@@ -389,10 +389,64 @@ def _format_pick(item: dict[str, Any], priority: bool) -> list[str]:
         f"Коэффициент: <b>{odds}</b> | Вероятность модели: <b>{prob_text}</b>",
         f"Рынок после снятия маржи: {market_text} | Edge: <b>{edge}%</b>",
     ]
+    lines.extend(_trust_cockpit_lines(item))
     lines.extend(f"• {fact}" for fact in facts)
     if reason:
         lines.append(f"• Статус: {reason}")
     return lines
+
+
+def _trust_cockpit_lines(item: dict[str, Any]) -> list[str]:
+    score = _trust_score(item)
+    if score >= 85:
+        label = "A"
+        icon = "🛡️"
+    elif score >= 70:
+        label = "B"
+        icon = "🧭"
+    elif score >= 50:
+        label = "C"
+        icon = "⚠️"
+    else:
+        label = "D"
+        icon = "⛔"
+
+    timestamp_status = str(item.get("timestamp_verification_status") or "unknown")
+    freshness = str(item.get("odds_freshness_tier") or "unknown")
+    age = item.get("odds_snapshot_age_seconds")
+    age_text = f"{int(age)}с" if isinstance(age, (int, float)) else "?"
+    market = str(item.get("market", item.get("market_key", "h2h")))
+    tier = str(item.get("recommendation_tier", "legacy"))
+    return [
+        f"• {icon} Trust Cockpit: <b>{label}</b> ({score}/100)",
+        f"• timestamp={escape(timestamp_status)} | freshness={escape(freshness)} ({age_text})",
+        f"• market={escape(market)} | tier={escape(tier)}",
+    ]
+
+
+def _trust_score(item: dict[str, Any]) -> int:
+    score = 100
+    if item.get("timestamp_verification_status") != "verified_pre_match":
+        score -= 30
+    freshness = item.get("odds_freshness_tier")
+    if freshness == "watchlist":
+        score -= 12
+    elif freshness not in {"priority", "unknown", None}:
+        score -= 25
+    if item.get("recommendation_tier") != "priority":
+        score -= 12
+    if str(item.get("market", item.get("market_key", "h2h"))) != "h2h":
+        score -= 18
+    if item.get("experimental") or item.get("experimental_market"):
+        score -= 25
+    edge = _num(item.get("edge_pct", item.get("edge_vs_fair_pct")))
+    if edge <= 0:
+        score -= 20
+    elif edge > 55:
+        score -= 20
+    if _num(item.get("stake_units"), 1.0) <= 0:
+        score -= 10
+    return max(0, min(100, score))
 
 
 def _load_entries() -> list[dict[str, Any]]:
