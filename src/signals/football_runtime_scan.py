@@ -14,6 +14,11 @@ _LEAGUE_TO_SPORT_KEY = {
     "LALIGA": "soccer_spain_la_liga",
     "SERIEA": "soccer_italy_serie_a",
     "LIGUE1": "soccer_france_ligue_one",
+    "MLS": "soccer_usa_mls",
+    "RPL": "soccer_russia_premier_league",
+    "BRAZIL_SERIE_A": "soccer_brazil_campeonato",
+    "ARGENTINA_PRIMERA": "soccer_argentina_primera_division",
+    "WC2026": "soccer_fifa_world_cup",
 }
 
 
@@ -28,6 +33,8 @@ def generate_football_signals_runtime(
     """Generate Dixon-Coles h2h signals from shared cached live odds."""
     sport_key = _LEAGUE_TO_SPORT_KEY.get(league.upper())
     if not sport_key:
+        import logging
+        logging.getLogger(__name__).warning("[football] %s: no sport_key mapping, skipping", league)
         return []
     if not odds_api_key:
         import logging

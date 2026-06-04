@@ -309,7 +309,7 @@ def _format_football_pick(sig: dict, n: int) -> str:
     odds = sig.get("entry_odds", "?")
     edge = sig.get("edge_pct", "?")
     book = sig.get("bookmaker", "")
-    mp = sig.get("model_prob", 0)
+    mp = sig.get("model_prob", sig.get("model_probability", 0))
     mp_pct = int(mp * 100) if isinstance(mp, float) else "?"
 
     stake = 1000
@@ -343,7 +343,7 @@ def _format_tennis_pick(sig: dict, n: int) -> str:
     odds = sig.get("entry_odds", "?")
     edge = sig.get("edge_pct", "?")
     book = sig.get("bookmaker", "")
-    mp = sig.get("model_prob", 0)
+    mp = sig.get("model_prob", sig.get("model_probability", 0))
     mp_pct = int(mp * 100) if isinstance(mp, float) else "?"
     surf = {"clay": "грунт", "grass": "трава", "hard": "хард"}.get(
         sig.get("surface", "hard"), sig.get("surface", "hard")
@@ -379,11 +379,11 @@ def _format_tennis_pick(sig: dict, n: int) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Daily morning digest — "Ставки на сегодня"
+# _DUPLICATE BLOCK REMOVED_ — send_morning_digest and helpers defined above
 # ---------------------------------------------------------------------------
 
-def send_morning_digest() -> str:
-    """Collect today's signals and send one friendly 'ставки на сегодня' message.
+def _send_morning_digest_duplicate_removed() -> str:  # pragma: no cover
+    """Placeholder — original duplicate definitions removed. See line 162.
 
     Called at 09:05 UTC every day. Runs signal scan first, then sends digest.
     Returns delivery status string.
@@ -500,7 +500,7 @@ def _format_football_pick(sig: dict, n: int) -> str:
     odds = sig.get("entry_odds", "?")
     edge = sig.get("edge_pct", "?")
     book = sig.get("bookmaker", "")
-    mp = sig.get("model_prob", 0)
+    mp = sig.get("model_prob", sig.get("model_probability", 0))
     mp_pct = int(mp * 100) if isinstance(mp, float) else "?"
 
     stake = 1000
@@ -531,7 +531,7 @@ def _format_tennis_pick(sig: dict, n: int) -> str:
     odds = sig.get("entry_odds", "?")
     edge = sig.get("edge_pct", "?")
     book = sig.get("bookmaker", "")
-    mp = sig.get("model_prob", 0)
+    mp = sig.get("model_prob", sig.get("model_probability", 0))
     mp_pct = int(mp * 100) if isinstance(mp, float) else "?"
     surf = {"clay": "грунт", "grass": "трава", "hard": "хард"}.get(
         sig.get("surface", "hard"), sig.get("surface", "hard")
@@ -818,7 +818,7 @@ def _send_tennis_alerts(signals: list[dict]) -> None:
         edge = sig.get("edge_pct", "?")
         odds = sig.get("entry_odds", "?")
         book = sig.get("bookmaker", "?")
-        mp = sig.get("model_prob", 0)
+        mp = sig.get("model_prob", sig.get("model_probability", 0))
         mp_str = f"{mp:.1%}" if isinstance(mp, float) else str(mp)
         msg = (
             f"🎾 ATP Сигнал\n"

@@ -118,8 +118,12 @@ def settle_ledger_from_results(
             ledger.update_result(signal_id, result=result, closing_odds=closing_odds)
             settled_signals.append(ledger.get(signal_id))
 
-        # Handle tennis
+        # Handle tennis h2h only — spreads/totals are settled by settle_tennis_from_sackmann
         elif sport == "tennis":
+            market = entry.get("market", entry.get("market_key", "h2h"))
+            if market != "h2h":
+                unmatched.append(signal_id)
+                continue
             result_row = _get_live_tennis_result_fallback(entry, api_key)
             if result_row is None:
                 unmatched.append(signal_id)

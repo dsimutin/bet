@@ -113,7 +113,7 @@ def start(loop: asyncio.AbstractEventLoop | None = None) -> None:
         day_of_week="mon",
         hour=6,
         minute=20,
-        id="tennis_retrain",
+        id="tennis_retrain_quick",
         replace_existing=True,
         misfire_grace_time=3600,
     )
