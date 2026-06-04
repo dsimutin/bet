@@ -12,27 +12,35 @@ LEDGER_PATH = Path(os.environ.get("LEDGER_PATH", DATA_DIR / "core" / "paper_sign
 
 
 def build_today_text() -> str:
+    from datetime import timedelta
+
     entries = list(_load_entries())
     today = date.today()
-    tomorrow = today + __import__("datetime").timedelta(days=1)
+    tomorrow = today + timedelta(days=1)
+    week_end = today + timedelta(days=7)
     now = datetime.now(timezone.utc)
 
-    def _in_window(item: dict) -> bool:
+    def _is_near(item: dict) -> bool:
         d = _event_day(item)
-        return d == today or d == tomorrow
+        return d is not None and d == today or d == tomorrow
 
-    today_entries = [
-        item
-        for item in entries
-        if item.get("ledger_status") == "open"
-        and item.get("delivery_status") != "blocked"
-        and item.get("recommendation_tier", "priority") in {"priority", "watchlist"}
-        and _in_window(item)
-    ]
+    def _is_week(item: dict) -> bool:
+        d = _event_day(item)
+        return d is not None and d > tomorrow and d <= week_end
 
-    # Split into upcoming (not yet started) and already started
-    upcoming = [item for item in today_entries if not _event_already_started(item, now)]
-    started = [item for item in today_entries if _event_already_started(item, now)]
+    def _base_filter(item: dict) -> bool:
+        return (
+            item.get("ledger_status") == "open"
+            and item.get("delivery_status") != "blocked"
+            and item.get("recommendation_tier", "priority") in {"priority", "watchlist"}
+        )
+
+    near_entries = [item for item in entries if _base_filter(item) and _is_near(item)]
+    week_entries = [item for item in entries if _base_filter(item) and _is_week(item)]
+
+    # Split near into upcoming / already started
+    upcoming = [item for item in near_entries if not _event_already_started(item, now)]
+    started = [item for item in near_entries if _event_already_started(item, now)]
 
     upcoming.sort(
         key=lambda item: (
@@ -40,9 +48,17 @@ def build_today_text() -> str:
             -_num(item.get("edge_pct", item.get("edge_vs_fair_pct"))),
         )
     )
+    week_entries.sort(
+        key=lambda item: (
+            _event_day(item) or date.max,
+            -_num(item.get("edge_pct", item.get("edge_vs_fair_pct"))),
+        )
+    )
+
     priority = [item for item in upcoming if item.get("recommendation_tier") == "priority"]
     watch = [item for item in upcoming if item.get("recommendation_tier") == "watchlist"]
     lines = [f"📅 <b>Ставки — {today.strftime('%d.%m')} и {tomorrow.strftime('%d.%m.%Y')}</b>", ""]
+
     if not upcoming and not started:
         lines += [
             "Подходящих сигналов на сегодня пока нет.",
@@ -63,31 +79,52 @@ def build_today_text() -> str:
             lines.append(
                 "\n⚽ Топ-лиги (АПЛ, Бундеслига, и др.) в межсезонье. Сканируются: MLS, Бразилия, Аргентина, РПЛ, теннис."
             )
-        return "\n".join(lines)
-    if priority:
-        lines.append(f"✅ <b>Приоритетные сигналы ({len(priority)})</b>")
-        for item in priority:
-            lines.extend(_format_pick(item, priority=True))
-    if watch:
-        lines.append(f"\n👀 <b>Наблюдение ({len(watch)})</b>")
-        lines.append(
-            "Edge есть, но уверенность ниже. Эти варианты бот сохраняет для обучения и показывает отдельно."
-        )
-        for item in watch:
-            lines.extend(_format_pick(item, priority=False))
-    if started:
-        lines.append(f"\n⏳ <b>Уже начались ({len(started)}) — ожидаем результатов</b>")
-        for item in started:
+    else:
+        if priority:
+            lines.append(f"✅ <b>Приоритетные сигналы ({len(priority)})</b>")
+            for item in priority:
+                lines.extend(_format_pick(item, priority=True))
+        if watch:
+            lines.append(f"\n👀 <b>Наблюдение ({len(watch)})</b>")
+            lines.append(
+                "Edge есть, но уверенность ниже. Эти варианты бот сохраняет для обучения и показывает отдельно."
+            )
+            for item in watch:
+                lines.extend(_format_pick(item, priority=False))
+        if started:
+            lines.append(f"\n⏳ <b>Уже начались ({len(started)}) — ожидаем результатов</b>")
+            for item in started:
+                sport = item.get("sport", "football")
+                if sport == "tennis":
+                    match_label = escape(
+                        str(item.get("player", "?")) + " vs " + str(item.get("opponent", "?"))
+                    )
+                else:
+                    match_label = escape(f"{item.get('home_team', '?')} — {item.get('away_team', '?')}")
+                lines.append(f"• {match_label} | {_event_time_text(item)}")
+            lines.append("Результаты закроются автоматически после обновления данных.")
+
+    # Upcoming week signals (matches 2–7 days away)
+    if week_entries:
+        lines.append(f"\n📆 <b>На этой неделе ({len(week_entries)})</b>")
+        lines.append("Матчи через 2–7 дней — коэффициенты ещё могут измениться.")
+        for item in week_entries[:8]:  # cap at 8 to keep message readable
             sport = item.get("sport", "football")
+            event_day = _event_day(item)
+            day_label = event_day.strftime("%d.%m") if event_day else "?"
             if sport == "tennis":
-                match_label = escape(
-                    str(item.get("player", "?")) + " vs " + str(item.get("opponent", "?"))
-                )
+                match_label = escape(f"{item.get('player','?')} vs {item.get('opponent','?')}")
             else:
-                match_label = escape(f"{item.get('home_team', '?')} — {item.get('away_team', '?')}")
-            lines.append(f"• {match_label} | {_event_time_text(item)}")
-        lines.append("Результаты закроются автоматически после обновления данных.")
-    if upcoming or started:
+                match_label = escape(f"{item.get('home_team','?')} — {item.get('away_team','?')}")
+            sel_ru = escape(str(item.get("selection_ru") or item.get("selection") or "?"))
+            odds = item.get("entry_odds", "?")
+            edge = item.get("edge_pct", item.get("edge_vs_fair_pct", "?"))
+            tier = "🟢" if item.get("recommendation_tier") == "priority" else "🟡"
+            lines.append(f"{tier} {day_label} {match_label} | {sel_ru} @ {odds} | edge {edge}%")
+        if len(week_entries) > 8:
+            lines.append(f"  … и ещё {len(week_entries) - 8} матчей")
+
+    if upcoming or started or week_entries:
         lines.append(
             "\n📄 Бумажные сигналы. Коэффициенты меняются: перед любым решением проверьте линию самостоятельно."
         )
