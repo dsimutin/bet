@@ -201,6 +201,8 @@ def _build_model_info() -> list[str]:
 
 def build_history_text(limit: int = 20) -> str:
     entries = list(_load_entries())
+    # Exclude blocked signals — they were never actionable
+    entries = [e for e in entries if e.get("delivery_status") != "blocked"]
     entries.sort(
         key=lambda item: item.get("ledger_updated_at_utc")
         or item.get("ledger_created_at_utc")

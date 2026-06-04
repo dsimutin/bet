@@ -293,8 +293,13 @@ def _score_event(
 
     _RU = {"home": f"П1 ({home_team})", "draw": "Ничья", "away": f"П2 ({away_team})"}
 
+    # Deterministic ID so the same match is not duplicated across scan runs
+    stable_id = hashlib.sha256(
+        f"exotic:{sport_key}:{home_team}:{away_team}:{commence_time_raw}:{selection}".encode()
+    ).hexdigest()[:16]
+
     return {
-        "signal_id": str(uuid.uuid4()),
+        "signal_id": f"exo_{stable_id}",
         "strategy_id": "bayesian_zero_shot_v1",
         "sport": "football",
         "league": meta["league_code"],
