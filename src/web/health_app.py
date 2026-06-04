@@ -2,15 +2,18 @@
 
 Endpoints:
     GET /health              — liveness probe (Render uses this)
-    GET /health/ledger       — last settlement status
-    GET /health/model        — latest model Brier score + age
-    GET /health/drift        — current CUSUM drift status + Kelly multiplier
-    GET /health/disk         — persistent disk usage
-    GET /health/readiness    — deep readiness for signal generation
-    GET /health/active       — active mode status, last run timestamps, 24h stats
-    GET /health/canary       — read-only production-loop verification
-    GET /health/all          — all checks combined (for dashboards)
-    POST /trigger            — немедленно запустить отчёт и отправить в Telegram
+    GET /health/db           — Supabase connectivity (public)
+    GET /health/signals      — signal counts from Supabase: 24h/7d/total (public)
+    GET /health/odds-api     — Odds API ping + quota remaining (public)
+    GET /health/ledger       — last settlement status (admin)
+    GET /health/model        — latest model Brier score + age (admin)
+    GET /health/drift        — current CUSUM drift status + Kelly multiplier (admin)
+    GET /health/disk         — persistent disk usage (admin)
+    GET /health/readiness    — deep readiness for signal generation (admin)
+    GET /health/active       — active mode status, last run timestamps, 24h stats (admin)
+    GET /health/canary       — read-only production-loop verification (admin)
+    GET /health/all          — all checks combined (admin)
+    POST /trigger            — немедленно запустить отчёт и отправить в Telegram (admin)
 """
 
 from __future__ import annotations
@@ -267,6 +270,141 @@ def health_db():
     ok = result.get("ok", False)
     status_code = 200 if ok else 503
     return JSONResponse(status_code=status_code, content=result)
+
+
+# ──────────────────────────────────────────────────────────────────
+# /health/signals  (public — no credentials)
+# ──────────────────────────────────────────────────────────────────
+
+
+@app.get("/health/signals")
+def health_signals():
+    """Signal counts from Supabase — public, no sensitive data exposed."""
+    from src.infrastructure import supabase_ledger
+
+    if not supabase_ledger.is_enabled():
+        return JSONResponse(
+            {"ok": False, "reason": "Supabase not configured (DATABASE_URL missing)"},
+            status_code=503,
+        )
+    try:
+        now = datetime.now(timezone.utc)
+        with supabase_ledger._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("select count(*) from public.bot_signal_ledger")
+                total = cur.fetchone()[0]
+
+                cur.execute(
+                    "select count(*) from public.bot_signal_ledger "
+                    "where created_at >= now() - interval '24 hours'"
+                )
+                last_24h = cur.fetchone()[0]
+
+                cur.execute(
+                    "select count(*) from public.bot_signal_ledger "
+                    "where created_at >= now() - interval '7 days'"
+                )
+                last_7d = cur.fetchone()[0]
+
+                cur.execute(
+                    "select sport, ledger_status, count(*) "
+                    "from public.bot_signal_ledger "
+                    "group by sport, ledger_status"
+                )
+                breakdown_rows = cur.fetchall()
+
+                cur.execute(
+                    "select count(*) from public.bot_signal_ledger "
+                    "where ledger_status='settled' and payload->>'result'='win'"
+                )
+                wins = cur.fetchone()[0]
+
+                cur.execute(
+                    "select count(*) from public.bot_signal_ledger "
+                    "where ledger_status='settled'"
+                )
+                settled_total = cur.fetchone()[0]
+
+                cur.execute(
+                    "select max(created_at) from public.bot_signal_ledger"
+                )
+                last_signal_at = cur.fetchone()[0]
+
+        breakdown: dict = {}
+        for sport, status, count in breakdown_rows:
+            key = f"{sport or 'unknown'}:{status}"
+            breakdown[key] = count
+
+        winrate = round(wins / settled_total * 100, 1) if settled_total else None
+
+        return {
+            "ok": True,
+            "total_signals": total,
+            "last_24h": last_24h,
+            "last_7d": last_7d,
+            "settled": settled_total,
+            "wins": wins,
+            "winrate_pct": winrate,
+            "breakdown": breakdown,
+            "last_signal_at": last_signal_at.isoformat() if last_signal_at else None,
+            "ts": now.isoformat(),
+        }
+    except Exception as exc:
+        from src.infrastructure.persistent_ledger import _sanitize
+        return JSONResponse(
+            {"ok": False, "error": _sanitize(str(exc)), "ts": _utcnow()},
+            status_code=503,
+        )
+
+
+# ──────────────────────────────────────────────────────────────────
+# /health/odds-api  (public — no credentials exposed)
+# ──────────────────────────────────────────────────────────────────
+
+
+@app.get("/health/odds-api")
+def health_odds_api():
+    """Test Odds API connectivity and show remaining quota — public endpoint."""
+    import os
+    import urllib.request
+
+    api_key = os.environ.get("THE_ODDS_API_KEY", "").strip()
+    if not api_key:
+        return JSONResponse(
+            {"ok": False, "reason": "THE_ODDS_API_KEY not configured"},
+            status_code=503,
+        )
+    try:
+        url = f"https://api.the-odds-api.com/v4/sports/?apiKey={api_key}&all=false"
+        req = urllib.request.Request(url, headers={"User-Agent": "bet-health/1.0"})
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            remaining = resp.headers.get("x-requests-remaining", "?")
+            used = resp.headers.get("x-requests-used", "?")
+            data = json.loads(resp.read())
+            active_sports = [s["key"] for s in data if s.get("active")]
+            tennis_keys = [k for k in active_sports if "tennis" in k]
+            football_keys = [k for k in active_sports if "soccer" in k]
+        return {
+            "ok": True,
+            "quota_remaining": remaining,
+            "quota_used": used,
+            "active_sports_total": len(active_sports),
+            "tennis_active": len(tennis_keys),
+            "football_active": len(football_keys),
+            "sample_tennis": tennis_keys[:5],
+            "sample_football": football_keys[:5],
+            "ts": _utcnow(),
+        }
+    except urllib.error.HTTPError as exc:
+        return JSONResponse(
+            {"ok": False, "http_error": exc.code, "reason": str(exc), "ts": _utcnow()},
+            status_code=502,
+        )
+    except Exception as exc:
+        return JSONResponse(
+            {"ok": False, "error": str(exc), "ts": _utcnow()},
+            status_code=503,
+        )
 
 
 # ──────────────────────────────────────────────────────────────────
