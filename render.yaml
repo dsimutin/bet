@@ -18,6 +18,11 @@
 version: "1"
 
 services:
+
+  # ──────────────────────────────────────────────────────────────────
+  # WEB SERVICE — FastAPI: health checks + Telegram webhook (optional)
+  # Бесплатный план: 750 часов/месяц, усыпает при простое
+  # ──────────────────────────────────────────────────────────────────
   - type: web
     name: bet-api
     runtime: python
