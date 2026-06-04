@@ -60,9 +60,12 @@ class FeedbackPolicy:
         )
         anomaly_edge = _env("MAX_SANE_VISIBLE_EDGE_PCT", 55.0)
         market = str(signal.get("market", signal.get("market_key", "h2h"))).lower()
+        _tennis_markets = {"h2h", "spreads", "totals"}
         tier, reason = "priority", "meets priority thresholds"
-        if market != "h2h":
+        if sport == "football" and market != "h2h":
             tier, reason = "blocked", "only h2h is supported for reliable settlement"
+        elif sport == "tennis" and market not in _tennis_markets:
+            tier, reason = "blocked", f"tennis market {market!r} not supported"
         elif prob is None:
             tier, reason = "blocked", "model probability missing"
         elif odds <= 1.0:

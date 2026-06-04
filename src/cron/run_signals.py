@@ -31,7 +31,10 @@ def run_signal_job(
     staging_dir = Path(os.environ.get("STAGING_DIR", "data/staging"))
     leagues = [
         x.strip()
-        for x in os.environ.get("LEAGUES", "EPL,BUNDESLIGA,LALIGA,SERIEA,LIGUE1").split(",")
+        for x in os.environ.get(
+            "LEAGUES",
+            "EPL,BUNDESLIGA,LALIGA,SERIEA,LIGUE1,MLS,BRAZIL_SERIE_A,ARGENTINA_PRIMERA,RPL,WC2026",
+        ).split(",")
         if x.strip()
     ]
     today = date.today()
