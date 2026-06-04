@@ -258,6 +258,17 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/health/db")
+def health_db():
+    """Database connectivity check — public endpoint, no credentials exposed."""
+    from src.infrastructure.persistent_ledger import ledger_healthcheck
+
+    result = ledger_healthcheck(LEDGER_PATH)
+    ok = result.get("ok", False)
+    status_code = 200 if ok else 503
+    return JSONResponse(status_code=status_code, content=result)
+
+
 # ──────────────────────────────────────────────────────────────────
 # /health/ledger
 # ──────────────────────────────────────────────────────────────────

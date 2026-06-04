@@ -79,7 +79,14 @@ class MirroredLedgerBackend:
         self.mirror = mirror
 
     def load(self) -> SignalLedger:
-        return self.authority.load()
+        try:
+            return self.authority.load()
+        except Exception as exc:
+            _log.warning(
+                "Supabase ledger unavailable, falling back to local mirror: %s",
+                _sanitize(str(exc)),
+            )
+            return self.mirror.load()
 
     def save(self, ledger: SignalLedger) -> None:
         self.authority.save(ledger)
