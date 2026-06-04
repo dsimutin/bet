@@ -66,7 +66,7 @@ def test_telegram_card_metrics_are_internally_consistent() -> None:
 
     text = "\n".join(_format_pick(signal, priority=True))
 
-    assert "Вероятность модели: <b>55.0%</b>" in text
+    assert "🎯 ЧТО СТАВИТЬ:" in text
     assert "Справедливый кэф: 1.8182" in text
-    assert "Edge: <b>10.0%</b>" in text
-    assert f"Ставка: {signal['stake_units']}u" in text
+    assert "📊 Edge: <b>10.0%</b>" in text
+    assert "🔍 Mostbet:" in text

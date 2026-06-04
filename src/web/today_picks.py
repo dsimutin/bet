@@ -319,88 +319,110 @@ def _format_pick(item: dict[str, Any], priority: bool) -> list[str]:
     edge = item.get("edge_pct", item.get("edge_vs_fair_pct", "?"))
     prob_text = f"{float(prob):.1%}" if isinstance(prob, (int, float)) else "?"
     market_text = f"{float(market_prob):.1%}" if isinstance(market_prob, (int, float)) else "?"
-    reason = escape(str(item.get("recommendation_reason", "")))
     market = item.get("market", "h2h")
     market_icon = _MARKET_ICON.get(str(market), "")
+    tier_label = "ПРИОРИТЕТ" if priority else "наблюдение"
+
     if item.get("sport") == "tennis":
-        selection_ru = escape(str(item.get("selection_ru", "")))
-        if market == "h2h":
-            title = f"{icon} 🎾{market_icon} <b>{escape(str(item.get('player', '?')))} победит {escape(str(item.get('opponent', '?')))}</b>"
-        else:
-            title = f"{icon} 🎾{market_icon} <b>{escape(str(item.get('player', '?')))} vs {escape(str(item.get('opponent', '?')))}</b> — {selection_ru or escape(str(item.get('selection', '?')))}"
+        player = escape(str(item.get("player", "?")))
+        opponent = escape(str(item.get("opponent", "?")))
         surface_ru = _surface_ru(item.get("surface"))
-        recent_form = item.get("recent_form")
-        form_text = f"{float(recent_form):.0%}" if isinstance(recent_form, (int, float)) else "?"
-        facts = [
-            f"Покрытие: {surface_ru} | Рейтинг: #{item.get('rank', '?')} vs #{item.get('opp_rank', '?')}",
-            f"ELO: {_pct(item.get('elo_prob'))} | Форма (побед, посл. 10): {form_text}",
-            f"Подача (выигрыш гейма): {_pct(item.get('serve_win_pct'))} | Отдых: {item.get('days_since_last_match', '?')} дн.",
-            f"H2H-поправка: {_signed_pct(item.get('h2h_adj'))} | Модель: {escape(str(item.get('model_source', 'elo')))}",
+        rank = item.get("rank", "?")
+        opp_rank = item.get("opp_rank", "?")
+
+        if market == "h2h":
+            bet_action = f"Победа <b>{player}</b>"
+            mostbet_path = f"Теннис → ATP → {player} vs {opponent}"
+        elif market == "spreads":
+            sel_ru = escape(str(item.get("selection_ru", item.get("selection", "?"))))
+            bet_action = f"Фора: <b>{sel_ru}</b>"
+            mostbet_path = f"Теннис → ATP → {player} vs {opponent} → Форы"
+        else:
+            sel_ru = escape(str(item.get("selection_ru", item.get("selection", "?"))))
+            bet_action = f"Тотал: <b>{sel_ru}</b>"
+            mostbet_path = f"Теннис → ATP → {player} vs {opponent} → Тоталы"
+
+        title = f"{icon} 🎾{market_icon} <b>{player} vs {opponent}</b>"
+        context_lines = [
+            f"Покрытие: {surface_ru} | Рейтинг: #{rank} vs #{opp_rank}",
+            f"Шанс по модели: {prob_text} | Рынок без маржи: {market_text}",
         ]
+        h2h_adj = item.get("h2h_adj")
+        if h2h_adj:
+            context_lines.append(f"H2H поправка: {_signed_pct(h2h_adj)}")
+
     elif item.get("model_source") == "bayesian_zero_shot":
         home = escape(str(item.get("home_team", "?")))
         away = escape(str(item.get("away_team", "?")))
         sel = item.get("selection", "")
         sel_ru = item.get("selection_ru", "")
-        bet_label = _football_bet_label(sel, sel_ru, home, away)
+        bet_action = _football_bet_label(sel, sel_ru, home, away)
         league_name = escape(str(item.get("league_name", item.get("league", "?"))))
         title = f"{icon} 🌍 <b>{home} — {away}</b>"
-        facts = [
-            f"Ставка: <b>{bet_label}</b>",
-            f"Лига: {league_name} | Байесовская модель (нет истории)",
-            f"Маржа БК: {item.get('margin_pct', '?')}% | Ставка: {item.get('stake_units', 0.5)}u (снижена)",
-            "⚠️ Слабый сигнал: нет исторических данных. Только Watchlist.",
-            "⚠️ Составы/травмы: проверьте вручную (Sofascore, Flashscore)",
+        mostbet_path = f"Футбол → {league_name} → {home} vs {away}"
+        context_lines = [
+            f"Лига: {league_name}",
+            f"Шанс по модели: {prob_text} | Рынок без маржи: {market_text}",
+            "⚠️ Байесовская модель — нет истории по лиге. Проверь состав на Sofascore.",
         ]
     else:
         home = escape(str(item.get("home_team", "?")))
         away = escape(str(item.get("away_team", "?")))
         sel = item.get("selection", "")
         sel_ru = item.get("selection_ru", "")
-        bet_label = _football_bet_label(sel, sel_ru, home, away)
-        title = f"{icon} ⚽ <b>{home} — {away}</b>"
+        bet_action = _football_bet_label(sel, sel_ru, home, away)
         league = escape(str(item.get("league", item.get("competition", "?"))))
-        fair_odds = item.get("reference_fair_odds", "?")
-
-        # Fatigue & form context
-        rest_h = item.get("ctx_rest_days_home")
-        rest_a = item.get("ctx_rest_days_away")
+        title = f"{icon} ⚽ <b>{home} — {away}</b>"
+        mostbet_path = f"Футбол → {league} → {home} vs {away}"
+        fair_odds = item.get("reference_fair_odds")
         form_h = item.get("ctx_form_str_home", "")
         form_a = item.get("ctx_form_str_away", "")
-        fatigue_h = item.get("ctx_fatigue_home", "none")
-        fatigue_a = item.get("ctx_fatigue_away", "none")
-        ctx_adj = item.get("context_adj")
-
-        rest_line = _rest_line(home, rest_h, fatigue_h, away, rest_a, fatigue_a)
-        form_line = _form_line(home, form_h, away, form_a)
-        adj_note = f" (скорр. контекстом {ctx_adj:+.1%})" if ctx_adj else ""
-
-        facts = [
-            f"Ставка: <b>{bet_label}</b>",
-            f"Лига: {league} | Dixon–Coles (история голов){adj_note}",
-            f"Справедливый кэф: {fair_odds} | Ставка: {item.get('stake_units', 1)}u",
+        context_lines = [
+            f"Лига: {league}",
+            f"Шанс по модели: {prob_text} | Рынок без маржи: {market_text}",
         ]
-        if rest_line:
-            facts.append(rest_line)
+        if fair_odds:
+            context_lines.append(f"Справедливый кэф: {fair_odds}")
+        form_line = _form_line(home, form_h, away, form_a)
         if form_line:
-            facts.append(form_line)
+            context_lines.append(form_line)
         inj_text = item.get("injuries_text", "")
         if inj_text:
-            facts.append(escape(inj_text))
+            context_lines.append(escape(inj_text))
         else:
-            facts.append("⚠️ Травмы/состав: проверьте самостоятельно (Sofascore, Flashscore)")
+            context_lines.append("⚠️ Травмы/состав: проверь на Sofascore перед ставкой")
+
     lines = [
         "",
         title,
-        f"📅 {_event_time_text(item)}",
-        f"Коэффициент: <b>{odds}</b> | Вероятность модели: <b>{prob_text}</b>",
-        f"Рынок после снятия маржи: {market_text} | Edge: <b>{edge}%</b>",
+        f"📅 {_event_time_text(item)} {_msk_time(item)}",
+        "",
+        f"🎯 ЧТО СТАВИТЬ: {bet_action}",
+        f"💰 Коэффициент: <b>{odds}</b> — проверь на Mostbet перед ставкой",
+        f"📊 Edge: <b>{edge}%</b> (наш шанс {prob_text} vs рынок {market_text})",
+        f"🔍 Mostbet: {mostbet_path}",
     ]
-    lines.extend(_trust_cockpit_lines(item))
-    lines.extend(f"• {fact}" for fact in facts)
-    if reason:
-        lines.append(f"• Статус: {reason}")
+    lines.extend(f"• {line}" for line in context_lines)
+    lines.append(f"<i>[{tier_label}]</i>")
     return lines
+
+
+def _msk_time(item: dict[str, Any]) -> str:
+    """Return event time in Moscow timezone (UTC+3)."""
+    from datetime import timedelta
+    raw = item.get("event_time_utc") or item.get("commence_time") or ""
+    if not raw:
+        return ""
+    try:
+        dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        msk = dt + timedelta(hours=3)
+        return f"({msk.strftime('%H:%M')} МСК)"
+    except ValueError:
+        return ""
+
+
 
 
 def _trust_cockpit_lines(item: dict[str, Any]) -> list[str]:

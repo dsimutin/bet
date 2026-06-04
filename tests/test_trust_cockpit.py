@@ -27,13 +27,14 @@ def _signal(**overrides):
     return base
 
 
-def test_trust_cockpit_included_in_pick_card() -> None:
+def test_pick_card_contains_actionable_fields() -> None:
     lines = _format_pick(_signal(), priority=True)
     text = "\n".join(lines)
 
-    assert "Trust Cockpit" in text
-    assert "timestamp=verified_pre_match" in text
-    assert "freshness=priority" in text
+    assert "🎯 ЧТО СТАВИТЬ:" in text
+    assert "💰 Коэффициент:" in text
+    assert "📊 Edge:" in text
+    assert "🔍 Mostbet:" in text
 
 
 def test_trust_score_penalizes_experimental_stale_signal() -> None:
