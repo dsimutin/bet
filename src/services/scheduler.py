@@ -51,7 +51,7 @@ def start(loop: asyncio.AbstractEventLoop | None = None) -> None:
     if sched.running:
         return
 
-    scan_hours = _hours("RUNTIME_SCAN_HOURS_UTC", "7,15")
+    scan_hours = _hours("RUNTIME_SCAN_HOURS_UTC", "7,10,13,15")
     settlement_hours = _hours("SETTLEMENT_HOURS_UTC", "7,15,22")
     sched.add_job(
         _job_signal_scan,

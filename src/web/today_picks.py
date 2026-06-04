@@ -14,7 +14,12 @@ LEDGER_PATH = Path(os.environ.get("LEDGER_PATH", DATA_DIR / "core" / "paper_sign
 def build_today_text() -> str:
     entries = list(_load_entries())
     today = date.today()
+    tomorrow = today + __import__("datetime").timedelta(days=1)
     now = datetime.now(timezone.utc)
+
+    def _in_window(item: dict) -> bool:
+        d = _event_day(item)
+        return d == today or d == tomorrow
 
     today_entries = [
         item
@@ -22,7 +27,7 @@ def build_today_text() -> str:
         if item.get("ledger_status") == "open"
         and item.get("delivery_status") != "blocked"
         and item.get("recommendation_tier", "priority") in {"priority", "watchlist"}
-        and _event_day(item) == today
+        and _in_window(item)
     ]
 
     # Split into upcoming (not yet started) and already started
@@ -37,7 +42,7 @@ def build_today_text() -> str:
     )
     priority = [item for item in upcoming if item.get("recommendation_tier") == "priority"]
     watch = [item for item in upcoming if item.get("recommendation_tier") == "watchlist"]
-    lines = [f"📅 <b>Ставки на сегодня — {today.strftime('%d.%m.%Y')}</b>", ""]
+    lines = [f"📅 <b>Ставки — {today.strftime('%d.%m')} и {tomorrow.strftime('%d.%m.%Y')}</b>", ""]
     if not upcoming and not started:
         lines += [
             "Подходящих сигналов на сегодня пока нет.",
