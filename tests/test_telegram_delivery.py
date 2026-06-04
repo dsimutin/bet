@@ -476,8 +476,8 @@ class TestSchedulerStates:
             running, n_jobs = asyncio.run(_check())
             assert running is True
             assert (
-                n_jobs == 8
-            )  # signal_scan, settlement, today digests, training_check, tennis_refresh, tennis_retrain, tennis_daily_refresh
+                n_jobs == 9
+            )  # signal_scan, settlement, today digests, training_check, tennis_refresh, tennis_retrain, tennis_daily_refresh, weekly_report
 
     def test_scheduler_logs_next_run_times(self, caplog) -> None:
         import asyncio

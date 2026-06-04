@@ -142,6 +142,18 @@ def start(loop: asyncio.AbstractEventLoop | None = None) -> None:
         misfire_grace_time=3600,
     )
 
+    # Weekly performance report: every Monday at 09:00 UTC
+    sched.add_job(
+        _job_weekly_report,
+        "cron",
+        day_of_week="mon",
+        hour=9,
+        minute=0,
+        id="weekly_report",
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
+
     sched.start()
     _log.info(
         "[scheduler] ACTIVE SCHEDULER STARTED with %d jobs | scan_hours=%s | settlement_hours=%s",
@@ -232,6 +244,25 @@ async def _job_tennis_retrain() -> None:
         )
 
     await _run_in_executor(_run, "tennis_retrain")
+
+
+async def _job_weekly_report() -> None:
+    """Send weekly performance report to default Telegram chat."""
+    import os
+
+    def _run() -> None:
+        from src.web.today_picks import build_weekly_report_text
+        from src.web.telegram_bot import _send
+
+        chat_id = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+        if not chat_id:
+            _log.info("[scheduler] weekly_report: TELEGRAM_CHAT_ID not set, skipping")
+            return
+        text = build_weekly_report_text()
+        _send(chat_id, text)
+        _log.info("[scheduler] weekly_report: sent to chat_id=%s", chat_id)
+
+    await _run_in_executor(_run, "weekly_report")
 
 
 async def _job_tennis_daily_refresh() -> None:

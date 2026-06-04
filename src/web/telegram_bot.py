@@ -73,6 +73,8 @@ def _handle_callback(callback: dict[str, Any]) -> None:
             _send(chat_id, _stats_text(), _back_button())
         elif action == "history":
             _send(chat_id, _history_text(), _back_button())
+        elif action == "weekly_report":
+            _send(chat_id, _weekly_report_text(), _back_button())
         elif action == "how_it_works":
             _send(chat_id, _how_it_works(), _back_button())
         elif action == "debug_tennis":
@@ -106,7 +108,10 @@ def _send_main_menu(chat_id: str, first_name: str = "") -> None:
                 {"text": "📈 Статистика", "callback_data": "stats"},
                 {"text": "🏆 История ставок", "callback_data": "history"},
             ],
-            [{"text": "ℹ️ Как это работает", "callback_data": "how_it_works"}],
+            [
+                {"text": "📋 Отчёт за неделю", "callback_data": "weekly_report"},
+                {"text": "ℹ️ Как это работает", "callback_data": "how_it_works"},
+            ],
             [{"text": "🔍 Диагностика тенниса", "callback_data": "debug_tennis"}],
         ]
     }
@@ -180,6 +185,12 @@ def _history_text() -> str:
     from src.web.today_picks import build_history_text
 
     return build_history_text()
+
+
+def _weekly_report_text() -> str:
+    from src.web.today_picks import build_weekly_report_text
+
+    return build_weekly_report_text()
 
 
 def _how_it_works() -> str:

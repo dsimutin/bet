@@ -512,3 +512,87 @@ def _num(value: Any, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def build_weekly_report_text() -> str:
+    """Weekly performance summary for the last 7 days."""
+    from datetime import timedelta
+
+    entries = list(_load_entries())
+    now = datetime.now(timezone.utc)
+    week_ago = now - timedelta(days=7)
+
+    def _created_at(item: dict) -> datetime | None:
+        raw = item.get("ledger_created_at_utc") or item.get("settled_at_utc") or ""
+        if not raw:
+            return None
+        try:
+            dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+        except ValueError:
+            return None
+
+    week_entries = [e for e in entries if (_created_at(e) or now) >= week_ago]
+    settled = [e for e in week_entries if e.get("ledger_status") == "settled"]
+    opened = [
+        e for e in week_entries
+        if e.get("ledger_status") == "open" and e.get("delivery_status") != "blocked"
+    ]
+    wins = [e for e in settled if e.get("result") == "win"]
+    losses = [e for e in settled if e.get("result") == "loss"]
+    pnl = sum(_num(e.get("pnl_units")) for e in settled)
+    stake = sum(_num(e.get("stake_units"), 1.0) for e in settled if e.get("result") in {"win", "loss"})
+    roi = pnl / stake * 100 if stake else 0.0
+    accuracy = len(wins) / len(settled) * 100 if settled else 0.0
+    avg_edge = (
+        sum(_num(e.get("edge_pct")) for e in week_entries) / len(week_entries)
+        if week_entries else 0.0
+    )
+
+    pnl_emoji = "📈" if pnl >= 0 else "📉"
+    lines = [
+        f"📊 <b>Недельный отчёт</b>",
+        f"<i>{(now - timedelta(days=7)).strftime('%d.%m')} — {now.strftime('%d.%m.%Y')}</i>",
+        "",
+        f"Сигналов за неделю: <b>{len(week_entries)}</b>",
+        f"Открыто: {len(opened)} | Закрыто: {len(settled)}",
+    ]
+    if settled:
+        lines += [
+            f"Победы / Поражения: <b>{len(wins)}W / {len(losses)}L</b>",
+            f"Точность: <b>{accuracy:.1f}%</b>",
+            f"{pnl_emoji} ROI: <b>{roi:+.1f}%</b> | P&amp;L: <b>{pnl:+.2f}u</b>",
+            f"Средний edge: {avg_edge:.1f}%",
+        ]
+    else:
+        lines += [
+            "Закрытых ставок за неделю нет.",
+            "Результаты появятся после завершения матчей.",
+        ]
+
+    # Per-sport breakdown
+    lines.append("")
+    for sport, icon, name_ru in (("football", "⚽", "Футбол"), ("tennis", "🎾", "Теннис")):
+        rows = [e for e in settled if str(e.get("sport") or "football") == sport]
+        if rows:
+            sw = sum(e.get("result") == "win" for e in rows)
+            sp = sum(_num(e.get("pnl_units")) for e in rows)
+            ss = sum(_num(e.get("stake_units"), 1.0) for e in rows if e.get("result") in {"win", "loss"})
+            sr = sp / ss * 100 if ss else 0.0
+            lines.append(f"{icon} {name_ru}: {sw}/{len(rows)} | ROI {sr:+.1f}% | P&amp;L {sp:+.2f}u")
+        else:
+            lines.append(f"{icon} {name_ru}: нет ставок за неделю")
+
+    # All-time totals for context
+    all_settled = [e for e in entries if e.get("ledger_status") == "settled"]
+    if all_settled:
+        all_pnl = sum(_num(e.get("pnl_units")) for e in all_settled)
+        all_stake = sum(_num(e.get("stake_units"), 1.0) for e in all_settled if e.get("result") in {"win", "loss"})
+        all_roi = all_pnl / all_stake * 100 if all_stake else 0.0
+        lines += [
+            "",
+            f"<b>Всего за всё время:</b> {len(all_settled)} ставок | ROI {all_roi:+.1f}% | P&amp;L {all_pnl:+.2f}u",
+        ]
+
+    lines += ["", "📄 Бумажные сигналы — реальные деньги не используются."]
+    return "\n".join(lines)
