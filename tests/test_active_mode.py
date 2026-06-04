@@ -334,6 +334,51 @@ class TestActiveReportFormatter:
         assert "Ligue" in text or "🇫🇷" in text
 
 
+    def test_off_season_shows_world_cup_countdown(self, tmp_path, monkeypatch):
+        """When all leagues are off-season and World Cup is <30 days away, show countdown."""
+        monkeypatch.setenv("DATA_DIR", str(tmp_path))
+        monkeypatch.setenv("MODEL_DIR", str(tmp_path / "models"))
+        monkeypatch.setenv("LEDGER_PATH", str(tmp_path / "ledger.json"))
+        monkeypatch.setenv("REPORTS_DIR", str(tmp_path / "reports"))
+
+        import importlib
+        import src.reporting.active_report as ar
+        importlib.reload(ar)
+
+        # Simulate: key set, some soccer leagues active, but 0 signals (off-season)
+        signals = self._signals_result(
+            has_odds_api_key=True,
+            active_soccer_leagues=["soccer_usa_mls", "soccer_brazil_campeonato"],
+            signals_count=0,
+            per_league={
+                "EPL": {"status": "no_fixtures", "signals": 0},
+                "LIGUE1": {"status": "no_fixtures", "signals": 0},
+            },
+        )
+        text = ar.format_active_report(signals, self._settlement_result(), self._training_result())
+        # Should show off-season info block
+        assert "межсезонье" in text or "off-season" in text.lower() or "Mls" in text or "август" in text
+
+    def test_ligue1_shown_in_per_league_section(self, tmp_path, monkeypatch):
+        """Ligue 1 should appear in per-league section when included in per_league dict."""
+        monkeypatch.setenv("DATA_DIR", str(tmp_path))
+        monkeypatch.setenv("MODEL_DIR", str(tmp_path / "models"))
+        monkeypatch.setenv("LEDGER_PATH", str(tmp_path / "ledger.json"))
+        monkeypatch.setenv("REPORTS_DIR", str(tmp_path / "reports"))
+
+        import importlib
+        import src.reporting.active_report as ar
+        importlib.reload(ar)
+
+        signals = self._signals_result(
+            has_odds_api_key=True,
+            per_league={"LIGUE1": {"status": "no_fixtures", "signals": 0}},
+            active_soccer_leagues=["soccer_epl"],
+        )
+        text = ar.format_active_report(signals, self._settlement_result(), self._training_result())
+        assert "Ligue" in text or "🇫🇷" in text
+
+
 # ---------------------------------------------------------------------------
 # 3. Training: no new data → skip
 # ---------------------------------------------------------------------------

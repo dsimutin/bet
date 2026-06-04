@@ -189,6 +189,9 @@ def run_settlement_job(
         print(f"[settle] Drift check failed (non-critical): {exc}", file=sys.stderr)
         steps["drift"] = {"status": "partial", "error": _sanitize_error(exc)}
 
+    # Step 4: Settle tennis signals
+    _settle_tennis(ledger_path, reports_dir)
+
     elapsed = round(time.perf_counter() - t0, 1)
     total_settled = int(football_report.get("settled_count", 0)) + int(
         tennis_report.get("settled", 0)

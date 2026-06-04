@@ -118,6 +118,30 @@ def start(loop: asyncio.AbstractEventLoop | None = None) -> None:
         misfire_grace_time=3600,
     )
 
+    # Tennis ELO retrain: every Monday at 02:30 UTC (full retrain)
+    sched.add_job(
+        _job_tennis_retrain,
+        "cron",
+        day_of_week="mon",
+        hour=2,
+        minute=30,
+        id="tennis_retrain",
+        replace_existing=True,
+        misfire_grace_time=3600,  # 1h grace — retrain any time Monday if missed
+    )
+
+    # Tennis daily data refresh: re-download current-year ATP CSV + retrain if new matches
+    # Runs every day at 06:00 UTC (early morning, before signal scan at 09:00)
+    sched.add_job(
+        _job_tennis_daily_refresh,
+        "cron",
+        hour=6,
+        minute=0,
+        id="tennis_daily_refresh",
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
+
     sched.start()
     _log.info(
         "[scheduler] ACTIVE SCHEDULER STARTED with %d jobs | scan_hours=%s | settlement_hours=%s",
