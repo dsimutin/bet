@@ -199,6 +199,8 @@ def _debug_tennis(chat_id: str) -> None:
     def _run() -> None:
         try:
             from src.signals.tennis_runtime_scan import scan_tennis_h2h_runtime
+            from src.models.timestamp_policy import verify_pre_match_timestamps
+            from src.models.feedback_policy import FeedbackPolicy
 
             model_dir = Path(os.environ.get("MODEL_DIR", "data/models"))
             result = scan_tennis_h2h_runtime(
@@ -229,10 +231,30 @@ def _debug_tennis(chat_id: str) -> None:
             top_lines = ""
             if top:
                 mkt_icons = {"h2h": "🏆", "spreads": "↔️", "totals": "🔢"}
-                top_lines = "\n\n<b>Топ сигналы:</b>\n" + "\n".join(
-                    f"• {mkt_icons.get(s.get('market','h2h'),'')}"
-                    f"{escape(str(s.get('player','?')))} edge {s.get('edge_pct','?')}%"
-                    for s in top[:3]
+                policy = FeedbackPolicy({})
+                signal_details = []
+                for s in top[:5]:
+                    mkt = s.get("market", "h2h")
+                    icon = mkt_icons.get(mkt, "")
+                    player = escape(str(s.get("player", "?")))
+                    edge = s.get("edge_pct", "?")
+                    ts_status = verify_pre_match_timestamps(s)
+                    freshness = s.get("odds_freshness_tier", "?")
+                    if ts_status != "verified_pre_match":
+                        block_reason = f"⛔ {ts_status}"
+                    elif freshness == "stale_blocked":
+                        block_reason = "⛔ котировки устарели (>1ч)"
+                    else:
+                        decision = policy.evaluate(s)
+                        block_reason = (
+                            f"✅ {decision.tier}" if decision.tier != "blocked"
+                            else f"⛔ {decision.reason[:40]}"
+                        )
+                    signal_details.append(
+                        f"• {icon}{player} edge {edge}% [{mkt}] → {block_reason}"
+                    )
+                top_lines = "\n\n<b>Топ сигналы (с причиной блокировки):</b>\n" + "\n".join(
+                    signal_details
                 )
             text = (
                 "🔍 <b>Диагностика тенниса</b>\n"
