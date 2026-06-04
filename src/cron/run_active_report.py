@@ -379,6 +379,191 @@ def _format_tennis_pick(sig: dict, n: int) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Daily morning digest — "Ставки на сегодня"
+# ---------------------------------------------------------------------------
+
+def send_morning_digest() -> str:
+    """Collect today's signals and send one friendly 'ставки на сегодня' message.
+
+    Called at 09:05 UTC every day. Runs signal scan first, then sends digest.
+    Returns delivery status string.
+    """
+    import json as _json
+
+    _log.info("[digest] Building morning digest")
+    today = date.today()
+
+    # Run a fresh signal scan to get today's signals
+    signals_result = {}
+    tennis_result = {}
+    try:
+        signals_result = _run_signal_scan()
+    except Exception as e:
+        _log.error("[digest] Football scan failed: %s", e)
+        signals_result = _empty_signals_result(str(e))
+
+    try:
+        tennis_result = _run_tennis_scan()
+    except Exception as e:
+        _log.error("[digest] Tennis scan failed: %s", e)
+        tennis_result = {"signals_count": 0, "all_signals": []}
+
+    football_signals = signals_result.get("top_signals", [])
+    tennis_signals = tennis_result.get("all_signals", [])
+    all_signals = football_signals + tennis_signals
+
+    text = _format_morning_digest(all_signals, today)
+
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+
+    if not token or not chat_id:
+        _log.info("[digest] DRY RUN — digest:\n%s", text)
+        try:
+            REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+            (REPORTS_DIR / f"{today.isoformat()}_morning_digest.txt").write_text(
+                text, encoding="utf-8"
+            )
+        except Exception:
+            pass
+        return "dry_run"
+
+    import urllib.request, urllib.error
+    payload = _json.dumps({
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True,
+    }).encode("utf-8")
+
+    try:
+        req = urllib.request.Request(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            body = _json.loads(resp.read())
+            if body.get("ok"):
+                _log.info("[digest] Morning digest sent (%d signals)", len(all_signals))
+                return "sent"
+            else:
+                _log.error("[digest] Telegram API error: %s", body.get("description"))
+                return "failed"
+    except Exception as exc:
+        _log.error("[digest] Telegram send failed: %s", exc)
+        return "failed"
+
+
+def _format_morning_digest(signals: list[dict], today: date) -> str:
+    """Format a clean, beginner-friendly daily betting digest."""
+    day_ru = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"][today.weekday()]
+    months_ru = [
+        "", "янв", "фев", "мар", "апр", "мая", "июн",
+        "июл", "авг", "сен", "окт", "ноя", "дек",
+    ]
+    date_str = f"{today.day} {months_ru[today.month]} ({day_ru})"
+
+    if not signals:
+        return (
+            f"📅 <b>Прогнозы на {date_str}</b>\n\n"
+            "Сегодня подходящих ставок не найдено.\n\n"
+            "Модель проверила все матчи и не нашла достаточного преимущества "
+            "над букмекерами. Лучше подождать — не ставить вообще лучше, "
+            "чем ставить без преимущества.\n\n"
+            "📄 Бумажная статистика — реальных денег нет"
+        )
+
+    lines = [f"📅 <b>Прогнозы на {date_str}</b>\n"]
+
+    for i, sig in enumerate(signals[:7], 1):
+        sport = sig.get("sport", "football")
+        if sport == "tennis":
+            lines.append(_format_tennis_pick(sig, i))
+        else:
+            lines.append(_format_football_pick(sig, i))
+
+    if len(signals) > 7:
+        lines.append(f"\n<i>...ещё {len(signals) - 7} сигналов</i>")
+
+    lines.append(
+        f"\n📊 Всего сигналов: <b>{len(signals)}</b>\n"
+        "📄 Бумажная статистика — реальных денег нет"
+    )
+    return "\n".join(lines)
+
+
+def _format_football_pick(sig: dict, n: int) -> str:
+    home = sig.get("home_team", "?")
+    away = sig.get("away_team", "?")
+    sel = sig.get("selection_ru", sig.get("selection", "?"))
+    odds = sig.get("entry_odds", "?")
+    edge = sig.get("edge_pct", "?")
+    book = sig.get("bookmaker", "")
+    mp = sig.get("model_prob", 0)
+    mp_pct = int(mp * 100) if isinstance(mp, float) else "?"
+
+    stake = 1000
+    payout = round(stake * float(odds)) if isinstance(odds, (int, float)) else "?"
+    profit = (payout - stake) if isinstance(payout, int) else "?"
+
+    conf = "🟢 уверенно" if mp_pct != "?" and mp_pct >= 65 else "🟡 умеренно"
+
+    book_names = {
+        "pinnacle": "Pinnacle", "bet365": "Bet365",
+        "betfair_ex_uk": "Betfair", "williamhill": "William Hill",
+        "draftkings": "DraftKings", "fanduel": "FanDuel",
+    }
+    book_disp = book_names.get(book, book) if book else "лучший букмекер"
+
+    return (
+        f"\n{n}⃣ ⚽ <b>{home} — {away}</b>\n"
+        f"   Ставить: <b>{sel}</b> @ {odds} ({book_disp})\n"
+        f"   Почему: модель даёт {mp_pct}% вероятности, {conf}\n"
+        f"   Преимущество над букмекером: <b>{edge}%</b>\n"
+        f"   💰 Поставил 1 000 ₽ → получишь <b>{payout} ₽</b> (+{profit} ₽ прибыли)"
+    )
+
+
+def _format_tennis_pick(sig: dict, n: int) -> str:
+    player = sig.get("player", "?")
+    opp = sig.get("opponent", "?")
+    odds = sig.get("entry_odds", "?")
+    edge = sig.get("edge_pct", "?")
+    book = sig.get("bookmaker", "")
+    mp = sig.get("model_prob", 0)
+    mp_pct = int(mp * 100) if isinstance(mp, float) else "?"
+    surf = {"clay": "грунт", "grass": "трава", "hard": "хард"}.get(
+        sig.get("surface", "hard"), sig.get("surface", "hard")
+    )
+    rank = sig.get("rank")
+    opp_rank = sig.get("opp_rank")
+    rank_str = f"#{rank}" if rank else ""
+    opp_rank_str = f"#{opp_rank}" if opp_rank else ""
+
+    stake = 1000
+    payout = round(stake * float(odds)) if isinstance(odds, (int, float)) else "?"
+    profit = (payout - stake) if isinstance(payout, int) else "?"
+
+    conf = "🟢 уверенно" if mp_pct != "?" and mp_pct >= 65 else "🟡 умеренно"
+
+    book_names = {
+        "pinnacle": "Pinnacle", "bet365": "Bet365", "betfair_ex_uk": "Betfair",
+        "williamhill": "William Hill", "unibet_eu": "Unibet",
+    }
+    book_disp = book_names.get(book, book) if book else "лучший букмекер"
+
+    rank_info = f" ({rank_str} vs {opp_rank_str})" if rank_str and opp_rank_str else ""
+    return (
+        f"\n{n}⃣ 🎾 <b>{player} победит {opp}</b>{rank_info}\n"
+        f"   Покрытие: {surf} | Ставить @ {odds} ({book_disp})\n"
+        f"   Почему: модель даёт {mp_pct}% вероятности, {conf}\n"
+        f"   Преимущество над букмекером: <b>{edge}%</b>\n"
+        f"   💰 Поставил 1 000 ₽ → получишь <b>{payout} ₽</b> (+{profit} ₽ прибыли)"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Step implementations
 # ---------------------------------------------------------------------------
 

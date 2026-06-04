@@ -15,6 +15,7 @@ Endpoints:
 
 from __future__ import annotations
 
+import hmac
 import json
 import logging
 import os
@@ -51,6 +52,13 @@ def _env_bool(key: str, default: bool = False) -> bool:
 
 
 ACTIVE_MODE = _env_bool("ACTIVE_MODE", False)
+ADMIN_API_TOKEN = os.environ.get("ADMIN_API_TOKEN", "").strip()
+
+# In-memory update deduplication (last 200 Telegram update_ids)
+_seen_update_ids: set[int] = set()
+_seen_update_ids_queue: list[int] = []
+_SEEN_MAX = 200
+_last_trigger_at: dict[str, float] = {}
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -849,8 +857,10 @@ def trigger_report():
     """Немедленно запустить active report и отправить в Telegram.
 
     Используй для проверки что бот работает:
-        curl -X POST https://your-app.onrender.com/trigger
+        curl -X POST -H "Authorization: Bearer $ADMIN_API_TOKEN" https://your-app.onrender.com/trigger
     """
+    _require_admin(request)
+    _check_trigger_cooldown("trigger")
     import threading
 
     result: dict = {"started": False, "error": None}
@@ -885,6 +895,8 @@ def debug_tennis():
 
     Использование: GET /debug/tennis
     """
+    if not _env_bool("ENABLE_DEBUG_ROUTES", False):
+        raise HTTPException(status_code=404, detail="Not found")
     from pathlib import Path
 
     api_key = os.environ.get("THE_ODDS_API_KEY", "")
@@ -921,8 +933,10 @@ def debug_tennis():
 def trigger_tennis_scan():
     """Немедленно запустить теннисный скан сигналов.
 
-    curl -X POST https://your-app.onrender.com/trigger/tennis-scan
+    curl -X POST -H "Authorization: Bearer $ADMIN_API_TOKEN" https://your-app.onrender.com/trigger/tennis-scan
     """
+    _require_admin(request)
+    _check_trigger_cooldown("tennis-scan")
     import threading
 
     def _run():
@@ -1050,8 +1064,10 @@ def debug_tennis_raw():
 def trigger_morning_digest():
     """Немедленно запустить утренний дайджест и отправить в Telegram.
 
-    curl -X POST https://your-app.onrender.com/trigger/morning-digest
+    curl -X POST -H "Authorization: Bearer $ADMIN_API_TOKEN" https://your-app.onrender.com/trigger/morning-digest
     """
+    _require_admin(request)
+    _check_trigger_cooldown("morning-digest")
     import threading
 
     def _run():
@@ -1089,6 +1105,15 @@ async def telegram_webhook(request: Request):
         )
     try:
         update = await request.json()
+        update_id = int(update.get("update_id", 0))
+        if update_id:
+            if update_id in _seen_update_ids:
+                return {"ok": True}
+            _seen_update_ids.add(update_id)
+            _seen_update_ids_queue.append(update_id)
+            if len(_seen_update_ids_queue) > _SEEN_MAX:
+                old = _seen_update_ids_queue.pop(0)
+                _seen_update_ids.discard(old)
         import threading
 
         threading.Thread(
@@ -1114,8 +1139,9 @@ def _handle_bot_update(update: dict) -> None:
 def telegram_webhook_setup():
     """Register webhook URL with Telegram. Run once after deploy.
 
-    curl -X POST https://your-app.onrender.com/webhook/telegram/setup
+    curl -X POST -H "Authorization: Bearer $ADMIN_API_TOKEN" https://your-app.onrender.com/webhook/telegram/setup
     """
+    _require_admin(request)
     from src.web.telegram_bot import setup_webhook, get_webhook_info
 
     app_url = os.environ.get("RENDER_EXTERNAL_URL", "").strip()

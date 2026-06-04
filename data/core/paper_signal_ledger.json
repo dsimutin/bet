@@ -1,6 +1,7 @@
 {
   "version": "1.0",
-  "saved_at_utc": "2026-06-02T09:05:29.416952+00:00",
+  "ledger_schema_version": 2,
+  "saved_at_utc": "2026-06-04T05:36:07.254099+00:00",
   "entries": {
     "oos_2024-08-17_Ars_Wol_home": {
       "signal_id": "oos_2024-08-17_Ars_Wol_home",
@@ -724,17 +725,17 @@
     }
   },
   "summary": {
-    "total_signals": 32,
+    "total_signals": 30,
     "open_signals": 0,
     "settled_signals": 30,
     "void_signals": 0,
-    "expired_signals": 2,
+    "expired_signals": 0,
     "delivered_signals": 30,
     "blocked_delivery_signals": 0,
     "win_rate": 0.7,
     "roi_pct": -11.1111,
     "pnl_units": -0.191,
     "turnover_units": 1.719,
-    "mean_edge_pct": 3.8963
+    "mean_edge_pct": 2.8657
   }
 }

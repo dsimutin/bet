@@ -211,6 +211,13 @@ def api_readiness() -> dict[str, Any]:
     return _daily_readiness() or {"available": False}
 
 
+@app.get("/api/modules")
+def api_modules() -> dict[str, Any]:
+    from src.system.module_audit import run_module_audit
+
+    return run_module_audit().to_dict()
+
+
 # ── HTML dashboard ─────────────────────────────────────────────────────────────
 
 
@@ -218,10 +225,13 @@ def api_readiness() -> dict[str, Any]:
 def dashboard(request: Request) -> HTMLResponse:
     from src.ingest.telegram_collector import is_configured as tg_configured
 
+    from src.system.module_audit import run_module_audit
+
     summary = _ledger_summary()
     signals = _recent_signals(30)
     models = _model_status()
     readiness = _daily_readiness()
+    module_audit = run_module_audit().to_dict()
 
     live_path = _DATA / "staging" / "free_sources" / "telegram_live.jsonl"
     tg_status = {
@@ -252,6 +262,7 @@ def dashboard(request: Request) -> HTMLResponse:
             "prod_model": prod_model,
             "readiness": readiness,
             "tg_status": tg_status,
+            "module_audit": module_audit,
             "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
         },
     )

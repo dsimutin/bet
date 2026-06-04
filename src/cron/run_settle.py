@@ -30,7 +30,7 @@ def run_settlement_job(
     t0 = time.perf_counter()
     leagues = [
         x.strip()
-        for x in os.environ.get("LEAGUES", "EPL,BUNDESLIGA,LALIGA,SERIEA").split(",")
+        for x in os.environ.get("LEAGUES", "EPL,BUNDESLIGA,LALIGA,SERIEA,LIGUE1").split(",")
         if x.strip()
     ]
     seasons = [
@@ -189,6 +189,9 @@ def run_settlement_job(
         print(f"[settle] Drift check failed (non-critical): {exc}", file=sys.stderr)
         steps["drift"] = {"status": "partial", "error": _sanitize_error(exc)}
 
+    # Step 4: Settle tennis signals
+    _settle_tennis(ledger_path, reports_dir)
+
     elapsed = round(time.perf_counter() - t0, 1)
     total_settled = int(football_report.get("settled_count", 0)) + int(
         tennis_report.get("settled", 0)
@@ -320,8 +323,8 @@ def _log_run(
         from src.infrastructure.render_db import get_db
 
         get_db().log_cron_run(job, status, duration_s, message, meta)
-    except Exception:
-        pass
+    except Exception as exc:
+        print(f"[settle] audit log failed (non-critical): {exc}", file=sys.stderr)
 
 
 if __name__ == "__main__":

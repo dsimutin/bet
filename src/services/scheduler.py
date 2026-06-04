@@ -118,6 +118,30 @@ def start(loop: asyncio.AbstractEventLoop | None = None) -> None:
         misfire_grace_time=3600,
     )
 
+    # Tennis ELO retrain: every Monday at 02:30 UTC (full retrain)
+    sched.add_job(
+        _job_tennis_retrain,
+        "cron",
+        day_of_week="mon",
+        hour=2,
+        minute=30,
+        id="tennis_retrain",
+        replace_existing=True,
+        misfire_grace_time=3600,  # 1h grace — retrain any time Monday if missed
+    )
+
+    # Tennis daily data refresh: re-download current-year ATP CSV + retrain if new matches
+    # Runs every day at 06:00 UTC (early morning, before signal scan at 09:00)
+    sched.add_job(
+        _job_tennis_daily_refresh,
+        "cron",
+        hour=6,
+        minute=0,
+        id="tennis_daily_refresh",
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
+
     sched.start()
     _log.info(
         "[scheduler] ACTIVE SCHEDULER STARTED with %d jobs | scan_hours=%s | settlement_hours=%s",
@@ -208,3 +232,25 @@ async def _job_tennis_retrain() -> None:
         )
 
     await _run_in_executor(_run, "tennis_retrain")
+
+
+async def _job_tennis_daily_refresh() -> None:
+    """Re-download current-year ATP CSV; retrain ELO model if new matches found."""
+
+    def _run() -> None:
+        from datetime import datetime
+        from pathlib import Path
+        from src.ingest.tennis_atp import download_atp_season
+
+        data_dir = Path(os.environ.get("DATA_DIR", "data"))
+        cache_dir = data_dir / "raw" / "tennis_atp"
+        prev_size = sum(f.stat().st_size for f in cache_dir.glob("*.csv")) if cache_dir.exists() else 0
+        download_atp_season(datetime.utcnow().year, cache_dir, use_cache=False)
+        new_size = sum(f.stat().st_size for f in cache_dir.glob("*.csv")) if cache_dir.exists() else 0
+        if new_size > prev_size:
+            _log.info("[scheduler] tennis_daily_refresh: new ATP data detected, retraining ELO")
+            subprocess.run(
+                [sys.executable, "-m", "src.models.train_tennis_elo"], check=False
+            )
+
+    await _run_in_executor(_run, "tennis_daily_refresh")
