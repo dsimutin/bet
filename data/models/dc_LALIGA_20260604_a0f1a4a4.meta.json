@@ -1,0 +1,20 @@
+{
+  "model_id": "dc_LALIGA_20260604_a0f1a4a4",
+  "league": "LALIGA",
+  "trained_on": {
+    "start": "2021-08-13",
+    "end": "2026-05-24"
+  },
+  "n_matches": 1875,
+  "dataset_hash": "sha256:a0f1a4a418efb42f834fe66298fd74e82465014160bd381935d864a98ce22731",
+  "status": "production",
+  "converged": true,
+  "created_at_utc": "2026-06-04T10:03:08.922525+00:00",
+  "model_path": "data/models/dc_LALIGA_20260604_a0f1a4a4.pkl",
+  "calibration_path": "data/models/calibration_dc_LALIGA_20260604_a0f1a4a4.pkl",
+  "brier_score": 0.6000003611713763,
+  "log_loss": 1.0058892868353326,
+  "max_brier_score": 0.75,
+  "max_log_loss": 1.2,
+  "promotion_reason": "force_promoted: trained on 2025-26 season data (1875 total matches)"
+}

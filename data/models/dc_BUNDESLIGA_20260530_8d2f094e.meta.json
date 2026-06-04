@@ -7,7 +7,7 @@
   },
   "n_matches": 1224,
   "dataset_hash": "sha256:8d2f094e0e9b65fd974c955e54003f8b1e05b5c6b64b2c0775c8deda50abddde",
-  "status": "production",
+  "status": "superseded",
   "converged": true,
   "created_at_utc": "2026-05-30T19:00:43.686030+00:00",
   "model_path": "data/models/dc_BUNDESLIGA_20260530_8d2f094e.pkl",

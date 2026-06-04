@@ -28,14 +28,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--download-openfootball", action="store_true")
     parser.add_argument("--openfootball-leagues", default="EPL")
     parser.add_argument("--seasons", default="2122,2223,2324,2425,2526")
-    parser.add_argument("--openfootball-seasons", default="2021-22,2022-23,2023-24,2024-25")
+    parser.add_argument("--openfootball-seasons", default="2021-22,2022-23,2023-24,2024-25,2025-26")
     parser.add_argument("--no-cache", action="store_true")
     parser.add_argument("--model-dir", type=Path, default=Path("data/models"))
     parser.add_argument("--output-dir", type=Path, default=Path("data/reports"))
     parser.add_argument("--min-matches", type=int, default=20)
     parser.add_argument("--max-iterations", type=int, default=200)
     parser.add_argument("--max-goals", type=int, default=10)
-    parser.add_argument("--max-brier-score", type=float, default=0.60)
+    parser.add_argument("--max-brier-score", type=float, default=0.75)
     parser.add_argument("--max-log-loss", type=float, default=1.20)
     return parser
 

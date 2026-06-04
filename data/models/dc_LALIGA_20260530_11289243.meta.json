@@ -7,7 +7,7 @@
   },
   "n_matches": 1510,
   "dataset_hash": "sha256:1128924390f2ef3c5d6e6526c808ddd8a4e54a35679891e4a263d263aad8c968",
-  "status": "production",
+  "status": "superseded",
   "converged": true,
   "created_at_utc": "2026-05-30T19:04:46.893981+00:00",
   "model_path": "data/models/dc_LALIGA_20260530_11289243.pkl",

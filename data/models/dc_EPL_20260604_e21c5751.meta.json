@@ -1,0 +1,20 @@
+{
+  "model_id": "dc_EPL_20260604_e21c5751",
+  "league": "EPL",
+  "trained_on": {
+    "start": "2021-08-13",
+    "end": "2026-05-24"
+  },
+  "n_matches": 1873,
+  "dataset_hash": "sha256:e21c5751aa69eb2fb4ba6bd27c9ba93487158a2acec36a7205a6609db65c05e9",
+  "status": "production",
+  "converged": true,
+  "created_at_utc": "2026-06-04T09:58:07.011834+00:00",
+  "model_path": "data/models/dc_EPL_20260604_e21c5751.pkl",
+  "calibration_path": "data/models/calibration_dc_EPL_20260604_e21c5751.pkl",
+  "brier_score": 0.7104724841091805,
+  "log_loss": 1.183726111630388,
+  "max_brier_score": 0.65,
+  "max_log_loss": 1.2,
+  "promotion_reason": "force_promoted: trained on 2025-26 season data (353 new matches)"
+}

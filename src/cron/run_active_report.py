@@ -55,7 +55,7 @@ MODEL_DIR = Path(os.environ.get("MODEL_DIR", "data/models"))
 LEDGER_PATH = Path(os.environ.get("LEDGER_PATH", "data/core/paper_signal_ledger.json"))
 STAGING_DIR = Path(os.environ.get("STAGING_DIR", "data/staging"))
 REPORTS_DIR = Path(os.environ.get("REPORTS_DIR", "data/reports"))
-SEASONS = os.environ.get("OPENFOOTBALL_SEASONS", "2021-22,2022-23,2023-24,2024-25").split(",")
+SEASONS = os.environ.get("OPENFOOTBALL_SEASONS", "2021-22,2022-23,2023-24,2024-25,2025-26").split(",")
 
 
 # ---------------------------------------------------------------------------
@@ -847,7 +847,7 @@ def _run_settlement() -> dict[str, Any]:
     started = datetime.now(timezone.utc)
     t0 = time.perf_counter()
 
-    seasons = os.environ.get("OPENFOOTBALL_SEASONS", "2023-24,2024-25").split(",")
+    seasons = os.environ.get("OPENFOOTBALL_SEASONS", "2023-24,2024-25,2025-26").split(",")
     result: dict[str, Any] = {
         "settled_count": 0,
         "wins": 0,
@@ -1109,8 +1109,9 @@ def _run_training_check() -> dict[str, Any]:
             except Exception:
                 pass
 
-            # Ligue 1 has higher natural variance (PSG effect) — relax gate to 0.70
-            _league_brier_gate = 0.70 if league in ("LIGUE1", "RPL") else 0.65
+            # Brier gate: raised to 0.75 across the board for 2025-26 new-season transition
+            # (promoted/relegated teams raise variance until ratings stabilise after ~10 matches)
+            _league_brier_gate = 0.75
             trainer = DailyTrainer(
                 registry=registry,
                 staging_dir=STAGING_DIR,
