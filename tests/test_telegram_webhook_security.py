@@ -91,6 +91,8 @@ def test_parallel_manual_refresh_does_not_start_two_scans(monkeypatch) -> None:
     monkeypatch.setenv("TELEGRAM_MANUAL_REFRESH_COOLDOWN_SECONDS", "0")
     import src.web.telegram_bot as bot
 
+    bot._refresh_last_by_chat.clear()
+
     class InlineThread:
         def __init__(self, target, daemon=False):
             self.target = target
@@ -115,6 +117,8 @@ def test_parallel_manual_refresh_does_not_start_two_scans(monkeypatch) -> None:
 def test_manual_refresh_error_is_sanitized(monkeypatch) -> None:
     monkeypatch.setenv("TELEGRAM_MANUAL_REFRESH_COOLDOWN_SECONDS", "0")
     import src.web.telegram_bot as bot
+
+    bot._refresh_last_by_chat.clear()
 
     class InlineThread:
         def __init__(self, target, daemon=False):

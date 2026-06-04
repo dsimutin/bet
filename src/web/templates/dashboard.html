@@ -324,6 +324,25 @@
     {% endif %}
   </div>
 
+  <div class="section">
+    <h2>Модули проекта</h2>
+    {% if module_audit %}
+      <p>Статус: {% if module_audit.passed %}<span class="positive">✓ все модули доступны</span>{% else %}<span class="negative">⚠ есть проблемы</span>{% endif %}</p>
+      <table>
+        <thead><tr><th>Пакет</th><th>Статус</th><th>Детали</th></tr></thead>
+        <tbody>
+          {% for check in module_audit.checks %}
+          <tr>
+            <td>{{ check.package }}</td>
+            <td>{% if check.ok %}<span class="positive">✓</span>{% else %}<span class="negative">✗</span>{% endif %}</td>
+            <td>{{ check.get('detail', '') }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+  </div>
+
 </main>
 </body>
 </html>
