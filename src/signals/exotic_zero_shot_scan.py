@@ -106,13 +106,14 @@ EXOTIC_LEAGUES: dict[str, dict[str, str]] = {
 
 # Default scan subset: 6 year-round leagues + World Cup (returns [] when not active).
 # Override via EXOTIC_LEAGUES env var (comma-separated sport_keys).
+# J-League removed from defaults — Japan UTC+9 means matches start 01:00-11:00 UTC,
+# always post_start by the time our scans run at 07:00-15:00 UTC.
 EXOTIC_DEFAULT_LEAGUES = [
     "soccer_fifa_world_cup",
     "soccer_usa_mls",
     "soccer_brazil_campeonato",
     "soccer_argentina_primera_division",
     "soccer_russia_premier_league",
-    "soccer_japan_j_league",
     "soccer_mexico_ligamx",
 ]
 
